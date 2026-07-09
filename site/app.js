@@ -99,7 +99,9 @@ search.addEventListener("keydown", (e) => {
     removeClub(clubIds[clubIds.length - 1]);
   } else if (e.key === "Escape") { sugg.hidden = true; }
 });
-search.addEventListener("blur", () => setTimeout(() => sugg.hidden = true, 100));
+search.addEventListener("blur", () => setTimeout(() => {
+  if (document.activeElement !== search) sugg.hidden = true;
+}, 100));
 
 // ---------------------------------------------------------------- selection
 function addClub(ci) {
