@@ -3,13 +3,79 @@
 
 const $ = (id) => document.getElementById(id);
 const search = $("search"), sugg = $("suggestions"), chips = $("chips"),
-      results = $("results"), status = $("status");
+      results = $("results"), status = $("status"),
+      sortSel = $("sortsel"), dirBtn = $("dirbtn"),
+      byFrom = $("byfrom"), byTo = $("byto"), noZero = $("nozero"), langSel = $("langsel");
 
 let DB = null;               // raw index.json
 let clubIds = [];            // selected club indices
+let sortBy = "apps", sortDir = -1;
 const decoded = new Map();   // club index -> Int32Array of player ids
 const careerCache = new Map();
 const NSHARDS = 128;
+
+// ---------------------------------------------------------------- i18n
+const STR = {
+  it: {
+    tagline: "Scegli due o più squadre — chi ha giocato in tutte?",
+    placeholder: "Aggiungi una squadra…",
+    loading: "Caricamento dati…",
+    footer: "dati: Wikidata · foto: Wikimedia Commons",
+    remove: "rimuovi",
+    sort: "Ordina per", sortApps: "presenze", sortGoals: "gol", sortBirth: "nascita",
+    asc: "crescente", desc: "decrescente",
+    born: "Nati", from: "dal", to: "al",
+    noZero: "nascondi 0 presenze",
+    stats: (p, c) => `${p.toLocaleString("it")} giocatori · ${c} squadre`,
+    needTwo: "Aggiungi almeno due squadre.",
+    oneClub: (n) => `${n.toLocaleString("it")} giocatori in rosa storica — aggiungi un'altra squadra.`,
+    found: (n, ms) => `${n} giocator${n === 1 ? "e" : "i"} · ${ms} ms`,
+    combApps: (n) => `${n.toLocaleString("it")} presenze combinate`,
+    combGoals: (n) => `${n.toLocaleString("it")} gol`,
+    apps: "pres", goals: "gol", noData: "nessun dato",
+    more: (n) => `… e altri ${n}`,
+  },
+  en: {
+    tagline: "Pick two or more clubs — who played for them all?",
+    placeholder: "Add a club…",
+    loading: "Loading data…",
+    footer: "data: Wikidata · photos: Wikimedia Commons",
+    remove: "remove",
+    sort: "Sort by", sortApps: "apps", sortGoals: "goals", sortBirth: "birth",
+    asc: "ascending", desc: "descending",
+    born: "Born", from: "from", to: "to",
+    noZero: "hide 0 apps",
+    stats: (p, c) => `${p.toLocaleString("en")} players · ${c} clubs`,
+    needTwo: "Add at least two clubs.",
+    oneClub: (n) => `${n.toLocaleString("en")} players in the all-time squad — add another club.`,
+    found: (n, ms) => `${n} player${n === 1 ? "" : "s"} · ${ms} ms`,
+    combApps: (n) => `${n.toLocaleString("en")} combined apps`,
+    combGoals: (n) => `${n.toLocaleString("en")} goals`,
+    apps: "apps", goals: "goals", noData: "no data",
+    more: (n) => `… and ${n} more`,
+  },
+};
+let lang = STR[localStorage.lang] ? localStorage.lang
+         : (navigator.language || "").startsWith("it") ? "it" : "en";
+let t = STR[lang];
+
+function applyLang() {
+  t = STR[lang];
+  document.documentElement.lang = lang;
+  langSel.value = lang;
+  $("tagline").textContent = t.tagline;
+  $("foot").textContent = t.footer;
+  search.placeholder = t.placeholder;
+  $("l-sort").textContent = t.sort;
+  [t.sortApps, t.sortGoals, t.sortBirth].forEach((s, i) => sortSel.options[i].text = s);
+  dirBtn.title = sortDir < 0 ? t.desc : t.asc;
+  $("l-born").textContent = t.born;
+  byFrom.placeholder = t.from; byTo.placeholder = t.to;
+  $("l-nozero").textContent = t.noZero;
+  if (DB) { renderChips(); clubIds.length ? solve() : status.textContent = t.stats(DB.names.length, DB.clubs.length); }
+  else status.textContent = t.loading;
+}
+langSel.onchange = () => { lang = localStorage.lang = langSel.value; applyLang(); };
 
 // small alias map for names people actually type (keyed by club QID)
 const ALIASES = {
@@ -33,7 +99,7 @@ async function boot() {
   DB.aliasNorm = DB.clubs.map(c => (ALIASES[c[3]] || []).map(norm));
   search.disabled = false;
   search.focus();
-  status.textContent = `${DB.names.length.toLocaleString("it")} giocatori · ${DB.clubs.length} squadre`;
+  status.textContent = t.stats(DB.names.length, DB.clubs.length);
 }
 
 function postings(ci) {
@@ -121,7 +187,7 @@ function renderChips() {
     const c = DB.clubs[ci];
     const el = document.createElement("span");
     el.className = "chip";
-    el.innerHTML = `${flag(c[1])} ${c[0]} <button aria-label="rimuovi">×</button>`;
+    el.innerHTML = `${flag(c[1])} ${c[0]} <button aria-label="${t.remove}">×</button>`;
     el.querySelector("button").onclick = () => removeClub(ci);
     chips.appendChild(el);
   });
@@ -145,29 +211,51 @@ function intersect(lists) {
 
 function solve() {
   results.innerHTML = "";
-  if (clubIds.length === 0) { status.textContent = "Aggiungi almeno due squadre."; return; }
+  if (clubIds.length === 0) { status.textContent = t.needTwo; return; }
   if (clubIds.length === 1) {
-    status.textContent = `${postings(clubIds[0]).length.toLocaleString("it")} giocatori in rosa storica — aggiungi un'altra squadra.`;
+    status.textContent = t.oneClub(postings(clubIds[0]).length);
     return;
   }
   const t0 = performance.now();
   const common = intersect(clubIds.map(postings));
   const commonSet = new Set(common);
-  // combined apps across the selected clubs (0 = unknown)
-  const appsOf = new Map();
+  // combined apps/goals across the selected clubs (-1 in DB = unknown; absent from map = all unknown)
+  const appsOf = new Map(), goalsOf = new Map(), zero = new Set();
   for (const ci of clubIds) {
-    const arr = postings(ci), apps = DB.apps[ci];
-    for (let i = 0; i < arr.length; i++)
-      if (commonSet.has(arr[i]))
-        appsOf.set(arr[i], (appsOf.get(arr[i]) || 0) + apps[i]);
+    const arr = postings(ci), apps = DB.apps[ci], goals = DB.goals?.[ci] || [];
+    for (let i = 0; i < arr.length; i++) {
+      const p = arr[i];
+      if (!commonSet.has(p)) continue;
+      if (apps[i] >= 0) appsOf.set(p, (appsOf.get(p) || 0) + apps[i]);
+      if (apps[i] === 0) zero.add(p);
+      if (goals[i] >= 0) goalsOf.set(p, (goalsOf.get(p) || 0) + goals[i]);
+    }
   }
-  common.sort((a, b) => (appsOf.get(b) - appsOf.get(a)) || DB.names[a].localeCompare(DB.names[b]));
+  let ids = common;
+  if (noZero.checked) ids = ids.filter(p => !zero.has(p));  // known 0 apps at a selected club
+  const yf = +byFrom.value || 0, yt = +byTo.value || 0;
+  if (yf || yt)  // a set bound excludes unknown birth years
+    ids = ids.filter(p => { const b = DB.births[p]; return b && (!yf || b >= yf) && (!yt || b <= yt); });
+  const key = sortBy === "goals" ? (p) => goalsOf.get(p) || 0
+            : sortBy === "birth" ? (p) => DB.births[p] || 9999 * sortDir  // unknown last
+            : (p) => appsOf.get(p) || 0;
+  ids.sort((a, b) => sortDir * (key(a) - key(b)) || DB.names[a].localeCompare(DB.names[b]));
   const ms = performance.now() - t0;
-  status.textContent = `${common.length} giocator${common.length === 1 ? "e" : "i"} · ${ms.toFixed(1)} ms`;
-  renderResults(common, appsOf);
+  status.textContent = t.found(ids.length, ms.toFixed(1));
+  renderResults(ids, appsOf, goalsOf);
 }
 
-function renderResults(ids, appsOf) {
+sortSel.onchange = () => { sortBy = sortSel.value; solve(); };
+dirBtn.onclick = () => {
+  sortDir = -sortDir;
+  dirBtn.textContent = sortDir < 0 ? "↓" : "↑";
+  dirBtn.title = sortDir < 0 ? t.desc : t.asc;
+  solve();
+};
+byFrom.oninput = byTo.oninput = solve;
+noZero.onchange = solve;
+
+function renderResults(ids, appsOf, goalsOf) {
   const frag = document.createDocumentFragment();
   for (const pid of ids.slice(0, 200)) {
     const li = document.createElement("li");
@@ -175,9 +263,10 @@ function renderResults(ids, appsOf) {
     const img = DB.imgs[pid]
       ? `<img loading="lazy" src="https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(DB.imgs[pid])}?width=96" alt="">`
       : `<span class="avatar">${initials(pid)}</span>`;
-    const apps = appsOf.get(pid);
+    const apps = appsOf.get(pid), goals = goalsOf.get(pid);
+    const meta = [apps ? t.combApps(apps) : "", goals ? t.combGoals(goals) : ""].filter(Boolean).join(" · ");
     li.innerHTML = `${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${DB.names[pid]}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span>
-      <span class="pmeta">${apps ? apps + " presenze combinate" : ""}</span></div><span class="expand">▸</span>`;
+      <span class="pmeta">${meta}</span></div><span class="expand">▸</span>`;
     const im = li.querySelector("img");
     if (im) im.onerror = () => im.replaceWith(avatar(initials(pid)));
     li.onclick = () => toggleCareer(li, pid);
@@ -187,7 +276,7 @@ function renderResults(ids, appsOf) {
   if (ids.length > 200) {
     const li = document.createElement("li");
     li.className = "more";
-    li.textContent = `… e altri ${ids.length - 200}`;
+    li.textContent = t.more(ids.length - 200);
     results.appendChild(li);
   }
 }
@@ -215,10 +304,11 @@ async function toggleCareer(li, pid) {
   div.innerHTML = career.filter(e => e[0]).map(([team, s, e, apps, goals]) =>
     `<div class="crow${selNames.has(team) ? " hit" : ""}">
        <span class="cyears">${s || "?"}–${e || (s ? "" : "?")}</span><span class="cteam">${team}</span>
-       <span class="cstats">${apps != null ? apps + " pres" : ""}${goals != null ? " · " + goals + " gol" : ""}</span>
-     </div>`).join("") || "<div class='crow'>nessun dato</div>";
+       <span class="cstats">${apps != null ? apps + " " + t.apps : ""}${goals != null ? " · " + goals + " " + t.goals : ""}</span>
+     </div>`).join("") || `<div class='crow'>${t.noData}</div>`;
   div.onclick = (e) => e.stopPropagation();
   li.appendChild(div);
 }
 
+applyLang();
 boot();

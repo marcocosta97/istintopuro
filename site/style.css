@@ -14,9 +14,14 @@ body {
   font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
   max-width: 640px; margin: 0 auto; padding: 2rem 1rem 4rem;
 }
-header { margin-bottom: 1.5rem; }
+header { margin-bottom: 1.5rem; position: relative; }
 h1 { font-size: 1.6rem; letter-spacing: -.02em; }
 .sub { color: var(--muted); }
+#langsel {
+  position: absolute; top: .25rem; right: 0; cursor: pointer;
+  background: transparent; color: var(--muted); border: 1px solid var(--line);
+  border-radius: 7px; font: inherit; font-size: .8rem; padding: .1rem .15rem;
+}
 
 #picker {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
@@ -49,6 +54,20 @@ h1 { font-size: 1.6rem; letter-spacing: -.02em; }
 }
 #suggestions li small { color: var(--muted); text-align: right; }
 #suggestions li.active, #suggestions li:hover { background: var(--hit); }
+
+#controls {
+  display: flex; flex-wrap: wrap; gap: .4rem 1.1rem; align-items: center;
+  margin-top: .6rem; color: var(--muted); font-size: .85rem;
+}
+.ctl { display: inline-flex; align-items: center; gap: .35rem; }
+#controls select, #controls input[type=number], #controls button {
+  font: inherit; color: var(--fg); background: var(--card);
+  border: 1px solid var(--line); border-radius: 7px; padding: .12rem .3rem;
+}
+#controls input[type=number] { width: 4.2rem; }
+#controls input[type=checkbox] { accent-color: var(--accent); margin: 0; }
+#dirbtn { cursor: pointer; }
+#dirbtn:hover, #controls select:hover { border-color: var(--accent); }
 
 #status { color: var(--muted); font-size: .9rem; margin: 1rem 0 .5rem; min-height: 1.4em; }
 
