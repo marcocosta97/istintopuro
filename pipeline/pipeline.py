@@ -218,23 +218,80 @@ def stage_teams():
 # ----------------------------------------------------------------- stage: build
 NSHARDS = 128
 
+# --- phoenix-club merging: same club re-founded under a new Wikidata item ---
+STOP_TOKENS = {"fc", "afc", "cf", "cfc", "ac", "acf", "as", "ss", "ssc", "sc", "us",
+               "usd", "ud", "sd", "cd", "rcd", "ca", "rc", "calcio", "club", "football",
+               "futbol", "associazione", "sportiva", "societa", "spa", "ssd", "tsv",
+               "vfb", "vfl", "sv", "fsv", "bsc"}
+# same-city clubs that are NOT the same club — never merge
+DONT_MERGE = {("FR", "bastia"), ("ES", "extremadura"), ("ES", "logrones")}
+# true phoenixes whose names normalize differently
+EXTRA_MERGE = {"Q56542463": "Q8643"}  # LR Vicenza -> Vicenza Calcio (2018 refounding)
+
+def club_core(name):
+    import unicodedata
+    s = unicodedata.normalize("NFD", name).encode("ascii", "ignore").decode().lower()
+    toks = [t for t in re.sub(r"[^a-z0-9 ]", " ", s).split()
+            if t not in STOP_TOKENS and not re.fullmatch(r"(18|19|20)\d\d", t)]
+    return " ".join(toks)
+
+def merge_map(clubs, members):
+    groups = {}
+    for q in members:
+        key = (clubs[q]["cc"], club_core(clubs[q]["name"]))
+        groups.setdefault(key, []).append(q)
+    m = dict(EXTRA_MERGE)
+    for key, qs in groups.items():
+        if len(qs) < 2 or key in DONT_MERGE: continue
+        canon = max(qs, key=lambda q: len(members[q]))
+        m.update({q: canon for q in qs if q != canon})
+    return {old: canon for old, canon in m.items() if old in members and canon in members}
+
 def stage_build():
     clubs, members, attrs = load("clubs"), load("members"), load("attrs")
     careers, teams = load("careers"), load("teams")
 
-    player_qids = sorted({p for ps in members.values() for p in ps},
+    merged = merge_map(clubs, members)
+    groups = {}  # canonical qid -> all qids folded into it
+    for q in members: groups.setdefault(merged.get(q, q), []).append(q)
+    for old, canon in sorted(merged.items(), key=lambda x: clubs[x[1]]["name"]):
+        print(f"  merge: {clubs[old]['name']} ({old}) -> {clubs[canon]['name']} ({canon})")
+
+    # a membership counts only if the statement carries at least one qualifier
+    # (start/end/apps/goals); bare P54 statements are too often wrong
+    def spell(p, qs):  # aggregated career entry of player p across a club group
+        s = e = a = g = None
+        for q in qs:
+            ent = careers.get(p, {}).get(q)
+            if not ent: continue
+            if ent[0] is not None: s = min(s, ent[0]) if s else ent[0]
+            if ent[1] is not None: e = max(e, ent[1]) if e else ent[1]
+            if ent[2] is not None: a = (a or 0) + ent[2]
+            if ent[3] is not None: g = (g or 0) + ent[3]
+        return s, e, a, g
+
+    kept_members, n_dropped = {}, 0
+    for canon, qs in groups.items():
+        pool = {p for q in qs for p in members[q]}
+        kept = {p for p in pool if any(x is not None for x in spell(p, qs))}
+        n_dropped += len(pool) - len(kept)
+        kept_members[canon] = kept
+    print(f"  dropped {n_dropped} unqualified postings, "
+          f"merged {len(merged)} duplicate club items")
+
+    player_qids = sorted({p for ps in kept_members.values() for p in ps},
                          key=lambda q: (attrs.get(q, [None])[0] or "￿", q))
     pid = {q: i for i, q in enumerate(player_qids)}
 
-    club_qids = sorted(members, key=lambda q: clubs[q]["name"])
+    club_qids = sorted(kept_members, key=lambda q: clubs[q]["name"])
     lmask = {q: i for i, q in enumerate(LEAGUE_ORDER)}
     out_clubs, postings, apps_col = [], [], []
     for cq in club_qids:
         c = clubs[cq]
-        mask = sum(1 << lmask[l] for l in c["leagues"] if l in lmask)
-        ids = sorted(pid[p] for p in members[cq])
-        apps = [(careers.get(player_qids[i], {}).get(cq) or [0, 0, None, None])[2] or 0
-                for i in ids]
+        leagues = {l for q in groups[cq] for l in clubs[q]["leagues"]}
+        mask = sum(1 << lmask[l] for l in leagues if l in lmask)
+        ids = sorted(pid[p] for p in kept_members[cq])
+        apps = [spell(player_qids[i], groups[cq])[2] or 0 for i in ids]
         deltas = [ids[0]] + [b - a for a, b in zip(ids, ids[1:])] if ids else []
         out_clubs.append([c["name"], c["cc"] or "", mask, cq])
         postings.append(deltas)
@@ -254,10 +311,13 @@ def stage_build():
     (SITE_DATA / "index.json").write_bytes(blob)
 
     club_name = {q: clubs[q]["name"] for q in clubs} | teams
+    club_name |= {old: clubs[canon]["name"] for old, canon in merged.items()}
     shards = [{} for _ in range(NSHARDS)]
     for q, career in careers.items():
+        if q not in pid: continue  # all memberships dropped as unqualified
         i = pid[q]
-        entries = [[club_name.get(t, ""), c[0], c[1], c[2], c[3]] for t, c in career.items()]
+        entries = [[club_name.get(t, ""), c[0], c[1], c[2], c[3]] for t, c in career.items()
+                   if any(x is not None for x in c)]
         entries.sort(key=lambda e: e[1] or 9999)
         shards[i % NSHARDS][str(i)] = entries
     (SITE_DATA / "career").mkdir(exist_ok=True)
