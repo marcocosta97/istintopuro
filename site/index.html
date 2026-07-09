@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Istinto Puro — solver</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Istinto Puro</h1>
+  <p class="sub">Scegli due o più squadre — chi ha giocato in tutte?</p>
+</header>
+<main>
+  <div id="picker">
+    <div id="chips"></div>
+    <div id="searchwrap">
+      <input id="search" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Aggiungi una squadra…" disabled>
+      <ul id="suggestions" hidden></ul>
+    </div>
+  </div>
+  <div id="status">Caricamento dati…</div>
+  <ul id="results"></ul>
+</main>
+<footer>dati: Wikidata · foto: Wikimedia Commons</footer>
+<script src="app.js"></script>
+</body>
+</html>

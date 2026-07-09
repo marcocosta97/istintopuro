@@ -1,0 +1,83 @@
+:root {
+  --bg: #fafaf8; --fg: #1a1a1a; --muted: #767672; --line: #e4e4df;
+  --card: #ffffff; --accent: #0a7d4f; --hit: #e8f5ee;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111113; --fg: #ececec; --muted: #8f8f95; --line: #2a2a2e;
+    --card: #1a1a1e; --accent: #3dba82; --hit: #16281f;
+  }
+}
+* { box-sizing: border-box; margin: 0; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  max-width: 640px; margin: 0 auto; padding: 2rem 1rem 4rem;
+}
+header { margin-bottom: 1.5rem; }
+h1 { font-size: 1.6rem; letter-spacing: -.02em; }
+.sub { color: var(--muted); }
+
+#picker {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: .5rem; display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
+}
+.chip {
+  background: var(--hit); color: var(--fg); border: 1px solid var(--accent);
+  border-radius: 999px; padding: .15rem .3rem .15rem .6rem;
+  font-size: .9rem; white-space: nowrap; display: inline-flex; align-items: center; gap: .2rem;
+}
+.chip button {
+  all: unset; cursor: pointer; padding: 0 .3rem; color: var(--muted); font-size: 1rem;
+}
+.chip button:hover { color: var(--fg); }
+#chips { display: contents; }
+#searchwrap { position: relative; flex: 1; min-width: 12rem; }
+#search {
+  width: 100%; border: none; outline: none; background: transparent;
+  color: var(--fg); font: inherit; padding: .3rem;
+}
+#suggestions {
+  position: absolute; z-index: 10; left: 0; right: 0; top: calc(100% + .5rem);
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  list-style: none; padding: .25rem; box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  max-height: 20rem; overflow-y: auto;
+}
+#suggestions li {
+  padding: .45rem .6rem; border-radius: 7px; cursor: pointer;
+  display: flex; justify-content: space-between; gap: 1rem; align-items: baseline;
+}
+#suggestions li small { color: var(--muted); text-align: right; }
+#suggestions li.active, #suggestions li:hover { background: var(--hit); }
+
+#status { color: var(--muted); font-size: .9rem; margin: 1rem 0 .5rem; min-height: 1.4em; }
+
+#results { list-style: none; padding: 0; }
+.player {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem .8rem; margin-bottom: .5rem; cursor: pointer;
+  display: flex; align-items: center; gap: .8rem; flex-wrap: wrap;
+}
+.player:hover { border-color: var(--accent); }
+.player img, .avatar {
+  width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+}
+.avatar {
+  background: var(--hit); color: var(--accent);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: .85rem;
+}
+.pinfo { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.pname small { color: var(--muted); font-weight: 400; }
+.pmeta { color: var(--muted); font-size: .82rem; }
+.expand { color: var(--muted); }
+.more { color: var(--muted); padding: .5rem .8rem; }
+
+.career { flex-basis: 100%; border-top: 1px solid var(--line); margin-top: .4rem; padding-top: .4rem; cursor: default; }
+.crow { display: flex; gap: .8rem; font-size: .88rem; padding: .12rem 0; }
+.crow.hit { background: var(--hit); border-radius: 5px; }
+.cyears { color: var(--muted); min-width: 6.2ch; text-align: right; font-variant-numeric: tabular-nums; }
+.cteam { flex: 1; }
+.cstats { color: var(--muted); white-space: nowrap; }
+
+footer { margin-top: 3rem; color: var(--muted); font-size: .8rem; text-align: center; }
