@@ -1,7 +1,7 @@
 # Istinto Puro — solver
 
-Solver per il gioco "Istinto Puro" (Fontana di Trevi): scegli 2+ squadre,
-ottieni all'istante tutti i giocatori che hanno vestito tutte le maglie.
+Solver for the game "Istinto Puro": pick two or more clubs and instantly
+get every player who wore all of those shirts.
 
 ## How it works
 

@@ -21,7 +21,8 @@ const STR = {
     tagline: "Scegli due o più squadre — chi ha giocato in tutte?",
     placeholder: "Aggiungi una squadra…",
     loading: "Caricamento dati…",
-    footer: (d) => `dati: <a href="https://www.wikidata.org">Wikidata</a>${d ? ` (${d})` : ""} · foto: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
+    footer: `dati: <a href="https://www.wikidata.org">Wikidata</a> · foto: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
+    built: (d) => `aggiornato al ${d}`,
     remove: "rimuovi",
     sort: "Ordina per", sortApps: "presenze", sortGoals: "gol", sortBirth: "nascita",
     asc: "crescente", desc: "decrescente",
@@ -41,7 +42,8 @@ const STR = {
     tagline: "Pick two or more clubs — who played for them all?",
     placeholder: "Add a club…",
     loading: "Loading data…",
-    footer: (d) => `data: <a href="https://www.wikidata.org">Wikidata</a>${d ? ` (${d})` : ""} · photos: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
+    footer: `data: <a href="https://www.wikidata.org">Wikidata</a> · photos: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
+    built: (d) => `updated ${d}`,
     remove: "remove",
     sort: "Sort by", sortApps: "apps", sortGoals: "goals", sortBirth: "birth",
     asc: "ascending", desc: "descending",
@@ -67,7 +69,7 @@ function applyLang() {
   document.documentElement.lang = lang;
   langSel.value = lang;
   $("tagline").textContent = t.tagline;
-  $("foot").innerHTML = t.footer(DB && DB.built);
+  $("foot").innerHTML = t.footer + (DB && DB.built ? `<div id="built">${t.built(DB.built)}</div>` : "");
   search.placeholder = t.placeholder;
   $("l-sort").textContent = t.sort;
   [t.sortApps, t.sortGoals, t.sortBirth].forEach((s, i) => sortSel.options[i].text = s);
@@ -95,7 +97,7 @@ const flag = (cc) => cc ? String.fromCodePoint(...[...cc.toUpperCase()].map(c =>
 
 // ---------------------------------------------------------------- data loading
 async function boot() {
-  const res = await fetch("data/index.json");
+  const res = await fetch("data/index.json", { cache: "no-cache" });  // revalidate: stale index + fresh app.js hides fields
   DB = await res.json();
   DB.searchNames = DB.clubs.map(c => norm(c[0]));
   DB.searchInitials = DB.clubs.map(c => initialsOf(c[0]));

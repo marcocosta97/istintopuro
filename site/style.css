@@ -102,3 +102,4 @@ h1 { font-size: 1.6rem; letter-spacing: -.02em; }
 
 footer { margin-top: 3rem; color: var(--muted); font-size: .8rem; text-align: center; }
 footer a { color: inherit; }
+#built { margin-top: .3rem; opacity: .7; }
