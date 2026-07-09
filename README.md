@@ -32,7 +32,8 @@ Full run issues ~600 SPARQL queries (~40 min, politeness-throttled).
 Quality passes in `build`: P54 statements with no qualifiers at all
 (no years/apps/goals) are discarded as unreliable, re-founded "phoenix"
 clubs are merged into one entry, and national sides are filtered out of
-career panels.
+career panels. The index is stamped with the extraction date (newest
+checkpoint), shown in the site footer.
 
 ## Serve
 

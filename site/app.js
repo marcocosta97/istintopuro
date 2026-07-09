@@ -15,12 +15,13 @@ const careerCache = new Map();
 const NSHARDS = 128;
 
 // ---------------------------------------------------------------- i18n
+const REPO = "https://github.com/marcocosta97/istintopuro";
 const STR = {
   it: {
     tagline: "Scegli due o più squadre — chi ha giocato in tutte?",
     placeholder: "Aggiungi una squadra…",
     loading: "Caricamento dati…",
-    footer: "dati: Wikidata · foto: Wikimedia Commons",
+    footer: (d) => `dati: <a href="https://www.wikidata.org">Wikidata</a>${d ? ` (${d})` : ""} · foto: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
     remove: "rimuovi",
     sort: "Ordina per", sortApps: "presenze", sortGoals: "gol", sortBirth: "nascita",
     asc: "crescente", desc: "decrescente",
@@ -30,8 +31,9 @@ const STR = {
     needTwo: "Aggiungi almeno due squadre.",
     oneClub: (n) => `${n.toLocaleString("it")} giocatori in rosa storica — aggiungi un'altra squadra.`,
     found: (n, ms) => `${n} giocator${n === 1 ? "e" : "i"} · ${ms} ms`,
-    combApps: (n) => `${n.toLocaleString("it")} presenze combinate`,
+    combApps: (n) => `${n.toLocaleString("it")} presenze`,
     combGoals: (n) => `${n.toLocaleString("it")} gol`,
+    comb: (apps) => apps ? "combinate" : "combinati",
     apps: "pres", goals: "gol", noData: "nessun dato",
     more: (n) => `… e altri ${n}`,
   },
@@ -39,7 +41,7 @@ const STR = {
     tagline: "Pick two or more clubs — who played for them all?",
     placeholder: "Add a club…",
     loading: "Loading data…",
-    footer: "data: Wikidata · photos: Wikimedia Commons",
+    footer: (d) => `data: <a href="https://www.wikidata.org">Wikidata</a>${d ? ` (${d})` : ""} · photos: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
     remove: "remove",
     sort: "Sort by", sortApps: "apps", sortGoals: "goals", sortBirth: "birth",
     asc: "ascending", desc: "descending",
@@ -49,8 +51,9 @@ const STR = {
     needTwo: "Add at least two clubs.",
     oneClub: (n) => `${n.toLocaleString("en")} players in the all-time squad — add another club.`,
     found: (n, ms) => `${n} player${n === 1 ? "" : "s"} · ${ms} ms`,
-    combApps: (n) => `${n.toLocaleString("en")} combined apps`,
+    combApps: (n) => `${n.toLocaleString("en")} apps`,
     combGoals: (n) => `${n.toLocaleString("en")} goals`,
+    comb: () => "combined",
     apps: "apps", goals: "goals", noData: "no data",
     more: (n) => `… and ${n} more`,
   },
@@ -64,7 +67,7 @@ function applyLang() {
   document.documentElement.lang = lang;
   langSel.value = lang;
   $("tagline").textContent = t.tagline;
-  $("foot").textContent = t.footer;
+  $("foot").innerHTML = t.footer(DB && DB.built);
   search.placeholder = t.placeholder;
   $("l-sort").textContent = t.sort;
   [t.sortApps, t.sortGoals, t.sortBirth].forEach((s, i) => sortSel.options[i].text = s);
@@ -99,7 +102,7 @@ async function boot() {
   DB.aliasNorm = DB.clubs.map(c => (ALIASES[c[3]] || []).map(norm));
   search.disabled = false;
   search.focus();
-  status.textContent = t.stats(DB.names.length, DB.clubs.length);
+  applyLang();  // refresh status + footer now that DB (and its built date) exist
 }
 
 function postings(ci) {
@@ -264,7 +267,8 @@ function renderResults(ids, appsOf, goalsOf) {
       ? `<img loading="lazy" src="https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(DB.imgs[pid])}?width=96" alt="">`
       : `<span class="avatar">${initials(pid)}</span>`;
     const apps = appsOf.get(pid), goals = goalsOf.get(pid);
-    const meta = [apps ? t.combApps(apps) : "", goals ? t.combGoals(goals) : ""].filter(Boolean).join(" · ");
+    const parts = [apps ? t.combApps(apps) : "", goals ? t.combGoals(goals) : ""].filter(Boolean);
+    const meta = parts.length ? `${parts.join(" · ")} <span class="comb">(${t.comb(!!apps)})</span>` : "";
     li.innerHTML = `${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${DB.names[pid]}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span>
       <span class="pmeta">${meta}</span></div><span class="expand">▸</span>`;
     const im = li.querySelector("img");

@@ -310,7 +310,10 @@ def stage_build():
         nats.append(a[2] or ""); imgs.append(unquote(a[3]) if a[3] else "")  # P18 URL tail is %-encoded
 
     SITE_DATA.mkdir(parents=True, exist_ok=True)
-    index = {"leagues": [[LEAGUES[q][0], LEAGUES[q][1]] for q in LEAGUE_ORDER],
+    # data freshness = newest Wikidata checkpoint, not build time
+    built = time.strftime("%Y-%m-%d", time.localtime(max(p.stat().st_mtime for p in DATA.glob("*.json*"))))
+    index = {"built": built,
+             "leagues": [[LEAGUES[q][0], LEAGUES[q][1]] for q in LEAGUE_ORDER],
              "clubs": out_clubs, "postings": postings, "apps": apps_col,
              "goals": goals_col,
              "names": names, "births": births, "nats": nats, "imgs": imgs}
