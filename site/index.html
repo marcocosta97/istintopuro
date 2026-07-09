@@ -9,8 +9,11 @@
 </head>
 <body>
 <header>
+  <select id="langsel" aria-label="Lingua / Language">
+    <option value="it">IT</option><option value="en">EN</option>
+  </select>
   <h1>Istinto Puro</h1>
-  <p class="sub">Scegli due o più squadre — chi ha giocato in tutte?</p>
+  <p class="sub" id="tagline">Scegli due o più squadre — chi ha giocato in tutte?</p>
 </header>
 <main>
   <div id="picker">
@@ -21,10 +24,22 @@
       <ul id="suggestions" hidden></ul>
     </div>
   </div>
+  <div id="controls">
+    <span class="ctl"><label id="l-sort" for="sortsel">Ordina per</label>
+      <select id="sortsel">
+        <option value="apps">presenze</option>
+        <option value="goals">gol</option>
+        <option value="birth">nascita</option>
+      </select><button id="dirbtn">↓</button></span>
+    <span class="ctl"><label id="l-born" for="byfrom">Nati</label>
+      <input id="byfrom" type="number" min="1850" max="2035" placeholder="dal">–<input
+       id="byto" type="number" min="1850" max="2035" placeholder="al"></span>
+    <label class="ctl"><input id="nozero" type="checkbox"> <span id="l-nozero">nascondi 0 presenze</span></label>
+  </div>
   <div id="status">Caricamento dati…</div>
   <ul id="results"></ul>
 </main>
-<footer>dati: Wikidata · foto: Wikimedia Commons</footer>
+<footer id="foot">dati: Wikidata · foto: Wikimedia Commons</footer>
 <script src="app.js"></script>
 </body>
 </html>

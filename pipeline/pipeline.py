@@ -285,17 +285,18 @@ def stage_build():
 
     club_qids = sorted(kept_members, key=lambda q: clubs[q]["name"])
     lmask = {q: i for i, q in enumerate(LEAGUE_ORDER)}
-    out_clubs, postings, apps_col = [], [], []
+    out_clubs, postings, apps_col, goals_col = [], [], [], []
     for cq in club_qids:
         c = clubs[cq]
         leagues = {l for q in groups[cq] for l in clubs[q]["leagues"]}
         mask = sum(1 << lmask[l] for l in leagues if l in lmask)
         ids = sorted(pid[p] for p in kept_members[cq])
-        apps = [spell(player_qids[i], groups[cq])[2] or 0 for i in ids]
+        sp = [spell(player_qids[i], groups[cq]) for i in ids]
         deltas = [ids[0]] + [b - a for a, b in zip(ids, ids[1:])] if ids else []
         out_clubs.append([c["name"], c["cc"] or "", mask, cq])
         postings.append(deltas)
-        apps_col.append(apps)
+        apps_col.append([-1 if s[2] is None else s[2] for s in sp])  # -1 = unknown
+        goals_col.append([-1 if s[3] is None else s[3] for s in sp])
 
     names, births, nats, imgs = [], [], [], []
     for q in player_qids:
@@ -306,6 +307,7 @@ def stage_build():
     SITE_DATA.mkdir(parents=True, exist_ok=True)
     index = {"leagues": [[LEAGUES[q][0], LEAGUES[q][1]] for q in LEAGUE_ORDER],
              "clubs": out_clubs, "postings": postings, "apps": apps_col,
+             "goals": goals_col,
              "names": names, "births": births, "nats": nats, "imgs": imgs}
     blob = json.dumps(index, ensure_ascii=False, separators=(",", ":")).encode()
     (SITE_DATA / "index.json").write_bytes(blob)
@@ -329,14 +331,16 @@ def stage_build():
 
     n_post = sum(map(len, postings))
     gz = len(gzip.compress(blob, 6))
-    with_apps = sum(1 for col in apps_col for a in col if a)
+    with_apps = sum(1 for col in apps_col for a in col if a >= 0)
+    with_goals = sum(1 for col in goals_col for g in col if g >= 0)
     print(f"build: {len(out_clubs)} clubs, {len(names)} players, {n_post} postings")
     print(f"  index.json {len(blob)/1e6:.2f} MB raw, {gz/1e6:.2f} MB gzip")
     print(f"  career shards total {shard_bytes/1e6:.2f} MB ({NSHARDS} files)")
     print(f"  coverage: birth {sum(1 for b in births if b)/len(names):.0%}, "
           f"img {sum(1 for i in imgs if i)/len(names):.0%}, "
           f"nat {sum(1 for n in nats if n)/len(names):.0%}, "
-          f"apps-per-posting {with_apps/max(n_post,1):.0%}")
+          f"apps-per-posting {with_apps/max(n_post,1):.0%}, "
+          f"goals-per-posting {with_goals/max(n_post,1):.0%}")
     print(f"  longest posting list: {max(map(len, postings))}")
 
 STAGES = {"clubs": stage_clubs, "members": stage_members, "attrs": stage_attrs,
