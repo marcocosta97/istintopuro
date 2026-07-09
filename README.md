@@ -44,3 +44,8 @@ python3 -m http.server -d site 8000
 
 Pushing to `master` auto-deploys `site/` to GitHub Pages
 (`.github/workflows/pages.yml`).
+
+## License
+
+MIT. Data derived from [Wikidata](https://www.wikidata.org) (CC0);
+photos are served by Wikimedia Commons under their own licenses.
