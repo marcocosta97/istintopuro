@@ -5,11 +5,12 @@ ottieni all'istante tutti i giocatori che hanno vestito tutte le maglie.
 
 ## How it works
 
-- **No backend.** The whole dataset (~78k players, ~196k player–club pairs,
-  574 clubs from the top-5 leagues + their second divisions, all-time) is
+- **No backend.** The whole dataset (~62k players, ~172k player–club pairs,
+  480 clubs from the top-5 leagues + their second divisions, all-time) is
   precomputed into `site/data/index.json` as an inverted index
-  (club → delta-encoded sorted player IDs). The browser intersects posting
-  lists client-side in well under a millisecond.
+  (club → delta-encoded sorted player IDs, plus per-pair appearances and
+  goals, `-1` = unknown). The browser intersects posting lists client-side
+  in well under a millisecond.
 - **Careers** are sharded into `site/data/career/*.json` (128 files) and
   lazy-loaded when a player row is expanded.
 - **Photos** are the only runtime external dependency: thumbnails lazy-loaded
@@ -28,6 +29,11 @@ Stages: `clubs → members → attrs → careers → teams → build`. Each stag
 checkpoints to `data/*.json(l)`; delete a checkpoint to force a re-fetch.
 Full run issues ~600 SPARQL queries (~40 min, politeness-throttled).
 
+Quality passes in `build`: P54 statements with no qualifiers at all
+(no years/apps/goals) are discarded as unreliable, re-founded "phoenix"
+clubs are merged into one entry, and national sides are filtered out of
+career panels.
+
 ## Serve
 
 Any static file server:
@@ -35,3 +41,6 @@ Any static file server:
 ```
 python3 -m http.server -d site 8000
 ```
+
+Pushing to `master` auto-deploys `site/` to GitHub Pages
+(`.github/workflows/pages.yml`).
