@@ -231,7 +231,8 @@ STOP_TOKENS = {"fc", "afc", "cf", "cfc", "ac", "acf", "as", "ss", "ssc", "sc", "
 # same-city clubs that are NOT the same club — never merge
 DONT_MERGE = {("FR", "bastia"), ("ES", "extremadura"), ("ES", "logrones")}
 # true phoenixes whose names normalize differently
-EXTRA_MERGE = {"Q56542463": "Q8643"}  # LR Vicenza -> Vicenza Calcio (2018 refounding)
+EXTRA_MERGE = {"Q56542463": "Q8643",  # LR Vicenza -> Vicenza Calcio (2018 refounding)
+               "Q3626886": "Q6641"}   # Liberty Bari -> SSC Bari (merged into Bari in 1928)
 
 def club_core(name):
     import unicodedata
