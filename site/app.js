@@ -302,16 +302,19 @@ async function toggleCareer(li, pid) {
   const shard = pid % NSHARDS;
   if (!careerCache.has(shard))
     careerCache.set(shard, fetch(`data/career/${shard}.json`).then(r => r.json()));
-  const career = (await careerCache.get(shard))[pid] || [];
+  const entry = (await careerCache.get(shard))[pid] || [];
+  // new shard format [qid, spells]; tolerate a cached pre-qid shard (plain spell list)
+  const [qid, career] = typeof entry[0] === "number" ? entry : [0, entry];
   if (li.querySelector(".career")) return;
   const selNames = new Set(clubIds.map(ci => DB.clubs[ci][0]));
   const div = document.createElement("div");
   div.className = "career";
-  div.innerHTML = career.filter(e => e[0]).map(([team, s, e, apps, goals]) =>
+  div.innerHTML = (career.filter(e => e[0]).map(([team, s, e, apps, goals]) =>
     `<div class="crow${selNames.has(team) ? " hit" : ""}">
        <span class="cyears">${s || "?"}–${e || (s ? "" : "?")}</span><span class="cteam">${team}</span>
        <span class="cstats">${apps != null ? apps + " " + t.apps : ""}${goals != null ? " · " + goals + " " + t.goals : ""}</span>
-     </div>`).join("") || `<div class='crow'>${t.noData}</div>`;
+     </div>`).join("") || `<div class='crow'>${t.noData}</div>`)
+    + (qid ? `<a class="wiki" href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${lang}wiki/Q${qid}" target="_blank" rel="noopener">Wikipedia ↗</a>` : "");
   div.onclick = (e) => e.stopPropagation();
   li.appendChild(div);
 }

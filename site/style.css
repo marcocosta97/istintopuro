@@ -99,6 +99,7 @@ h1 { font-size: 1.6rem; letter-spacing: -.02em; }
 .cyears { color: var(--muted); min-width: 6.2ch; text-align: right; font-variant-numeric: tabular-nums; }
 .cteam { flex: 1; }
 .cstats { color: var(--muted); white-space: nowrap; }
+.career .wiki { display: inline-block; margin-top: .35rem; font-size: .8rem; color: var(--accent); text-decoration: none; }
 
 footer { margin-top: 3rem; color: var(--muted); font-size: .8rem; text-align: center; }
 footer a { color: inherit; }

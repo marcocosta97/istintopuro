@@ -331,7 +331,7 @@ def stage_build():
                    if any(x is not None for x in c)
                    and not NATIONAL.search(club_name.get(t, ""))]
         entries.sort(key=lambda e: e[1] or 9999)
-        shards[i % NSHARDS][str(i)] = entries
+        shards[i % NSHARDS][str(i)] = [int(q[1:]), entries]  # QID number -> Wikipedia via Special:GoToLinkedPage
     (SITE_DATA / "career").mkdir(exist_ok=True)
     shard_bytes = 0
     for si, sh in enumerate(shards):

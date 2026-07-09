@@ -12,7 +12,10 @@ get every player who wore all of those shirts.
   goals, `-1` = unknown). The browser intersects posting lists client-side
   in well under a millisecond.
 - **Careers** are sharded into `site/data/career/*.json` (128 files) and
-  lazy-loaded when a player row is expanded.
+  lazy-loaded when a player row is expanded. Each entry is
+  `[QID number, spells]`; the QID links the player's Wikipedia article
+  (it/en per UI language) via Wikidata's `Special:GoToLinkedPage`, so no
+  article titles need to be stored.
 - **Photos** are the only runtime external dependency: thumbnails lazy-loaded
   from Wikimedia Commons, with initials fallback.
 
