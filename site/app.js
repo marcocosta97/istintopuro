@@ -173,11 +173,13 @@ function renderResults(ids, appsOf) {
     const li = document.createElement("li");
     li.className = "player";
     const img = DB.imgs[pid]
-      ? `<img loading="lazy" src="https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(DB.imgs[pid])}?width=96" onerror="this.replaceWith(avatar('${initials(pid)}'))" alt="">`
+      ? `<img loading="lazy" src="https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(DB.imgs[pid])}?width=96" alt="">`
       : `<span class="avatar">${initials(pid)}</span>`;
     const apps = appsOf.get(pid);
     li.innerHTML = `${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${DB.names[pid]}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span>
       <span class="pmeta">${apps ? apps + " presenze combinate" : ""}</span></div><span class="expand">▸</span>`;
+    const im = li.querySelector("img");
+    if (im) im.onerror = () => im.replaceWith(avatar(initials(pid)));
     li.onclick = () => toggleCareer(li, pid);
     frag.appendChild(li);
   }
@@ -191,7 +193,7 @@ function renderResults(ids, appsOf) {
 }
 
 const initials = (pid) => DB.names[pid].split(" ").map(w => w[0]).slice(0, 2).join("");
-window.avatar = (txt) => {  // used by img onerror
+const avatar = (txt) => {
   const s = document.createElement("span");
   s.className = "avatar"; s.textContent = txt;
   return s;

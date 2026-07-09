@@ -13,6 +13,7 @@ Usage: python3 pipeline/pipeline.py [stage ...]   (default: all)
 """
 import json, re, sys, time, gzip
 from pathlib import Path
+from urllib.parse import unquote
 import requests
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -218,6 +219,10 @@ def stage_teams():
 # ----------------------------------------------------------------- stage: build
 NSHARDS = 128
 
+# national sides (senior/under-NN/Olympic/women's, any sport) — not clubs, keep out of careers
+NATIONAL = re.compile(r"\bnational\b.*\bteam\b|nationalmannschaft"
+                      r"|\bolympic (football|soccer) team|\bunder-\d+.*\bteam\b", re.I)
+
 # --- phoenix-club merging: same club re-founded under a new Wikidata item ---
 STOP_TOKENS = {"fc", "afc", "cf", "cfc", "ac", "acf", "as", "ss", "ssc", "sc", "us",
                "usd", "ud", "sd", "cd", "rcd", "ca", "rc", "calcio", "club", "football",
@@ -301,7 +306,7 @@ def stage_build():
     for q in player_qids:
         a = attrs.get(q) or [None, None, None, None]
         names.append(a[0] or q); births.append(a[1] or 0)
-        nats.append(a[2] or ""); imgs.append(a[3] or "")
+        nats.append(a[2] or ""); imgs.append(unquote(a[3]) if a[3] else "")  # P18 URL tail is %-encoded
 
     SITE_DATA.mkdir(parents=True, exist_ok=True)
     index = {"leagues": [[LEAGUES[q][0], LEAGUES[q][1]] for q in LEAGUE_ORDER],
@@ -317,7 +322,8 @@ def stage_build():
         if q not in pid: continue  # all memberships dropped as unqualified
         i = pid[q]
         entries = [[club_name.get(t, ""), c[0], c[1], c[2], c[3]] for t, c in career.items()
-                   if any(x is not None for x in c)]
+                   if any(x is not None for x in c)
+                   and not NATIONAL.search(club_name.get(t, ""))]
         entries.sort(key=lambda e: e[1] or 9999)
         shards[i % NSHARDS][str(i)] = entries
     (SITE_DATA / "career").mkdir(exist_ok=True)
