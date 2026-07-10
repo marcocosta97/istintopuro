@@ -22,13 +22,13 @@ SITE_DATA = ROOT / "site" / "data"
 UA = "istintopuro-pipeline/0.1 (mcosta97@proton.me)"
 WDQS = "https://query.wikidata.org/sparql"
 
-LEAGUES = {  # qid: (name, tier)
-    "Q15804":  ("Serie A", 1),          "Q194052": ("Serie B", 2),
-    "Q324867": ("La Liga", 1),          "Q35615":  ("LaLiga 2", 2),
-    "Q9448":   ("Premier League", 1),   "Q19510":  ("EFL Championship", 2),
-    "Q754839": ("First Division", 1),   "Q769744": ("Second Division", 2),
-    "Q13394":  ("Ligue 1", 1),          "Q217374": ("Ligue 2", 2),
-    "Q82595":  ("Bundesliga", 1),       "Q152665": ("2. Bundesliga", 2),
+LEAGUES = {  # qid: (name, tier, cc)
+    "Q15804":  ("Serie A", 1, "IT"),          "Q194052": ("Serie B", 2, "IT"),
+    "Q324867": ("La Liga", 1, "ES"),          "Q35615":  ("La Liga 2", 2, "ES"),
+    "Q9448":   ("Premier League", 1, "GB"),   "Q19510":  ("EFL Championship", 2, "GB"),
+    "Q754839": ("First Division", 1, "GB"),   "Q769744": ("Second Division", 2, "GB"),
+    "Q13394":  ("Ligue 1", 1, "FR"),          "Q217374": ("Ligue 2", 2, "FR"),
+    "Q82595":  ("Bundesliga", 1, "DE"),       "Q152665": ("2. Bundesliga", 2, "DE"),
 }
 # collapse historical English divisions into their modern successors for display
 LEAGUE_ALIAS = {"Q754839": "Q9448", "Q769744": "Q19510"}
@@ -314,7 +314,7 @@ def stage_build():
     # data freshness = newest Wikidata checkpoint, not build time
     built = time.strftime("%Y-%m-%d", time.localtime(max(p.stat().st_mtime for p in DATA.glob("*.json*"))))
     index = {"built": built,
-             "leagues": [[LEAGUES[q][0], LEAGUES[q][1]] for q in LEAGUE_ORDER],
+             "leagues": [list(LEAGUES[q]) for q in LEAGUE_ORDER],
              "clubs": out_clubs, "postings": postings, "apps": apps_col,
              "goals": goals_col,
              "names": names, "births": births, "nats": nats, "imgs": imgs}

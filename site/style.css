@@ -22,13 +22,16 @@ h1 { font-size: 1.6rem; letter-spacing: -.02em; }
   background: transparent; color: var(--muted); border: 1px solid var(--line);
   border-radius: 7px; font: inherit; font-size: .8rem; padding: .1rem .15rem;
 }
-#aboutbtn { right: 3.4rem; width: 1.5rem; }
+#langsel { right: 2rem; }
+#aboutbtn { width: 1.5rem; }
 
 #about {
   margin: auto;  /* the global reset kills the UA rule that centers <dialog> */
   background: var(--card); color: var(--fg); border: 1px solid var(--line);
-  border-radius: 10px; padding: 1.2rem 1.4rem; max-width: 26rem; font-size: .92rem;
+  border-radius: 10px; padding: 1.2rem 1.4rem; font-size: .92rem;
+  width: min(26rem, calc(100vw - 2.5rem));
 }
+#aboutleagues .lg { white-space: nowrap; }
 #about::backdrop { background: rgba(0, 0, 0, .45); }
 #about h2 { font-size: 1.05rem; margin-bottom: .6rem; }
 #aboutleagues { color: var(--muted); margin-top: .6rem; }

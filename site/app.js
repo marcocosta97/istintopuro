@@ -82,7 +82,8 @@ function applyLang() {
   byFrom.placeholder = t.from; byTo.placeholder = t.to;
   $("l-nozero").textContent = t.noZero;
   $("abouttext").textContent = t.about;
-  $("aboutleagues").innerHTML = t.aboutLeagues + (DB ? "<br>" + DB.leagues.map(l => l[0]).join(" · ") : "");
+  $("aboutleagues").innerHTML = t.aboutLeagues
+    + (DB ? "<br>" + DB.leagues.map(l => `<span class="lg">${flag(l[2])} ${l[0]}</span>`).join(" · ") : "");
   if (DB) { renderChips(); clubIds.length ? solve() : status.textContent = t.stats(DB.names.length, DB.clubs.length); }
   else status.textContent = t.loading;
 }
