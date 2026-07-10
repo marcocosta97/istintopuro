@@ -105,19 +105,22 @@ def resumable(stage, items, batch_size, fetch_batch):
 def stage_clubs():
     lgs = " ".join(f"wd:{q}" for q in LEAGUES)
     rows = sparql(f"""
-      SELECT DISTINCT ?club ?clubLabel ?cc ?lg WHERE {{
+      SELECT DISTINCT ?club ?clubLabel ?cc ?lg ?dissolved WHERE {{
         VALUES ?lg {{ {lgs} }}
         {{ ?club p:P118/ps:P118 ?lg . ?club wdt:P31 wd:Q476028 . }}
         UNION {{ ?season wdt:P3450 ?lg . ?season wdt:P1923 ?club . }}
         OPTIONAL {{ ?club wdt:P17/wdt:P297 ?cc }}
+        OPTIONAL {{ ?club wdt:P576 ?dissolved }}
         SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul,it,es,de,fr". }}
       }}""")
     clubs = {}
     for r in rows:
         q = qid(v(r, "club"))
-        c = clubs.setdefault(q, {"name": v(r, "clubLabel"), "cc": v(r, "cc"), "leagues": set()})
+        c = clubs.setdefault(q, {"name": v(r, "clubLabel"), "cc": v(r, "cc"), "leagues": set(), "dissolved": None})
         c["leagues"].add(LEAGUE_ALIAS.get(qid(v(r, "lg")), qid(v(r, "lg"))))
         if not c["cc"]: c["cc"] = v(r, "cc")
+        d = year(v(r, "dissolved"))
+        if d: c["dissolved"] = d
     dropped = []
     for q in list(clubs):
         name = clubs[q]["name"] or q
@@ -299,7 +302,10 @@ def stage_build():
         ids = sorted(pid[p] for p in kept_members[cq])
         sp = [spell(player_qids[i], groups[cq]) for i in ids]
         deltas = [ids[0]] + [b - a for a, b in zip(ids, ids[1:])] if ids else []
-        out_clubs.append([c["name"], c["cc"] or "", mask, cq])
+        # a merged group is "dissolved" only if the whole lineage ended (no refounded/active member)
+        diss = [clubs[q].get("dissolved") for q in groups[cq]]
+        dissolved = max(diss) if diss and all(diss) else 0
+        out_clubs.append([c["name"], c["cc"] or "", mask, cq, dissolved])
         postings.append(deltas)
         apps_col.append([-1 if s[2] is None else s[2] for s in sp])  # -1 = unknown
         goals_col.append([-1 if s[3] is None else s[3] for s in sp])

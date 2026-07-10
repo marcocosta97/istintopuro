@@ -81,6 +81,7 @@ h1 .accent { color: var(--accent); }
   display: flex; justify-content: space-between; gap: 1rem; align-items: baseline;
 }
 #suggestions li small { color: var(--muted); text-align: right; }
+.defunct { color: var(--muted); font-size: .82em; white-space: nowrap; }
 #suggestions li.active, #suggestions li:hover { background: var(--hit); }
 
 #controls {

@@ -9,8 +9,10 @@ get every player who wore all of those shirts.
   480 clubs from the top-5 leagues + their second divisions, all-time) is
   precomputed into `site/data/index.json` as an inverted index
   (club → delta-encoded sorted player IDs, plus per-pair appearances and
-  goals, `-1` = unknown). The browser intersects posting lists client-side
-  in well under a millisecond.
+  goals, `-1` = unknown). Each club record is `[name, country, leagueMask,
+  QID, dissolvedYear]` — `dissolvedYear` (Wikidata P576, `0` if active)
+  drives the `†year` marker on defunct clubs. The browser intersects posting
+  lists client-side in well under a millisecond.
 - **Careers** are sharded into `site/data/career/*.json` (128 files) and
   lazy-loaded when a player row is expanded. Each entry is
   `[QID number, spells]`; the QID links the player's Wikipedia article
@@ -21,7 +23,8 @@ get every player who wore all of those shirts.
 
 ## Data pipeline
 
-Source: Wikidata (P54 team memberships + qualifiers for years/apps/goals).
+Source: Wikidata (P54 team memberships + qualifiers for years/apps/goals;
+P576 club dissolution date).
 
 ```
 python3 pipeline/pipeline.py            # all stages, checkpointed in data/

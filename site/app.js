@@ -40,6 +40,7 @@ const STR = {
     combGoals: (n) => `${n.toLocaleString("it")} gol`,
     comb: (apps) => apps ? "combinate" : "combinati",
     apps: "pres", goals: "gol", noData: "nessun dato",
+    dissolved: (y) => `squadra sciolta nel ${y}`,
     more: (n) => `… e altri ${n}`,
   },
   en: {
@@ -65,6 +66,7 @@ const STR = {
     combGoals: (n) => `${n.toLocaleString("en")} goals`,
     comb: () => "combined",
     apps: "apps", goals: "goals", noData: "no data",
+    dissolved: (y) => `club dissolved in ${y}`,
     more: (n) => `… and ${n} more`,
   },
 };
@@ -122,6 +124,8 @@ const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "")
                      .toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 const initialsOf = (s) => norm(s).split(" ").filter(w => w.length > 2).map(w => w[0]).join("");
 const flag = (cc) => cc ? String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1A5 + c.charCodeAt(0))) : "";
+// defunct marker: a dagger + dissolution year for clubs with Wikidata P576 (c[4])
+const defunct = (c) => c[4] ? ` <span class="defunct" title="${t.dissolved(c[4])}">†${c[4]}</span>` : "";
 
 // ---------------------------------------------------------------- data loading
 async function boot() {
@@ -173,7 +177,7 @@ function renderSuggestions(ids) {
   ids.forEach((ci, i) => {
     const c = DB.clubs[ci];
     const li = document.createElement("li");
-    li.innerHTML = `<span>${flag(c[1])} ${c[0]}</span><small>${leagueNames(c[2])}</small>`;
+    li.innerHTML = `<span>${flag(c[1])} ${c[0]}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
     li.className = i === cursor ? "active" : "";
     li.onmousedown = (e) => { e.preventDefault(); addClub(ci); };
     sugg.appendChild(li);
@@ -220,7 +224,7 @@ function renderChips() {
     const c = DB.clubs[ci];
     const el = document.createElement("span");
     el.className = "chip";
-    el.innerHTML = `${flag(c[1])} ${c[0]} <button aria-label="${t.remove}">×</button>`;
+    el.innerHTML = `${flag(c[1])} ${c[0]}${defunct(c)} <button aria-label="${t.remove}">×</button>`;
     el.querySelector("button").onclick = () => removeClub(ci);
     chips.appendChild(el);
   });
