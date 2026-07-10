@@ -9,12 +9,19 @@
 </head>
 <body>
 <header>
-  <select id="langsel" aria-label="Lingua / Language">
-    <option value="it">IT</option><option value="en">EN</option>
-  </select>
-  <button id="aboutbtn" aria-label="info">?</button>
-  <h1>Istinto Puro</h1>
-  <p class="sub" id="tagline">Scegli due o più squadre — chi ha giocato in tutte?</p>
+  <div class="brand">
+    <span class="mark" aria-hidden="true">⚽</span>
+    <div>
+      <h1><span>Istinto</span> <span class="accent">Puro</span></h1>
+      <p class="sub" id="tagline">Scegli due o più squadre — chi ha giocato in tutte?</p>
+    </div>
+  </div>
+  <div class="htools">
+    <button id="aboutbtn" aria-label="info">?</button>
+    <select id="langsel" aria-label="Lingua / Language">
+      <option value="it">IT</option><option value="en">EN</option>
+    </select>
+  </div>
 </header>
 <main>
   <div id="picker">
@@ -26,16 +33,22 @@
     </div>
   </div>
   <div id="controls">
+    <button id="advtoggle" type="button" aria-controls="advbody" aria-expanded="false"><span id="l-adv">Filtri</span></button>
     <span class="ctl"><label id="l-sort" for="sortsel">Ordina per</label>
       <select id="sortsel">
         <option value="apps">presenze</option>
         <option value="goals">gol</option>
         <option value="birth">nascita</option>
-      </select><button id="dirbtn">↓</button></span>
+      </select><button id="dirbtn" aria-label="direzione">↓</button></span>
+  </div>
+  <div id="advbody" hidden>
     <span class="ctl"><label id="l-born" for="byfrom">Nati</label>
       <input id="byfrom" type="number" min="1850" max="2035" placeholder="dal">–<input
        id="byto" type="number" min="1850" max="2035" placeholder="al"></span>
-    <label class="ctl"><input id="nozero" type="checkbox"> <span id="l-nozero">nascondi 0 presenze</span></label>
+    <span class="ctl">
+      <label><input id="nozero" type="checkbox"> <span id="l-nozero">nascondi 0 presenze</span></label>
+      <button class="hint" id="hint-nozero" type="button" aria-expanded="false">?<span class="tip" id="tip-nozero"></span></button>
+    </span>
   </div>
   <div id="status">Caricamento dati…</div>
   <ul id="results"></ul>

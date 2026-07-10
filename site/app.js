@@ -28,8 +28,10 @@ const STR = {
     remove: "rimuovi",
     sort: "Ordina per", sortApps: "presenze", sortGoals: "gol", sortBirth: "nascita",
     asc: "crescente", desc: "decrescente",
+    adv: "Filtri",
     born: "Nati", from: "dal", to: "al",
     noZero: "nascondi 0 presenze",
+    noZeroHint: "Nasconde chi ha 0 presenze registrate in una delle squadre scelte. Chi ha giocato più volte nella stessa squadra e ha totalizzato almeno una presenza resta incluso.",
     stats: (p, c) => `${p.toLocaleString("it")} giocatori · ${c} squadre`,
     needTwo: "Aggiungi almeno due squadre.",
     oneClub: (n) => `${n.toLocaleString("it")} giocatori in rosa storica — aggiungi un'altra squadra.`,
@@ -51,8 +53,10 @@ const STR = {
     remove: "remove",
     sort: "Sort by", sortApps: "apps", sortGoals: "goals", sortBirth: "birth",
     asc: "ascending", desc: "descending",
+    adv: "Filters",
     born: "Born", from: "from", to: "to",
     noZero: "hide 0 apps",
+    noZeroHint: "Hides players with 0 recorded appearances at one of the selected clubs. Players with multiple stints at the same club who made at least one appearance are kept.",
     stats: (p, c) => `${p.toLocaleString("en")} players · ${c} clubs`,
     needTwo: "Add at least two clubs.",
     oneClub: (n) => `${n.toLocaleString("en")} players in the all-time squad — add another club.`,
@@ -78,9 +82,12 @@ function applyLang() {
   $("l-sort").textContent = t.sort;
   [t.sortApps, t.sortGoals, t.sortBirth].forEach((s, i) => sortSel.options[i].text = s);
   dirBtn.title = sortDir < 0 ? t.desc : t.asc;
+  $("l-adv").textContent = t.adv;
   $("l-born").textContent = t.born;
   byFrom.placeholder = t.from; byTo.placeholder = t.to;
   $("l-nozero").textContent = t.noZero;
+  $("tip-nozero").textContent = t.noZeroHint;
+  $("hint-nozero").setAttribute("aria-label", t.noZeroHint);
   $("abouttext").textContent = t.about;
   $("aboutleagues").innerHTML = t.aboutLeagues
     + (DB ? "<br>" + DB.leagues.map(l => `<span class="lg">${flag(l[2])} ${l[0]}</span>`).join(" · ") : "");
@@ -90,6 +97,18 @@ function applyLang() {
 langSel.onchange = () => { lang = localStorage.lang = langSel.value; applyLang(); };
 $("aboutbtn").onclick = () => $("about").showModal();
 $("about").onclick = (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); };
+$("advtoggle").onclick = () => {
+  const open = $("advbody").hidden;
+  $("advbody").hidden = !open;
+  $("advtoggle").setAttribute("aria-expanded", open);
+};
+// tap-to-toggle hint bubble (hover handles desktop); close on outside tap
+$("hint-nozero").onclick = (e) => {
+  e.stopPropagation();
+  const h = e.currentTarget, on = h.classList.toggle("show");
+  h.setAttribute("aria-expanded", on);
+};
+document.addEventListener("click", () => $("hint-nozero").classList.remove("show"));
 
 // small alias map for names people actually type (keyed by club QID)
 const ALIASES = {
