@@ -23,6 +23,8 @@ const STR = {
     loading: "Caricamento dati…",
     footer: `dati: <a href="https://www.wikidata.org">Wikidata</a> · foto: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
     built: (d) => `aggiornato al ${d}`,
+    about: "Solver per il gioco «Istinto Puro»: scegli due o più squadre e scopri all'istante tutti i giocatori che hanno giocato in tutte, ordinati per presenze combinate. Dati estratti da Wikidata.",
+    aboutLeagues: "Campionati coperti (tutte le stagioni):",
     remove: "rimuovi",
     sort: "Ordina per", sortApps: "presenze", sortGoals: "gol", sortBirth: "nascita",
     asc: "crescente", desc: "decrescente",
@@ -44,6 +46,8 @@ const STR = {
     loading: "Loading data…",
     footer: `data: <a href="https://www.wikidata.org">Wikidata</a> · photos: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
     built: (d) => `updated ${d}`,
+    about: "Solver for the game “Istinto Puro”: pick two or more clubs and instantly see every player who played for them all, ranked by combined appearances. Data extracted from Wikidata.",
+    aboutLeagues: "Leagues covered (all seasons):",
     remove: "remove",
     sort: "Sort by", sortApps: "apps", sortGoals: "goals", sortBirth: "birth",
     asc: "ascending", desc: "descending",
@@ -77,10 +81,14 @@ function applyLang() {
   $("l-born").textContent = t.born;
   byFrom.placeholder = t.from; byTo.placeholder = t.to;
   $("l-nozero").textContent = t.noZero;
+  $("abouttext").textContent = t.about;
+  $("aboutleagues").innerHTML = t.aboutLeagues + (DB ? "<br>" + DB.leagues.map(l => l[0]).join(" · ") : "");
   if (DB) { renderChips(); clubIds.length ? solve() : status.textContent = t.stats(DB.names.length, DB.clubs.length); }
   else status.textContent = t.loading;
 }
 langSel.onchange = () => { lang = localStorage.lang = langSel.value; applyLang(); };
+$("aboutbtn").onclick = () => $("about").showModal();
+$("about").onclick = (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); };
 
 // small alias map for names people actually type (keyed by club QID)
 const ALIASES = {
@@ -225,7 +233,7 @@ function solve() {
   const common = intersect(clubIds.map(postings));
   const commonSet = new Set(common);
   // combined apps/goals across the selected clubs (-1 in DB = unknown; absent from map = all unknown)
-  const appsOf = new Map(), goalsOf = new Map(), zero = new Set();
+  const appsOf = new Map(), goalsOf = new Map(), zero = new Set(), gKnown = new Map();
   for (const ci of clubIds) {
     const arr = postings(ci), apps = DB.apps[ci], goals = DB.goals?.[ci] || [];
     for (let i = 0; i < arr.length; i++) {
@@ -233,9 +241,14 @@ function solve() {
       if (!commonSet.has(p)) continue;
       if (apps[i] >= 0) appsOf.set(p, (appsOf.get(p) || 0) + apps[i]);
       if (apps[i] === 0) zero.add(p);
-      if (goals[i] >= 0) goalsOf.set(p, (goalsOf.get(p) || 0) + goals[i]);
+      if (goals[i] >= 0) {
+        goalsOf.set(p, (goalsOf.get(p) || 0) + goals[i]);
+        gKnown.set(p, (gKnown.get(p) || 0) + 1);
+      }
     }
   }
+  // 0 goals is only shown when known at every selected club
+  const zeroGoals = new Set([...gKnown].filter(([p, k]) => k === clubIds.length && !goalsOf.get(p)).map(([p]) => p));
   let ids = common;
   if (noZero.checked) ids = ids.filter(p => !zero.has(p));  // known 0 apps at a selected club
   const yf = +byFrom.value || 0, yt = +byTo.value || 0;
@@ -247,7 +260,7 @@ function solve() {
   ids.sort((a, b) => sortDir * (key(a) - key(b)) || DB.names[a].localeCompare(DB.names[b]));
   const ms = performance.now() - t0;
   status.textContent = t.found(ids.length, ms.toFixed(1));
-  renderResults(ids, appsOf, goalsOf);
+  renderResults(ids, appsOf, goalsOf, zeroGoals);
 }
 
 sortSel.onchange = () => { sortBy = sortSel.value; solve(); };
@@ -260,7 +273,7 @@ dirBtn.onclick = () => {
 byFrom.oninput = byTo.oninput = solve;
 noZero.onchange = solve;
 
-function renderResults(ids, appsOf, goalsOf) {
+function renderResults(ids, appsOf, goalsOf, zeroGoals) {
   const frag = document.createDocumentFragment();
   for (const pid of ids.slice(0, 200)) {
     const li = document.createElement("li");
@@ -269,7 +282,7 @@ function renderResults(ids, appsOf, goalsOf) {
       ? `<img loading="lazy" src="https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(DB.imgs[pid])}?width=96" alt="">`
       : `<span class="avatar">${initials(pid)}</span>`;
     const apps = appsOf.get(pid), goals = goalsOf.get(pid);
-    const parts = [apps ? t.combApps(apps) : "", goals ? t.combGoals(goals) : ""].filter(Boolean);
+    const parts = [apps ? t.combApps(apps) : "", goals || zeroGoals.has(pid) ? t.combGoals(goals || 0) : ""].filter(Boolean);
     const meta = parts.length ? `${parts.join(" · ")} <span class="comb">(${t.comb(!!apps)})</span>` : "";
     li.innerHTML = `${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${DB.names[pid]}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span>
       <span class="pmeta">${meta}</span></div><span class="expand">▸</span>`;
@@ -314,7 +327,8 @@ async function toggleCareer(li, pid) {
        <span class="cyears">${s || "?"}–${e || (s ? "" : "?")}</span><span class="cteam">${team}</span>
        <span class="cstats">${apps != null ? apps + " " + t.apps : ""}${goals != null ? " · " + goals + " " + t.goals : ""}</span>
      </div>`).join("") || `<div class='crow'>${t.noData}</div>`)
-    + (qid ? `<a class="wiki" href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${lang}wiki/Q${qid}" target="_blank" rel="noopener">Wikipedia ↗</a>` : "");
+    + (qid ? `<a class="wiki" href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${lang}wiki/Q${qid}" target="_blank" rel="noopener">Wikipedia ↗</a>
+              <a class="wiki" href="https://www.wikidata.org/wiki/Q${qid}" target="_blank" rel="noopener">Wikidata ↗</a>` : "");
   div.onclick = (e) => e.stopPropagation();
   li.appendChild(div);
 }

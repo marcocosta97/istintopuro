@@ -17,10 +17,24 @@ body {
 header { margin-bottom: 1.5rem; position: relative; }
 h1 { font-size: 1.6rem; letter-spacing: -.02em; }
 .sub { color: var(--muted); }
-#langsel {
+#langsel, #aboutbtn {
   position: absolute; top: .25rem; right: 0; cursor: pointer;
   background: transparent; color: var(--muted); border: 1px solid var(--line);
   border-radius: 7px; font: inherit; font-size: .8rem; padding: .1rem .15rem;
+}
+#aboutbtn { right: 3.4rem; width: 1.5rem; }
+
+#about {
+  margin: auto;  /* the global reset kills the UA rule that centers <dialog> */
+  background: var(--card); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 1.2rem 1.4rem; max-width: 26rem; font-size: .92rem;
+}
+#about::backdrop { background: rgba(0, 0, 0, .45); }
+#about h2 { font-size: 1.05rem; margin-bottom: .6rem; }
+#aboutleagues { color: var(--muted); margin-top: .6rem; }
+#about form button {
+  margin-top: .9rem; cursor: pointer; background: transparent; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: .85rem; padding: .15rem .8rem;
 }
 
 #picker {
@@ -99,7 +113,7 @@ h1 { font-size: 1.6rem; letter-spacing: -.02em; }
 .cyears { color: var(--muted); min-width: 6.2ch; text-align: right; font-variant-numeric: tabular-nums; }
 .cteam { flex: 1; }
 .cstats { color: var(--muted); white-space: nowrap; }
-.career .wiki { display: inline-block; margin-top: .35rem; font-size: .8rem; color: var(--accent); text-decoration: none; }
+.career .wiki { display: inline-block; margin: .35rem .8rem 0 0; font-size: .8rem; color: var(--accent); text-decoration: none; }
 
 footer { margin-top: 3rem; color: var(--muted); font-size: .8rem; text-align: center; }
 footer a { color: inherit; }
