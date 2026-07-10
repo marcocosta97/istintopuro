@@ -6,7 +6,7 @@ get every player who wore all of those shirts.
 ## How it works
 
 - **No backend.** The whole dataset (~62k players, ~172k player–club pairs,
-  480 clubs from the top-5 leagues + their second divisions, all-time) is
+  477 clubs from the top-5 leagues + their second divisions, all-time) is
   precomputed into `site/data/index.json` as an inverted index
   (club → delta-encoded sorted player IDs, plus per-pair appearances and
   goals, `-1` = unknown). Each club record is `[name, country, leagueMask,

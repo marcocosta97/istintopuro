@@ -163,10 +163,10 @@ function matches(q) {
     else if (DB.searchNames[i].includes(nq)) rank = 1;
     else if (DB.searchInitials[i] === nq.replace(/ /g, "")) rank = 0;
     else if (DB.aliasNorm[i].some(a => a.startsWith(nq))) rank = 0;
-    if (rank >= 0) out.push([rank, DB.postings[i].length, i]);
+    if (rank >= 0) out.push([rank, DB.postings[i].length, i, DB.clubs[i][4] ? 1 : 0]);
   }
-  // best rank first, bigger clubs first
-  return out.sort((a, b) => a[0] - b[0] || b[1] - a[1]).slice(0, 8).map(x => x[2]);
+  // best rank first, then active before dissolved, then bigger clubs first
+  return out.sort((a, b) => a[0] - b[0] || a[3] - b[3] || b[1] - a[1]).slice(0, 8).map(x => x[2]);
 }
 
 let cursor = -1;
