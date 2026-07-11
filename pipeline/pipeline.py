@@ -73,8 +73,9 @@ def num(row, key):
     except (TypeError, ValueError): return None  # 'unknown value' comes back as a genid URI
 
 def year(iso):
+    if not iso: return None
     try: return int(iso[:5].rstrip("-")) if iso[0] != "-" else None
-    except (ValueError, IndexError): return None
+    except (ValueError, IndexError, TypeError): return None
 
 def load(name):
     p = DATA / f"{name}.json"
