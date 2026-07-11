@@ -45,7 +45,12 @@ h1 .accent { color: var(--accent); }
 #aboutleagues .lg { white-space: nowrap; }
 #about::backdrop { background: rgba(0, 0, 0, .45); }
 #about h2 { font-size: 1.05rem; margin-bottom: .6rem; }
-#aboutleagues { color: var(--muted); margin-top: .6rem; }
+#aboutleagues { color: var(--muted); margin-top: .6rem; line-height: 1.7; }
+.disclaimer {
+  margin-top: .8rem; padding-top: .7rem; border-top: 1px solid var(--line);
+  color: var(--muted); font-size: .8rem;
+}
+.disclaimer a { color: var(--accent); }
 #about form button {
   margin-top: .9rem; cursor: pointer; background: transparent; color: var(--muted);
   border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: .85rem; padding: .15rem .8rem;

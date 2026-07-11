@@ -25,6 +25,7 @@ const STR = {
     built: (d) => `aggiornato al ${d}`,
     about: "Solver per il gioco «Istinto Puro»: scegli due o più squadre e scopri all'istante tutti i giocatori che hanno giocato in tutte, ordinati per presenze combinate. Dati estratti da Wikidata.",
     aboutLeagues: "Campionati coperti (tutte le stagioni):",
+    disclaimer: `Nessun dato viene raccolto: tutto avviene nel tuo browser, senza server né tracciamento. Codice open source (<a href="${REPO}">MIT su GitHub</a>).`,
     remove: "rimuovi",
     sort: "Ordina per", sortApps: "presenze", sortGoals: "gol", sortBirth: "nascita",
     asc: "crescente", desc: "decrescente",
@@ -51,6 +52,7 @@ const STR = {
     built: (d) => `updated ${d}`,
     about: "Solver for the game “Istinto Puro”: pick two or more clubs and instantly see every player who played for them all, ranked by combined appearances. Data extracted from Wikidata.",
     aboutLeagues: "Leagues covered (all seasons):",
+    disclaimer: `No data is collected: everything happens in your browser, with no server or tracking. Open source (<a href="${REPO}">MIT on GitHub</a>).`,
     remove: "remove",
     sort: "Sort by", sortApps: "apps", sortGoals: "goals", sortBirth: "birth",
     asc: "ascending", desc: "descending",
@@ -91,8 +93,17 @@ function applyLang() {
   $("tip-nozero").textContent = t.noZeroHint;
   $("hint-nozero").setAttribute("aria-label", t.noZeroHint);
   $("abouttext").textContent = t.about;
-  $("aboutleagues").innerHTML = t.aboutLeagues
-    + (DB ? "<br>" + DB.leagues.map(l => `<span class="lg">${flag(l[2])} ${l[0]}</span>`).join(" · ") : "");
+  $("aboutdisclaimer").innerHTML = t.disclaimer;
+  if (DB) {  // group leagues by country: one flag + its divisions per line
+    const rows = [];
+    for (const l of DB.leagues) {
+      const last = rows[rows.length - 1];
+      if (last && last.cc === l[2]) last.names.push(l[0]);
+      else rows.push({ cc: l[2], names: [l[0]] });
+    }
+    $("aboutleagues").innerHTML = t.aboutLeagues + "<br>" + rows.map(g =>
+      `${flag(g.cc)} ` + g.names.map(n => `<span class="lg">${n}</span>`).join(" · ")).join("<br>");
+  } else $("aboutleagues").textContent = t.aboutLeagues;
   if (DB) { renderChips(); clubIds.length ? solve() : status.textContent = t.stats(DB.names.length, DB.clubs.length); }
   else status.textContent = t.loading;
 }
