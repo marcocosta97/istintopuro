@@ -18,12 +18,12 @@ const PAGE = 50;             // result rows rendered per batch; "show more" appe
 const REPO = "https://github.com/marcocosta97/istintopuro";
 const STR = {
   it: {
-    tagline: "Scegli due o più squadre — chi ha giocato in tutte?",
+    tagline: "Scegli una o più squadre — chi ha giocato per tutte?",
     placeholder: "Aggiungi una squadra…",
     loading: "Caricamento dati…",
     footer: `dati: <a href="https://www.wikidata.org">Wikidata</a> · foto: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
     built: (d) => `aggiornato al ${d}`,
-    about: "Solver per il gioco «Istinto Puro»: scegli due o più squadre e scopri all'istante tutti i giocatori che hanno giocato in tutte, ordinati per presenze combinate. Dati estratti da Wikidata.",
+    about: "Solver per il gioco «Istinto Puro»: scegli una o più squadre e scopri all'istante tutti i giocatori che hanno giocato per tutte, ordinati per presenze combinate. Dati estratti da Wikidata.",
     aboutLeagues: "Campionati coperti (tutte le stagioni):",
     disclaimer: `Nessun dato viene raccolto: tutto avviene nel tuo browser, senza server né tracciamento. Codice open source (<a href="${REPO}">MIT su GitHub</a>).`,
     remove: "rimuovi",
@@ -35,8 +35,7 @@ const STR = {
     noZeroHint: "Nasconde chi ha 0 presenze registrate in una delle squadre scelte. Chi ha giocato più volte nella stessa squadra e ha totalizzato almeno una presenza resta incluso.",
     stats: (p, c) => `${p.toLocaleString("it")} giocatori · ${c} squadre`,
     loadFail: "Errore nel caricamento dei dati.", retry: "riprova",
-    needTwo: "Aggiungi almeno due squadre.",
-    oneClub: (n) => `${n.toLocaleString("it")} giocatori in rosa storica — aggiungi un'altra squadra.`,
+    needTwo: "Aggiungi almeno una squadra.",
     found: (n, ms) => `${n} giocator${n === 1 ? "e" : "i"} · ${ms} ms`,
     combApps: (n) => `${n.toLocaleString("it")} presenze`,
     combGoals: (n) => `${n.toLocaleString("it")} gol`,
@@ -49,12 +48,12 @@ const STR = {
     back: "indietro",
   },
   en: {
-    tagline: "Pick two or more clubs — who played for them all?",
+    tagline: "Pick one or more clubs — who played for them all?",
     placeholder: "Add a club…",
     loading: "Loading data…",
     footer: `data: <a href="https://www.wikidata.org">Wikidata</a> · photos: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
     built: (d) => `updated ${d}`,
-    about: "Solver for the game “Istinto Puro”: pick two or more clubs and instantly see every player who played for them all, ranked by combined appearances. Data extracted from Wikidata.",
+    about: "Solver for the game “Istinto Puro”: pick one or more clubs and instantly see every player who played for them all, ranked by combined appearances. Data extracted from Wikidata.",
     aboutLeagues: "Leagues covered (all seasons):",
     disclaimer: `No data is collected: everything happens in your browser, with no server or tracking. Open source (<a href="${REPO}">MIT on GitHub</a>).`,
     remove: "remove",
@@ -66,8 +65,7 @@ const STR = {
     noZeroHint: "Hides players with 0 recorded appearances at one of the selected clubs. Players with multiple stints at the same club who made at least one appearance are kept.",
     stats: (p, c) => `${p.toLocaleString("en")} players · ${c} clubs`,
     loadFail: "Failed to load data.", retry: "retry",
-    needTwo: "Add at least two clubs.",
-    oneClub: (n) => `${n.toLocaleString("en")} players in the all-time squad — add another club.`,
+    needTwo: "Add at least one club.",
     found: (n, ms) => `${n} player${n === 1 ? "" : "s"} · ${ms} ms`,
     combApps: (n) => `${n.toLocaleString("en")} apps`,
     combGoals: (n) => `${n.toLocaleString("en")} goals`,
@@ -417,10 +415,6 @@ function intersect(lists) {
 function solve() {
   results.innerHTML = "";
   if (clubIds.length === 0) { status.textContent = t.needTwo; return; }
-  if (clubIds.length === 1) {
-    status.textContent = t.oneClub(postings(clubIds[0]).length);
-    return;
-  }
   const t0 = performance.now();
   const common = intersect(clubIds.map(postings));
   const commonSet = new Set(common);
