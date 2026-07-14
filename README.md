@@ -10,9 +10,12 @@ get every player who wore all of those shirts.
   precomputed into `site/data/index.json` as an inverted index
   (club → delta-encoded sorted player IDs, plus per-pair appearances and
   goals, `-1` = unknown). Each club record is `[name, country, leagueMask,
-  QID, dissolvedYear]` — `dissolvedYear` (Wikidata P576, `0` if active)
-  drives the `†year` marker on defunct clubs. The browser intersects posting
-  lists client-side in well under a millisecond.
+  QID, dissolvedYear, currentLeague]` — `dissolvedYear` (Wikidata P576, `0`
+  if active) drives the `†year` marker on defunct clubs; `currentLeague`
+  (league index, `-1` if outside the covered leagues) drives the FM-style
+  browse panel (country › league › current clubs, everything else under
+  "Others"). The browser intersects posting lists client-side in well under
+  a millisecond.
 - **Careers** are sharded into `site/data/career/*.json` (128 files; the
   count is stamped into the index as `nshards`) and lazy-loaded when a
   player row is expanded. Each entry is
@@ -45,6 +48,12 @@ Quality passes in `build`: P54 statements with no qualifiers at all
 clubs are merged into one entry, and national sides are filtered out of
 career panels. The index is stamped with the extraction date (newest
 checkpoint), shown in the site footer.
+
+Current league membership (`CURRENT` in `pipeline.py`) is a curated list
+of club QIDs per league — Wikidata's P118 lags promotions/relegations by
+months, so it can't be derived reliably. Refresh it each August once the
+new season's lineups are settled (reserve teams stay out; `validate`
+fails if any league's current lineup drifts outside 17–24 clubs).
 
 ## Serve
 
