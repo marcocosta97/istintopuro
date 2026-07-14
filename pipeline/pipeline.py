@@ -363,6 +363,11 @@ def stage_build():
           f"apps-per-posting {with_apps/max(n_post,1):.0%}, "
           f"goals-per-posting {with_goals/max(n_post,1):.0%}")
     print(f"  longest posting list: {max(map(len, postings))}")
+    cov = sorted((sum(1 for a in col if a >= 0) / len(col), len(col), out_clubs[i][0])
+                 for i, col in enumerate(apps_col) if len(col) >= 30)
+    print("  thinnest apps coverage (roster >= 30):")
+    for c, n, name in cov[:12]:
+        print(f"    {c:4.0%} of {n:4d}  {name}")
 
 # -------------------------------------------------------------- stage: validate
 def stage_validate():
