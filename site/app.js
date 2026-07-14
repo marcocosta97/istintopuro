@@ -113,7 +113,7 @@ function applyLang() {
       else rows.push({ cc: l[2], names: [l[0]] });
     }
     $("aboutleagues").innerHTML = t.aboutLeagues + "<br>" + rows.map(g =>
-      `${flag(g.cc)} ` + g.names.map(n => `<span class="lg">${n}</span>`).join(" · ")).join("<br>");
+      `${countryFlag(g.cc)} ` + g.names.map(n => `<span class="lg">${n}</span>`).join(" · ")).join("<br>");
   } else $("aboutleagues").textContent = t.aboutLeagues;
   if (DB) { renderChips(); clubIds.length ? solve() : status.textContent = t.stats(DB.names.length, DB.clubs.length); }
   else status.textContent = t.loading;
@@ -244,7 +244,7 @@ function renderSuggestions(ids) {
   ids.forEach((ci, i) => {
     const c = DB.clubs[ci];
     const li = document.createElement("li");
-    li.innerHTML = `<span>${flag(c[1])} ${esc(c[0])}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
+    li.innerHTML = `<span>${countryFlag(c[1])} ${esc(c[0])}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
     li.className = i === cursor ? "active" : "";
     li.onmousedown = (e) => { e.preventDefault(); addClub(ci); };
     sugg.appendChild(li);
@@ -278,8 +278,8 @@ const browse = $("browse"), browseBtn = $("browsebtn"), brBack = $("br-back");
 let brCC = null, brLG = null;  // drill-down state: country code, league index | "x" (Others)
 const canHover = matchMedia("(hover: hover)").matches;
 
-// the GB leagues are English: show England, not the UK (club flags stay GB —
-// Cardiff, Swansea, Wrexham are Welsh)
+// GB renders as England wherever clubs or leagues appear — the covered pyramid is
+// English, even for its Welsh clubs. Player nationality flags keep flag() (real GB).
 const ENG = { flag: "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}",
               it: "Inghilterra", en: "England" };
 const countryFlag = (cc) => cc === "GB" ? ENG.flag : flag(cc);
@@ -387,7 +387,7 @@ function renderChips() {
     const c = DB.clubs[ci];
     const el = document.createElement("span");
     el.className = "chip";
-    el.innerHTML = `${flag(c[1])} ${esc(c[0])}${defunct(c)} <button aria-label="${t.remove}">×</button>`;
+    el.innerHTML = `${countryFlag(c[1])} ${esc(c[0])}${defunct(c)} <button aria-label="${t.remove}">×</button>`;
     el.querySelector("button").onclick = () => removeClub(ci);
     chips.appendChild(el);
   });
