@@ -25,8 +25,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - run: pip install requests
+          python-version: "3.13"
+      - run: pip install requests==2.32.3
+
+      # re-runs of a failed job resume its checkpoints; keys are scoped to the
+      # run id, so a new weekly run always starts from a clean fetch
+      - uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: checkpoints-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: checkpoints-${{ github.run_id }}-
 
       # the validate stage aborts the job (no commit, no deploy) if the new
       # index is malformed or shrank >3% vs the currently deployed one
@@ -34,6 +42,12 @@ jobs:
         run: |
           git show HEAD:site/data/index.json > /tmp/index-baseline.json
           VALIDATE_BASELINE=/tmp/index-baseline.json python3 pipeline/pipeline.py
+
+      - uses: actions/cache/save@v4
+        if: always()   # keep partial checkpoints even when a stage failed
+        with:
+          path: data
+          key: checkpoints-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Commit refreshed dataset if it changed
         run: |
