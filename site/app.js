@@ -128,9 +128,13 @@ document.addEventListener("click", () => $("hint-nozero").classList.remove("show
 // small alias map for names people actually type (keyed by club QID)
 const ALIASES = {
   Q483020: ["psg"], Q8682: ["real madrid"], Q8701: ["atletico madrid"],
-  Q631: ["inter"], Q1543: ["milan"], Q10329: ["siviglia"], Q8687: ["betis"],
+  Q631: ["inter"], Q1543: ["milan"], Q10329: ["siviglia"], Q8723: ["betis"],
   Q18656: ["man united", "manchester united"], Q50602: ["man city", "manchester city"],
   Q15789: ["bayern", "bayern monaco"], Q41420: ["borussia dortmund", "bvb"],
+  Q7156: ["barca", "barcellona"], Q8687: ["athletic bilbao", "bilbao"],
+  Q18741: ["spurs"], Q19500: ["wolves"], Q101959: ["gladbach"], Q51974: ["hsv"],
+  Q104770: ["cologne", "colonia"], Q185163: ["nizza"], Q19521: ["st etienne"],
+  Q8760: ["la coruna", "deportivo la coruna"], Q12278: ["sporting gijon"],
 };
 
 // Wikidata labels (club/player/team names) are publicly editable — never trust them in innerHTML
