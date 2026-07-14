@@ -177,7 +177,8 @@ h1 .accent { color: var(--accent); }
 .pmeta { color: var(--muted); font-size: .82rem; }
 .pmeta .comb { opacity: .55; }
 .expand { color: var(--muted); }
-.more { color: var(--muted); padding: .5rem .8rem; }
+.more { color: var(--accent); padding: .5rem .8rem; cursor: pointer; }
+.more:hover { text-decoration: underline; }
 
 .career { flex-basis: 100%; border-top: 1px solid var(--line); margin-top: .4rem; padding-top: .4rem; cursor: default; }
 .crow { display: flex; gap: .8rem; font-size: .88rem; padding: .12rem 0; }

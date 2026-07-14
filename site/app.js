@@ -12,6 +12,7 @@ let clubIds = [];            // selected club indices
 let sortBy = "apps", sortDir = -1;
 const decoded = new Map();   // club index -> Int32Array of player ids
 const careerCache = new Map();
+const PAGE = 50;             // result rows rendered per batch; "show more" appends the next one
 
 // ---------------------------------------------------------------- i18n
 const REPO = "https://github.com/marcocosta97/istintopuro";
@@ -42,7 +43,7 @@ const STR = {
     comb: (apps) => apps ? "combinate" : "combinati",
     apps: "pres", goals: "gol", noData: "nessun dato",
     dissolved: (y) => `squadra sciolta nel ${y}`,
-    more: (n) => `… e altri ${n}`,
+    more: (n) => `… mostra altri ${n}`,
   },
   en: {
     tagline: "Pick two or more clubs — who played for them all?",
@@ -70,7 +71,7 @@ const STR = {
     comb: () => "combined",
     apps: "apps", goals: "goals", noData: "no data",
     dissolved: (y) => `club dissolved in ${y}`,
-    more: (n) => `… and ${n} more`,
+    more: (n) => `… show ${n} more`,
   },
 };
 let lang = STR[localStorage.lang] ? localStorage.lang
@@ -333,9 +334,9 @@ dirBtn.onclick = () => {
 byFrom.oninput = byTo.oninput = solve;
 noZero.onchange = solve;
 
-function renderResults(ids, appsOf, goalsOf, zeroGoals) {
+function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
   const frag = document.createDocumentFragment();
-  for (const pid of ids.slice(0, 200)) {
+  for (const pid of ids.slice(from, from + PAGE)) {
     const li = document.createElement("li");
     li.className = "player";
     const img = DB.imgs[pid]
@@ -352,10 +353,12 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals) {
     frag.appendChild(li);
   }
   results.appendChild(frag);
-  if (ids.length > 200) {
+  const shown = Math.min(from + PAGE, ids.length);
+  if (ids.length > shown) {
     const li = document.createElement("li");
     li.className = "more";
-    li.textContent = t.more(ids.length - 200);
+    li.textContent = t.more(ids.length - shown);
+    li.onclick = () => { li.remove(); renderResults(ids, appsOf, goalsOf, zeroGoals, shown); };
     results.appendChild(li);
   }
 }
