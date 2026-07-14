@@ -133,6 +133,8 @@ const ALIASES = {
   Q15789: ["bayern", "bayern monaco"], Q41420: ["borussia dortmund", "bvb"],
 };
 
+// Wikidata labels (club/player/team names) are publicly editable — never trust them in innerHTML
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "")
                      .toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 const initialsOf = (s) => norm(s).split(" ").filter(w => w.length > 2).map(w => w[0]).join("");
@@ -201,7 +203,7 @@ function renderSuggestions(ids) {
   ids.forEach((ci, i) => {
     const c = DB.clubs[ci];
     const li = document.createElement("li");
-    li.innerHTML = `<span>${flag(c[1])} ${c[0]}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
+    li.innerHTML = `<span>${flag(c[1])} ${esc(c[0])}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
     li.className = i === cursor ? "active" : "";
     li.onmousedown = (e) => { e.preventDefault(); addClub(ci); };
     sugg.appendChild(li);
@@ -248,7 +250,7 @@ function renderChips() {
     const c = DB.clubs[ci];
     const el = document.createElement("span");
     el.className = "chip";
-    el.innerHTML = `${flag(c[1])} ${c[0]}${defunct(c)} <button aria-label="${t.remove}">×</button>`;
+    el.innerHTML = `${flag(c[1])} ${esc(c[0])}${defunct(c)} <button aria-label="${t.remove}">×</button>`;
     el.querySelector("button").onclick = () => removeClub(ci);
     chips.appendChild(el);
   });
@@ -332,7 +334,7 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals) {
     const apps = appsOf.get(pid), goals = goalsOf.get(pid);
     const parts = [apps ? t.combApps(apps) : "", goals || zeroGoals.has(pid) ? t.combGoals(goals || 0) : ""].filter(Boolean);
     const meta = parts.length ? `${parts.join(" · ")} <span class="comb">(${t.comb(!!apps)})</span>` : "";
-    li.innerHTML = `${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${DB.names[pid]}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span>
+    li.innerHTML = `${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span>
       <span class="pmeta">${meta}</span></div><span class="expand">▸</span>`;
     const im = li.querySelector("img");
     if (im) im.onerror = () => im.replaceWith(avatar(initials(pid)));
@@ -374,7 +376,7 @@ async function toggleCareer(li, pid) {
   div.className = "career";
   div.innerHTML = (career.filter(e => e[0]).map(([team, s, e, apps, goals]) =>
     `<div class="crow${selNames.has(team) ? " hit" : ""}">
-       <span class="cyears">${s || "?"}–${e || (s ? "" : "?")}</span><span class="cteam">${team}</span>
+       <span class="cyears">${s || "?"}–${e || (s ? "" : "?")}</span><span class="cteam">${esc(team)}</span>
        <span class="cstats">${apps != null ? apps + " " + t.apps : ""}${goals != null ? " · " + goals + " " + t.goals : ""}</span>
      </div>`).join("") || `<div class='crow'>${t.noData}</div>`)
     + (qid ? `<a class="wiki" href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${lang}wiki/Q${qid}" target="_blank" rel="noopener">Wikipedia ↗</a>
