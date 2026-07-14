@@ -151,6 +151,11 @@ h1 .accent { color: var(--accent); }
 @media (hover: hover) { .hint:hover .tip { display: block; } }  /* hover only on real pointers; touch uses .show toggle */
 
 #status { color: var(--muted); font-size: .9rem; margin: 1rem 0 .5rem; min-height: 1.4em; }
+#status button {
+  cursor: pointer; font: inherit; font-size: .85rem; color: var(--fg); background: var(--card);
+  border: 1px solid var(--line); border-radius: 7px; padding: .12rem .5rem;
+}
+#status button:hover { border-color: var(--accent); }
 
 #results { list-style: none; padding: 0; }
 .player {

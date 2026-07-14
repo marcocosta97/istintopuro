@@ -34,6 +34,7 @@ const STR = {
     noZero: "nascondi 0 presenze",
     noZeroHint: "Nasconde chi ha 0 presenze registrate in una delle squadre scelte. Chi ha giocato più volte nella stessa squadra e ha totalizzato almeno una presenza resta incluso.",
     stats: (p, c) => `${p.toLocaleString("it")} giocatori · ${c} squadre`,
+    loadFail: "Errore nel caricamento dei dati.", retry: "riprova",
     needTwo: "Aggiungi almeno due squadre.",
     oneClub: (n) => `${n.toLocaleString("it")} giocatori in rosa storica — aggiungi un'altra squadra.`,
     found: (n, ms) => `${n} giocator${n === 1 ? "e" : "i"} · ${ms} ms`,
@@ -61,6 +62,7 @@ const STR = {
     noZero: "hide 0 apps",
     noZeroHint: "Hides players with 0 recorded appearances at one of the selected clubs. Players with multiple stints at the same club who made at least one appearance are kept.",
     stats: (p, c) => `${p.toLocaleString("en")} players · ${c} clubs`,
+    loadFail: "Failed to load data.", retry: "retry",
     needTwo: "Add at least two clubs.",
     oneClub: (n) => `${n.toLocaleString("en")} players in the all-time squad — add another club.`,
     found: (n, ms) => `${n} player${n === 1 ? "" : "s"} · ${ms} ms`,
@@ -140,8 +142,19 @@ const defunct = (c) => c[4] ? ` <span class="defunct" title="${t.dissolved(c[4])
 
 // ---------------------------------------------------------------- data loading
 async function boot() {
-  const res = await fetch("data/index.json", { cache: "no-cache" });  // revalidate: stale index + fresh app.js hides fields
-  DB = await res.json();
+  status.textContent = t.loading;
+  try {
+    const res = await fetch("data/index.json", { cache: "no-cache" });  // revalidate: stale index + fresh app.js hides fields
+    if (!res.ok) throw new Error(res.status);
+    DB = await res.json();
+  } catch {
+    status.textContent = t.loadFail + " ";
+    const b = document.createElement("button");
+    b.textContent = t.retry;
+    b.onclick = boot;
+    status.appendChild(b);
+    return;
+  }
   DB.searchNames = DB.clubs.map(c => norm(c[0]));
   DB.searchInitials = DB.clubs.map(c => initialsOf(c[0]));
   DB.aliasNorm = DB.clubs.map(c => (ALIASES[c[3]] || []).map(norm));
@@ -348,11 +361,13 @@ async function toggleCareer(li, pid) {
   if (open) { open.remove(); li.querySelector(".expand").textContent = "▸"; return; }
   li.querySelector(".expand").textContent = "▾";
   const shard = pid % NSHARDS;
-  if (!careerCache.has(shard))
-    careerCache.set(shard, fetch(`data/career/${shard}.json`).then(r => r.json()));
-  const entry = (await careerCache.get(shard))[pid] || [];
-  // new shard format [qid, spells]; tolerate a cached pre-qid shard (plain spell list)
-  const [qid, career] = typeof entry[0] === "number" ? entry : [0, entry];
+  if (!careerCache.has(shard))  // versioned by dataset stamp: a stale cached shard would pair wrong careers with a fresh index
+    careerCache.set(shard, fetch(`data/career/${shard}.json?v=${DB.built || 0}`)
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }));
+  let table;
+  try { table = await careerCache.get(shard); }
+  catch { careerCache.delete(shard); li.querySelector(".expand").textContent = "▸"; return; }
+  const [qid = 0, career = []] = table[pid] || [];
   if (li.querySelector(".career")) return;
   const selNames = new Set(clubIds.map(ci => DB.clubs[ci][0]));
   const div = document.createElement("div");
