@@ -44,6 +44,9 @@ const STR = {
     apps: "pres", goals: "gol", noData: "nessun dato",
     dissolved: (y) => `squadra sciolta nel ${y}`,
     more: (n) => `… mostra altri ${n}`,
+    browse: "Sfoglia per campionato",
+    others: "Altre",
+    back: "indietro",
   },
   en: {
     tagline: "Pick two or more clubs — who played for them all?",
@@ -72,6 +75,9 @@ const STR = {
     apps: "apps", goals: "goals", noData: "no data",
     dissolved: (y) => `club dissolved in ${y}`,
     more: (n) => `… show ${n} more`,
+    browse: "Browse by league",
+    others: "Others",
+    back: "back",
   },
 };
 let lang = STR[localStorage.lang] ? localStorage.lang
@@ -85,6 +91,9 @@ function applyLang() {
   $("tagline").textContent = t.tagline;
   $("foot").innerHTML = t.footer + (DB && DB.built ? `<div id="built">${t.built(DB.built)}</div>` : "");
   search.placeholder = t.placeholder;
+  browseBtn.title = t.browse;
+  browseBtn.setAttribute("aria-label", t.browse);
+  if (DB && !browse.hidden) renderBrowse();
   $("l-sort").textContent = t.sort;
   [t.sortApps, t.sortGoals, t.sortBirth].forEach((s, i) => sortSel.options[i].text = s);
   dirBtn.title = sortDir < 0 ? t.desc : t.asc;
@@ -167,6 +176,7 @@ async function boot() {
   const byQid = new Map(DB.clubs.map((c, i) => [c[3], i]));  // restore a shared selection from the hash
   clubIds = location.hash.slice(1).split(",").map(q => byQid.get(q)).filter(i => i !== undefined);
   search.disabled = false;
+  browseBtn.disabled = false;
   search.focus();
   applyLang();  // refresh status + footer now that DB (and its built date) exist
 }
@@ -220,7 +230,7 @@ function leagueNames(mask) {
   return DB.leagues.filter((_, i) => mask & (1 << i)).map(l => l[0]).join(" · ");
 }
 
-search.addEventListener("input", () => renderSuggestions(matches(search.value)));
+search.addEventListener("input", () => { browseOpen(false); renderSuggestions(matches(search.value)); });
 search.addEventListener("keydown", (e) => {
   const items = [...sugg.children];
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -237,6 +247,87 @@ search.addEventListener("keydown", (e) => {
 search.addEventListener("blur", () => setTimeout(() => {
   if (document.activeElement !== search) sugg.hidden = true;
 }, 100));
+
+// ------------------------------------------------------- FM-style team browser
+const browse = $("browse"), browseBtn = $("browsebtn"), brBack = $("br-back");
+let brCC = null, brLG = null;  // drill-down state: country code, league index | "x" (Others)
+const canHover = matchMedia("(hover: hover)").matches;
+
+const countryName = (cc) => {
+  try { return new Intl.DisplayNames([lang], { type: "region" }).of(cc) || cc; }
+  catch { return cc; }
+};
+
+function browseOpen(open) {
+  if (browse.hidden === !open) return;
+  browse.hidden = !open;
+  browseBtn.setAttribute("aria-expanded", open);
+  if (open) {
+    sugg.hidden = true;
+    // desktop opens with all three columns populated; mobile starts at the country list
+    if (brCC === null && matchMedia("(min-width: 561px)").matches) { brCC = DB.leagues[0][2]; brLG = 0; }
+    renderBrowse();
+  }
+}
+browseBtn.onclick = (e) => { e.stopPropagation(); browseOpen(browse.hidden); };
+document.addEventListener("click", (e) => {
+  if (!browse.hidden && !browse.contains(e.target)) browseOpen(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !browse.hidden) { browseOpen(false); search.focus(); }
+});
+brBack.onclick = () => {
+  if (brLG !== null) brLG = null; else brCC = null;
+  renderBrowse();
+};
+
+function brItem(ul, html, cls, pick, hoverToo) {
+  const el = document.createElement("li");
+  el.innerHTML = html;
+  if (cls) el.className = cls;
+  if (pick) {
+    el.tabIndex = 0;
+    el.onclick = (e) => { e.stopPropagation(); pick(); };
+    el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } };
+    if (hoverToo && canHover) el.onmouseenter = pick;
+  }
+  ul.appendChild(el);
+}
+
+function renderBrowse() {
+  const [ulC, ulL, ulT] = browse.querySelectorAll("ul");
+  ulC.innerHTML = ulL.innerHTML = ulT.innerHTML = "";
+  const ccs = [...new Set(DB.leagues.map(l => l[2]))];
+  for (const cc of ccs)
+    brItem(ulC, `<span>${flag(cc)} ${esc(countryName(cc))}</span><span class="arr">›</span>`,
+           cc === brCC ? "active" : "",
+           () => { if (brCC !== cc) { brCC = cc; brLG = null; renderBrowse(); } }, true);
+  if (brCC !== null) {
+    DB.leagues.forEach((l, i) => {
+      if (l[2] !== brCC) return;
+      brItem(ulL, `<span>${esc(l[0])}</span><span class="arr">›</span>`,
+             i === brLG ? "active" : "",
+             () => { if (brLG !== i) { brLG = i; renderBrowse(); } }, true);
+    });
+    brItem(ulL, `<span>${t.others}</span><span class="arr">›</span>`,
+           brLG === "x" ? "active" : "",
+           () => { if (brLG !== "x") { brLG = "x"; renderBrowse(); } }, true);
+  }
+  if (brCC !== null && brLG !== null) {
+    const ccMask = DB.leagues.reduce((m, l, i) => l[2] === brCC ? m | (1 << i) : m, 0);
+    DB.clubs.forEach((c, ci) => {  // club list is already alphabetical
+      const cur = c[5] ?? -1;
+      if (brLG === "x" ? cur >= 0 || !(c[2] & ccMask) : cur !== brLG) return;
+      const sel = clubIds.includes(ci);
+      brItem(ulT, `<span>${esc(c[0])}${defunct(c)}</span>${sel ? "<span class=\"arr\">✓</span>" : ""}`,
+             sel ? "sel" : "", sel ? null : () => { addClub(ci); browseOpen(false); });
+    });
+  }
+  const level = brCC === null ? 0 : brLG === null ? 1 : 2;
+  browse.dataset.level = level;
+  brBack.hidden = level === 0;
+  brBack.textContent = `‹ ${level === 2 ? `${flag(brCC)} ${countryName(brCC)}` : t.back}`;
+}
 
 // ---------------------------------------------------------------- selection
 // the selection is shareable: club QIDs in the URL hash (stable across dataset rebuilds)

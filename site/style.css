@@ -57,6 +57,7 @@ h1 .accent { color: var(--accent); }
 }
 
 #picker {
+  position: relative;  /* anchors the #browse panel to the full picker width */
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: .5rem; display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
 }
@@ -70,11 +71,18 @@ h1 .accent { color: var(--accent); }
 }
 .chip button:hover { color: var(--fg); }
 #chips { display: contents; }
-#searchwrap { position: relative; flex: 1; min-width: 12rem; }
+#searchwrap { position: relative; flex: 1; min-width: 12rem; display: flex; align-items: center; }
 #search {
-  width: 100%; border: none; outline: none; background: transparent;
+  flex: 1; min-width: 0; border: none; outline: none; background: transparent;
   color: var(--fg); font: inherit; padding: .3rem;
 }
+#browsebtn {
+  cursor: pointer; flex-shrink: 0; background: transparent; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: .8rem;
+  padding: .1rem .45rem;
+}
+#browsebtn:hover, #browsebtn[aria-expanded="true"] { border-color: var(--accent); color: var(--fg); }
+#browsebtn:disabled { opacity: .4; cursor: default; }
 #suggestions {
   position: absolute; z-index: 10; left: 0; right: 0; top: calc(100% + .5rem);
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
@@ -88,6 +96,44 @@ h1 .accent { color: var(--accent); }
 #suggestions li small { color: var(--muted); text-align: right; }
 .defunct { color: var(--muted); font-size: .82em; white-space: nowrap; }
 #suggestions li.active, #suggestions li:hover { background: var(--hit); }
+
+/* FM-style team browser: country › league › current clubs (Others = out of league) */
+#browse {
+  position: absolute; z-index: 10; left: 0; right: 0; top: calc(100% + .5rem);
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: .25rem;
+  display: grid; grid-template-columns: 1fr 1.1fr 1.5fr;
+}
+#browse[hidden] { display: none; }
+#browse ul {
+  list-style: none; padding: .1rem; margin: 0;
+  max-height: 16rem; overflow-y: auto; font-size: .9rem;
+}
+#browse ul + ul { border-left: 1px solid var(--line); }
+#browse li {
+  padding: .35rem .55rem; border-radius: 7px; cursor: pointer;
+  display: flex; justify-content: space-between; gap: .5rem; align-items: baseline;
+}
+#browse li > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#browse li .arr { color: var(--muted); flex-shrink: 0; }
+#browse li:hover { background: var(--hit); }
+#browse li.active { background: var(--hit); color: var(--accent); }
+#browse li.sel { color: var(--muted); cursor: default; }
+#browse li.sel:hover { background: transparent; }
+#br-back {
+  display: none; cursor: pointer; width: 100%; text-align: left;
+  background: transparent; border: none; border-bottom: 1px solid var(--line);
+  color: var(--accent); font: inherit; font-size: .9rem; padding: .4rem .55rem;
+}
+@media (max-width: 560px) {  /* phones: one level at a time, back row on top */
+  #browse { display: block; }
+  #browse ul { display: none; }
+  #browse ul + ul { border-left: none; }
+  #browse[data-level="0"] ul:nth-of-type(1),
+  #browse[data-level="1"] ul:nth-of-type(2),
+  #browse[data-level="2"] ul:nth-of-type(3) { display: block; }
+  #br-back:not([hidden]) { display: block; }
+}
 
 #controls {
   display: flex; flex-wrap: wrap; gap: .5rem 1.1rem; align-items: center;
