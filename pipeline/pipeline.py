@@ -107,7 +107,7 @@ CURRENT = {
     ],
     "Q35615": [  # La Liga 2 (20 of 22: Celta Fortuna + Real Sociedad B are reserves)
         "Q576285",   # Albacete
-        "Q290781",   # Almería
+        "Q10407",    # UD Almería (not Q290781, the 1971–82 AD Almería)
         "Q1386854",  # FC Andorra
         "Q852079",   # Burgos
         "Q460448",   # Cádiz
@@ -462,7 +462,9 @@ DONT_MERGE = {("FR", "bastia"), ("ES", "extremadura"), ("ES", "logrones")}
 EXTRA_MERGE = {"Q56542463": "Q8643",   # LR Vicenza -> Vicenza Calcio (2018 refounding)
                "Q3626886": "Q6641",    # Liberty Bari -> SSC Bari (merged into Bari in 1928)
                "Q2338486": "Q19516",   # Olympique Lillois -> Lille OSC (1944 merger)
-               "Q2277043": "Q210864"}  # US du Mans -> Le Mans FC
+               "Q2277043": "Q210864",  # US du Mans -> Le Mans FC
+               "Q97905919": "Q15789",  # "FC Bayern München" dupe item -> FC Bayern Munich
+               "Q51243017": "Q704"}    # Lyon Olympique Universitaire -> OL (1950 split)
 
 def club_core(name):
     import unicodedata
@@ -535,7 +537,9 @@ def stage_build():
         # a merged group is "dissolved" only if the whole lineage ended (no refounded/active member)
         diss = [clubs[q].get("dissolved") for q in groups[cq]]
         dissolved = max(diss) if diss and all(diss) else 0
-        out_clubs.append([c["name"], c["cc"] or "", mask, cq, dissolved, cur_of.get(cq, -1)])
+        cur = cur_of.get(cq, -1)
+        if cur >= 0: dissolved = 0  # playing a covered league now = alive (stale P576 on refounded lineages)
+        out_clubs.append([c["name"], c["cc"] or "", mask, cq, dissolved, cur])
         postings.append(deltas)
         apps_col.append([-1 if s[2] is None else s[2] for s in sp])  # -1 = unknown
         goals_col.append([-1 if s[3] is None else s[3] for s in sp])
