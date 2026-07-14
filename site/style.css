@@ -95,7 +95,6 @@ h1 .accent { color: var(--accent); }
 }
 #suggestions li small { color: var(--muted); text-align: right; }
 .defunct { color: var(--muted); font-size: .82em; white-space: nowrap; }
-.pfx { color: var(--muted); opacity: .75; }  /* legal-form tokens: FC, AS, 1., Calcio 1913… */
 #suggestions li.active, #suggestions li:hover { background: var(--hit); }
 
 /* FM-style team browser: country › league › current clubs (Others = out of league) */

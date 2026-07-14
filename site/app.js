@@ -162,19 +162,18 @@ const sortName = (s) => {
   while (w.length > 1 && (LEGAL.has(w[0]) || w[0].length === 1 || /^\d+$/.test(w[0]))) w.shift();
   return w.join(" ");
 };
-// display variant: legal tokens around the core name render muted ("AC Milan", "Parma Calcio 1913")
+// FM-style display name for the browse panel: drop legal tokens around the core
+// ("AC Milan" -> "Milan", "Bologna F.C. 1909" -> "Bologna"); search/chips keep full names
 const isLegal = (word) => {
   const toks = norm(word).split(" ").filter(Boolean);
   return toks.length > 0 && toks.every(x => LEGAL.has(x) || x.length === 1 || /^\d+$/.test(x));
 };
-const fmtClub = (name) => {
+const coreClub = (name) => {
   const w = name.split(" ");
   let a = 0, b = w.length;
   while (a < w.length - 1 && isLegal(w[a])) a++;
   while (b > a + 1 && isLegal(w[b - 1])) b--;
-  const pfx = (arr) => `<span class="pfx">${esc(arr.join(" "))}</span>`;
-  return (a ? pfx(w.slice(0, a)) + " " : "") + esc(w.slice(a, b).join(" "))
-       + (b < w.length ? " " + pfx(w.slice(b)) : "");
+  return w.slice(a, b).join(" ");
 };
 const flag = (cc) => cc ? String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1A5 + c.charCodeAt(0))) : "";
 // defunct marker: a dagger + dissolution year for clubs with Wikidata P576 (c[4])
@@ -245,7 +244,7 @@ function renderSuggestions(ids) {
   ids.forEach((ci, i) => {
     const c = DB.clubs[ci];
     const li = document.createElement("li");
-    li.innerHTML = `<span>${flag(c[1])} ${fmtClub(c[0])}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
+    li.innerHTML = `<span>${flag(c[1])} ${esc(c[0])}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
     li.className = i === cursor ? "active" : "";
     li.onmousedown = (e) => { e.preventDefault(); addClub(ci); };
     sugg.appendChild(li);
@@ -355,7 +354,7 @@ function renderBrowse() {
     ids.sort((a, b) => DB.sortNames[a].localeCompare(DB.sortNames[b]));  // "AC Milan" under M
     for (const ci of ids) {
       const c = DB.clubs[ci], sel = clubIds.includes(ci);
-      brItem(ulT, `<span>${fmtClub(c[0])}${defunct(c)}</span>${sel ? "<span class=\"arr\">✓</span>" : ""}`,
+      brItem(ulT, `<span>${esc(coreClub(c[0]))}${defunct(c)}</span>${sel ? "<span class=\"arr\">✓</span>" : ""}`,
              sel ? "sel" : "", sel ? null : () => { addClub(ci); browseOpen(false); });
     }
   }
