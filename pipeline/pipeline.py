@@ -84,6 +84,7 @@ def load(name):
 
 def save(name, obj):
     (DATA / f"{name}.json").write_text(json.dumps(obj, ensure_ascii=False))
+    (DATA / f"{name}.jsonl").unlink(missing_ok=True)  # batch log superseded by the stage checkpoint
 
 def batched(seq, n):
     for i in range(0, len(seq), n): yield i // n, seq[i:i + n]
