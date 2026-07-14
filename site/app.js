@@ -151,6 +151,17 @@ const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">"
 const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "")
                      .toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 const initialsOf = (s) => norm(s).split(" ").filter(w => w.length > 2).map(w => w[0]).join("");
+// leading legal-form tokens (kin to the pipeline's STOP_TOKENS) don't count for
+// sorting or prefix ranking: "AC Milan" sorts under M and matches "mil" as a prefix
+const LEGAL = new Set(["fc", "afc", "cf", "cfc", "ac", "acf", "as", "ss", "ssc", "sc",
+  "us", "usd", "ud", "sd", "cd", "rcd", "ca", "rc", "ad", "aj", "es", "og", "ogc", "usl",
+  "calcio", "club", "football", "futbol", "associazione", "sportiva", "societa",
+  "unione", "spa", "ssd", "tsv", "vfb", "vfl", "sv", "fsv", "bsc", "spvgg", "tsg"]);
+const sortName = (s) => {
+  const w = norm(s).split(" ");  // single letters/digits = abbreviation debris ("U.C.", "1.")
+  while (w.length > 1 && (LEGAL.has(w[0]) || w[0].length === 1 || /^\d+$/.test(w[0]))) w.shift();
+  return w.join(" ");
+};
 const flag = (cc) => cc ? String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1A5 + c.charCodeAt(0))) : "";
 // defunct marker: a dagger + dissolution year for clubs with Wikidata P576 (c[4])
 const defunct = (c) => c[4] ? ` <span class="defunct" title="${t.dissolved(c[4])}">†${c[4]}</span>` : "";
@@ -171,6 +182,7 @@ async function boot() {
     return;
   }
   DB.searchNames = DB.clubs.map(c => norm(c[0]));
+  DB.sortNames = DB.clubs.map(c => sortName(c[0]));
   DB.searchInitials = DB.clubs.map(c => initialsOf(c[0]));
   DB.aliasNorm = DB.clubs.map(c => (ALIASES[c[3]] || []).map(norm));
   const byQid = new Map(DB.clubs.map((c, i) => [c[3], i]));  // restore a shared selection from the hash
@@ -201,7 +213,7 @@ function matches(q) {
   for (let i = 0; i < DB.clubs.length; i++) {
     if (clubIds.includes(i)) continue;
     let rank = -1;
-    if (DB.searchNames[i].startsWith(nq)) rank = 0;
+    if (DB.searchNames[i].startsWith(nq) || DB.sortNames[i].startsWith(nq)) rank = 0;
     else if (DB.searchNames[i].includes(nq)) rank = 1;
     else if (DB.searchInitials[i] === nq.replace(/ /g, "")) rank = 0;
     else if (DB.aliasNorm[i].some(a => a.startsWith(nq))) rank = 0;
@@ -253,7 +265,13 @@ const browse = $("browse"), browseBtn = $("browsebtn"), brBack = $("br-back");
 let brCC = null, brLG = null;  // drill-down state: country code, league index | "x" (Others)
 const canHover = matchMedia("(hover: hover)").matches;
 
+// the GB leagues are English: show England, not the UK (club flags stay GB —
+// Cardiff, Swansea, Wrexham are Welsh)
+const ENG = { flag: "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}",
+              it: "Inghilterra", en: "England" };
+const countryFlag = (cc) => cc === "GB" ? ENG.flag : flag(cc);
 const countryName = (cc) => {
+  if (cc === "GB") return ENG[lang] || ENG.en;
   try { return new Intl.DisplayNames([lang], { type: "region" }).of(cc) || cc; }
   catch { return cc; }
 };
@@ -299,7 +317,7 @@ function renderBrowse() {
   ulC.innerHTML = ulL.innerHTML = ulT.innerHTML = "";
   const ccs = [...new Set(DB.leagues.map(l => l[2]))];
   for (const cc of ccs)
-    brItem(ulC, `<span>${flag(cc)} ${esc(countryName(cc))}</span><span class="arr">›</span>`,
+    brItem(ulC, `<span>${countryFlag(cc)} ${esc(countryName(cc))}</span><span class="arr">›</span>`,
            cc === brCC ? "active" : "",
            () => { if (brCC !== cc) { brCC = cc; brLG = null; renderBrowse(); } }, true);
   if (brCC !== null) {
@@ -315,18 +333,22 @@ function renderBrowse() {
   }
   if (brCC !== null && brLG !== null) {
     const ccMask = DB.leagues.reduce((m, l, i) => l[2] === brCC ? m | (1 << i) : m, 0);
-    DB.clubs.forEach((c, ci) => {  // club list is already alphabetical
+    const ids = [];
+    DB.clubs.forEach((c, ci) => {
       const cur = c[5] ?? -1;
-      if (brLG === "x" ? cur >= 0 || !(c[2] & ccMask) : cur !== brLG) return;
-      const sel = clubIds.includes(ci);
+      if (brLG === "x" ? cur < 0 && (c[2] & ccMask) : cur === brLG) ids.push(ci);
+    });
+    ids.sort((a, b) => DB.sortNames[a].localeCompare(DB.sortNames[b]));  // "AC Milan" under M
+    for (const ci of ids) {
+      const c = DB.clubs[ci], sel = clubIds.includes(ci);
       brItem(ulT, `<span>${esc(c[0])}${defunct(c)}</span>${sel ? "<span class=\"arr\">✓</span>" : ""}`,
              sel ? "sel" : "", sel ? null : () => { addClub(ci); browseOpen(false); });
-    });
+    }
   }
   const level = brCC === null ? 0 : brLG === null ? 1 : 2;
   browse.dataset.level = level;
   brBack.hidden = level === 0;
-  brBack.textContent = `‹ ${level === 2 ? `${flag(brCC)} ${countryName(brCC)}` : t.back}`;
+  brBack.textContent = `‹ ${level === 2 ? `${countryFlag(brCC)} ${countryName(brCC)}` : t.back}`;
 }
 
 // ---------------------------------------------------------------- selection
