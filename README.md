@@ -43,10 +43,11 @@ and — given `VALIDATE_BASELINE=<previous index.json>`, as the weekly
 refresh workflow does — fails the run instead of shipping a dataset that
 shrank more than 3%.
 
-Quality passes in `build`: P54 statements with no qualifiers at all
-(no years/apps/goals) are discarded as unreliable, re-founded "phoenix"
-clubs are merged into one entry, and national sides are filtered out of
-career panels. The index is stamped with the extraction date (newest
+Quality passes: women (Wikidata P21) are excluded at the `members` stage —
+they reach men's club items through women's-section P54 statements. In
+`build`, P54 statements with no qualifiers at all (no years/apps/goals)
+are discarded as unreliable, re-founded "phoenix" clubs are merged into
+one entry, and national sides are filtered out of career panels. The index is stamped with the extraction date (newest
 checkpoint), shown in the site footer.
 
 Current league membership (`CURRENT` in `pipeline.py`) is a curated list

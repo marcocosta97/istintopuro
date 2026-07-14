@@ -359,8 +359,11 @@ def stage_members():
     clubs = load("clubs")
     def fetch(batch):
         vals = " ".join(f"wd:{q}" for q in batch)
+        # women (P21 female/trans woman) are out of scope: they reach men's club
+        # items via women's-section P54 statements (e.g. Patrizia Panico)
         rows = sparql(f"""SELECT ?club ?p WHERE {{
-            VALUES ?club {{ {vals} }} ?p p:P54/ps:P54 ?club . ?p wdt:P31 wd:Q5 . }}""")
+            VALUES ?club {{ {vals} }} ?p p:P54/ps:P54 ?club . ?p wdt:P31 wd:Q5 .
+            MINUS {{ VALUES ?fem {{ wd:Q6581072 wd:Q1052281 }} ?p wdt:P21 ?fem . }} }}""")
         return [[qid(v(r, "club")), qid(v(r, "p"))] for r in rows]
     pairs = resumable("members", sorted(clubs), 10, fetch)
     members = {}
