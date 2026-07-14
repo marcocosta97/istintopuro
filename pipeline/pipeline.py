@@ -36,6 +36,227 @@ LEAGUE_ALIAS = {"Q754839": "Q9448", "Q769744": "Q19510"}
 LEAGUE_ORDER = ["Q15804", "Q194052", "Q324867", "Q35615", "Q9448", "Q19510",
                 "Q13394", "Q217374", "Q82595", "Q152665"]
 
+# current league membership (2026–27), curated: Wikidata P118 lags promotions and
+# relegations by months. Refresh each August; reserve teams stay out (dataset scope).
+CURRENT = {
+    "Q15804": [  # Serie A
+        "Q1886",     # Atalanta
+        "Q1893",     # Bologna
+        "Q1900",     # Cagliari
+        "Q1120838",  # Como
+        "Q2052",     # Fiorentina
+        "Q845043",   # Frosinone
+        "Q2074",     # Genoa
+        "Q631",      # Inter
+        "Q1422",     # Juventus
+        "Q2609",     # Lazio
+        "Q13391",    # Lecce
+        "Q1543",     # Milan
+        "Q289482",   # Monza
+        "Q2641",     # Napoli
+        "Q2693",     # Parma
+        "Q2739",     # Roma
+        "Q8603",     # Sassuolo
+        "Q2768",     # Torino
+        "Q2798",     # Udinese
+        "Q501245",   # Venezia
+    ],
+    "Q194052": [  # Serie B
+        "Q297430",   # Arezzo
+        "Q6630",     # Ascoli
+        "Q298217",   # Avellino
+        "Q652516",   # Benevento
+        "Q650365",   # Carrarese
+        "Q501372",   # Catanzaro
+        "Q6664",     # Cesena
+        "Q759482",   # Cremonese
+        "Q6703",     # Empoli
+        "Q8639",     # Hellas Verona
+        "Q6748",     # Juve Stabia
+        "Q430993",   # Mantova
+        "Q8408",     # Modena
+        "Q8428",     # Padova
+        "Q2674",     # Palermo
+        "Q289613",   # Pisa
+        "Q1457",     # Sampdoria
+        "Q1387710",  # Südtirol
+        "Q8643",     # Vicenza
+        "Q2276413",  # Virtus Entella
+    ],
+    "Q324867": [  # La Liga
+        "Q223620",   # Alavés
+        "Q8687",     # Athletic Club
+        "Q8701",     # Atlético Madrid
+        "Q7156",     # Barcelona
+        "Q8749",     # Celta Vigo
+        "Q8760",     # Deportivo La Coruña
+        "Q10512",    # Elche
+        "Q8780",     # Espanyol
+        "Q8806",     # Getafe
+        "Q8823",     # Levante
+        "Q8857",     # Málaga
+        "Q10286",    # Osasuna
+        "Q12236",    # Racing Santander
+        "Q10300",    # Rayo Vallecano
+        "Q8723",     # Real Betis
+        "Q8682",     # Real Madrid
+        "Q10315",    # Real Sociedad
+        "Q10329",    # Sevilla
+        "Q10333",    # Valencia
+        "Q12297",    # Villarreal
+    ],
+    "Q35615": [  # La Liga 2 (20 of 22: Celta Fortuna + Real Sociedad B are reserves)
+        "Q576285",   # Albacete
+        "Q290781",   # Almería
+        "Q1386854",  # FC Andorra
+        "Q852079",   # Burgos
+        "Q460448",   # Cádiz
+        "Q743557",   # Castellón
+        "Q5773365",  # Ceuta
+        "Q10499",    # Córdoba
+        "Q770740",   # Eibar
+        "Q600232",   # Eldense
+        "Q11945",    # Girona
+        "Q8812",     # Granada
+        "Q11979",    # Las Palmas
+        "Q856119",   # Leganés
+        "Q8835",     # Mallorca
+        "Q271574",   # Real Oviedo
+        "Q12260",    # Sabadell
+        "Q12278",    # Sporting Gijón
+        "Q216661",   # Tenerife
+        "Q10319",    # Valladolid
+    ],
+    "Q9448": [  # Premier League
+        "Q9617",     # Arsenal
+        "Q18711",    # Aston Villa
+        "Q19568",    # Bournemouth
+        "Q19571",    # Brentford
+        "Q19453",    # Brighton
+        "Q9616",     # Chelsea
+        "Q19580",    # Coventry City
+        "Q19467",    # Crystal Palace
+        "Q5794",     # Everton
+        "Q18708",    # Fulham
+        "Q19477",    # Hull City
+        "Q9653",     # Ipswich Town
+        "Q1128631",  # Leeds United
+        "Q1130849",  # Liverpool
+        "Q50602",    # Manchester City
+        "Q18656",    # Manchester United
+        "Q18716",    # Newcastle United
+        "Q19490",    # Nottingham Forest
+        "Q18739",    # Sunderland
+        "Q18741",    # Tottenham Hotspur
+    ],
+    "Q19510": [  # EFL Championship
+        "Q19444",    # Birmingham City
+        "Q19446",    # Blackburn Rovers
+        "Q19451",    # Bolton Wanderers
+        "Q19456",    # Bristol City
+        "Q19458",    # Burnley
+        "Q18662",    # Cardiff City
+        "Q19462",    # Charlton Athletic
+        "Q19470",    # Derby County
+        "Q18519",    # Lincoln City
+        "Q18661",    # Middlesbrough
+        "Q19487",    # Millwall
+        "Q18721",    # Norwich City
+        "Q19604",    # Portsmouth
+        "Q19612",    # Preston North End
+        "Q18723",    # QPR
+        "Q19607",    # Sheffield United
+        "Q18732",    # Southampton
+        "Q18736",    # Stoke City
+        "Q18659",    # Swansea City
+        "Q2714",     # Watford
+        "Q18744",    # West Bromwich Albion
+        "Q18747",    # West Ham United
+        "Q19500",    # Wolves
+        "Q18529",    # Wrexham
+    ],
+    "Q13394": [  # Ligue 1
+        "Q845137",   # Angers
+        "Q182876",   # Auxerre
+        "Q218372",   # Brest
+        "Q328658",   # Le Havre
+        "Q210864",   # Le Mans
+        "Q191843",   # Lens
+        "Q19516",    # Lille
+        "Q48911",    # Lorient
+        "Q704",      # Olympique Lyonnais
+        "Q132885",   # Olympique de Marseille
+        "Q180305",   # Monaco
+        "Q185163",   # Nice
+        "Q1051013",  # Paris FC
+        "Q483020",   # Paris Saint-Germain
+        "Q19509",    # Rennes
+        "Q126334",   # Strasbourg
+        "Q19518",    # Toulouse
+        "Q501693",   # Troyes
+    ],
+    "Q217374": [  # Ligue 2
+        "Q1140695",  # Annecy
+        "Q309400",   # Boulogne
+        "Q870182",   # Clermont
+        "Q503317",   # Dijon
+        "Q1815297",  # Dunkerque
+        "Q209509",   # Grenoble
+        "Q459148",   # Guingamp
+        "Q760736",   # Laval
+        "Q221525",   # Metz
+        "Q19513",    # Montpellier
+        "Q19523",    # Nancy
+        "Q192071",   # Nantes
+        "Q288419",   # Pau
+        "Q522283",   # Red Star
+        "Q208228",   # Reims
+        "Q292231",   # Rodez
+        "Q19521",    # Saint-Étienne
+        "Q19512",    # Sochaux
+    ],
+    "Q82595": [  # Bundesliga
+        "Q15755",    # Augsburg
+        "Q141971",   # Union Berlin
+        "Q51976",    # Werder Bremen
+        "Q41420",    # Borussia Dortmund
+        "Q692691",   # Elversberg
+        "Q38245",    # Eintracht Frankfurt
+        "Q106394",   # Freiburg
+        "Q51974",    # Hamburger SV
+        "Q22707",    # Hoffenheim
+        "Q104770",   # 1. FC Köln
+        "Q702455",   # RB Leipzig
+        "Q104761",   # Bayer Leverkusen
+        "Q105254",   # Mainz 05
+        "Q101959",   # Borussia Mönchengladbach
+        "Q15789",    # Bayern Munich
+        "Q160532",   # Paderborn
+        "Q32494",    # Schalke 04
+        "Q4512",     # VfB Stuttgart
+    ],
+    "Q152665": [  # 2. Bundesliga
+        "Q102720",   # Hertha BSC
+        "Q105844",   # Arminia Bielefeld
+        "Q105861",   # VfL Bochum
+        "Q154053",   # Eintracht Braunschweig
+        "Q107818",   # Energie Cottbus
+        "Q479351",   # Darmstadt 98
+        "Q141931",   # Dynamo Dresden
+        "Q153539",   # Greuther Fürth
+        "Q33748",    # Hannover 96
+        "Q162251",   # Heidenheim
+        "Q8466",     # Kaiserslautern
+        "Q105853",   # Karlsruher SC
+        "Q157828",   # Holstein Kiel
+        "Q155730",   # Magdeburg
+        "Q15786",    # Nürnberg
+        "Q160530",   # Osnabrück
+        "Q6463",     # St. Pauli
+        "Q101859",   # Wolfsburg
+    ],
+}
+
 EXCLUDE_CLUB = re.compile(
     r"(\s(II|III|IV|B|C)|U-?\d{2}|Under-?\d{2}|[Yy]outh|Primavera|Castilla|Atl[eè]tic\b"
     r"|[Rr]eserves?|[Aa]cademy|[Ww]omen|[Ff]emen|[Ff]rauen|[Ff]éminin|[Ff]emminile)$"
@@ -300,6 +521,9 @@ def stage_build():
 
     club_qids = sorted(kept_members, key=lambda q: clubs[q]["name"])
     lmask = {q: i for i, q in enumerate(LEAGUE_ORDER)}
+    cur_of = {merged.get(q, q): lmask[lq] for lq, qs in CURRENT.items() for q in qs}
+    stray = sorted(q for q in cur_of if q not in kept_members)
+    if stray: print(f"  WARNING: CURRENT clubs not in universe: {stray}")
     out_clubs, postings, apps_col, goals_col = [], [], [], []
     for cq in club_qids:
         c = clubs[cq]
@@ -311,7 +535,7 @@ def stage_build():
         # a merged group is "dissolved" only if the whole lineage ended (no refounded/active member)
         diss = [clubs[q].get("dissolved") for q in groups[cq]]
         dissolved = max(diss) if diss and all(diss) else 0
-        out_clubs.append([c["name"], c["cc"] or "", mask, cq, dissolved])
+        out_clubs.append([c["name"], c["cc"] or "", mask, cq, dissolved, cur_of.get(cq, -1)])
         postings.append(deltas)
         apps_col.append([-1 if s[2] is None else s[2] for s in sp])  # -1 = unknown
         goals_col.append([-1 if s[3] is None else s[3] for s in sp])
@@ -355,6 +579,9 @@ def stage_build():
     gz = len(gzip.compress(blob, 6))
     with_apps = sum(1 for col in apps_col for a in col if a >= 0)
     with_goals = sum(1 for col in goals_col for g in col if g >= 0)
+    cur_counts = [sum(1 for c in out_clubs if c[5] == i) for i in range(len(LEAGUE_ORDER))]
+    print("  current teams: " + ", ".join(
+        f"{LEAGUES[q][0]} {n}" for q, n in zip(LEAGUE_ORDER, cur_counts)))
     print(f"build: {len(out_clubs)} clubs, {len(names)} players, {n_post} postings")
     print(f"  index.json {len(blob)/1e6:.2f} MB raw, {gz/1e6:.2f} MB gzip")
     print(f"  career shards total {shard_bytes/1e6:.2f} MB ({NSHARDS} files)")
@@ -386,6 +613,11 @@ def stage_validate():
     for k in ("births", "nats", "imgs"):
         chk(len(idx[k]) == np, f"{k}: {len(idx[k])} rows != {np} players")
     chk(len({c[3] for c in idx["clubs"]}) == nc, "duplicate club QIDs")
+    nl = len(idx["leagues"])
+    chk(all(len(c) == 6 and -1 <= c[5] < nl for c in idx["clubs"]), "bad current-league field")
+    for i in range(nl):  # every league must keep a plausible current lineup
+        n = sum(1 for c in idx["clubs"] if c[5] == i)
+        chk(17 <= n <= 24, f"league {idx['leagues'][i][0]}: {n} current clubs")
     for c, (d, a, g) in enumerate(zip(idx["postings"], idx["apps"], idx["goals"])):
         chk(len(d) == len(a) == len(g), f"club {c}: postings/apps/goals length mismatch")
         chk(not d or (d[0] >= 0 and all(x > 0 for x in d[1:]) and sum(d) < np),
