@@ -160,6 +160,8 @@ async function boot() {
   DB.searchNames = DB.clubs.map(c => norm(c[0]));
   DB.searchInitials = DB.clubs.map(c => initialsOf(c[0]));
   DB.aliasNorm = DB.clubs.map(c => (ALIASES[c[3]] || []).map(norm));
+  const byQid = new Map(DB.clubs.map((c, i) => [c[3], i]));  // restore a shared selection from the hash
+  clubIds = location.hash.slice(1).split(",").map(q => byQid.get(q)).filter(i => i !== undefined);
   search.disabled = false;
   search.focus();
   applyLang();  // refresh status + footer now that DB (and its built date) exist
@@ -233,16 +235,21 @@ search.addEventListener("blur", () => setTimeout(() => {
 }, 100));
 
 // ---------------------------------------------------------------- selection
+// the selection is shareable: club QIDs in the URL hash (stable across dataset rebuilds)
+function syncHash() {
+  const h = clubIds.map(ci => DB.clubs[ci][3]).join(",");
+  history.replaceState(null, "", h ? "#" + h : location.pathname + location.search);
+}
 function addClub(ci) {
   if (ci === undefined || clubIds.includes(ci)) return;
   clubIds.push(ci);
   search.value = ""; sugg.hidden = true;
-  renderChips(); solve();
+  renderChips(); solve(); syncHash();
   search.focus();
 }
 function removeClub(ci) {
   clubIds = clubIds.filter(x => x !== ci);
-  renderChips(); solve();
+  renderChips(); solve(); syncHash();
 }
 function renderChips() {
   chips.innerHTML = "";
