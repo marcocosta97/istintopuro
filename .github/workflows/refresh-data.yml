@@ -28,8 +28,12 @@ jobs:
           python-version: "3.12"
       - run: pip install requests
 
+      # the validate stage aborts the job (no commit, no deploy) if the new
+      # index is malformed or shrank >3% vs the currently deployed one
       - name: Refresh dataset from Wikidata (~40 min, ~600 throttled queries)
-        run: python3 pipeline/pipeline.py
+        run: |
+          git show HEAD:site/data/index.json > /tmp/index-baseline.json
+          VALIDATE_BASELINE=/tmp/index-baseline.json python3 pipeline/pipeline.py
 
       - name: Commit refreshed dataset if it changed
         run: |

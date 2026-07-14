@@ -31,9 +31,13 @@ python3 pipeline/pipeline.py            # all stages, checkpointed in data/
 python3 pipeline/pipeline.py build      # rebuild site/data from checkpoints
 ```
 
-Stages: `clubs → members → attrs → careers → teams → build`. Each stage
-checkpoints to `data/*.json(l)`; delete a checkpoint to force a re-fetch.
-Full run issues ~600 SPARQL queries (~40 min, politeness-throttled).
+Stages: `clubs → members → attrs → careers → teams → build → validate`.
+Each fetch stage checkpoints to `data/*.json(l)`; delete a checkpoint to
+force a re-fetch. Full run issues ~600 SPARQL queries (~40 min,
+politeness-throttled). `validate` checks the emitted index's invariants
+and — given `VALIDATE_BASELINE=<previous index.json>`, as the weekly
+refresh workflow does — fails the run instead of shipping a dataset that
+shrank more than 3%.
 
 Quality passes in `build`: P54 statements with no qualifiers at all
 (no years/apps/goals) are discarded as unreliable, re-founded "phoenix"

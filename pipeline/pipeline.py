@@ -8,10 +8,11 @@ Stages (each checkpoints to data/, reruns skip completed stages):
   careers  - full P54 career statements per player (any team, with years/apps/goals)
   teams    - labels for career teams outside the club universe
   build    - emit site/data/index.json + career shards, print stats
+  validate - sanity-check the emitted index; fail instead of shipping junk
 
 Usage: python3 pipeline/pipeline.py [stage ...]   (default: all)
 """
-import json, re, sys, time, gzip
+import json, os, re, sys, time, gzip
 from pathlib import Path
 from urllib.parse import unquote
 import requests
@@ -363,8 +364,43 @@ def stage_build():
           f"goals-per-posting {with_goals/max(n_post,1):.0%}")
     print(f"  longest posting list: {max(map(len, postings))}")
 
+# -------------------------------------------------------------- stage: validate
+def stage_validate():
+    """Exit non-zero rather than ship a malformed index. VALIDATE_BASELINE=
+    <previous index.json> additionally guards against a silently degraded
+    extraction (>3% fewer clubs or players), as the weekly refresh does."""
+    idx = json.loads((SITE_DATA / "index.json").read_bytes())
+    errs = []
+    def chk(ok, msg):
+        if not ok: errs.append(msg)
+    nc, np = len(idx["clubs"]), len(idx["names"])
+    chk(nc > 0 and np > 0, "empty index")
+    for k in ("postings", "apps", "goals"):
+        chk(len(idx[k]) == nc, f"{k}: {len(idx[k])} columns != {nc} clubs")
+    for k in ("births", "nats", "imgs"):
+        chk(len(idx[k]) == np, f"{k}: {len(idx[k])} rows != {np} players")
+    chk(len({c[3] for c in idx["clubs"]}) == nc, "duplicate club QIDs")
+    for c, (d, a, g) in enumerate(zip(idx["postings"], idx["apps"], idx["goals"])):
+        chk(len(d) == len(a) == len(g), f"club {c}: postings/apps/goals length mismatch")
+        chk(not d or (d[0] >= 0 and all(x > 0 for x in d[1:]) and sum(d) < np),
+            f"club {c}: bad posting deltas")
+        chk(all(x >= -1 for x in a + g), f"club {c}: apps/goals below -1")
+    missing = [i for i in range(NSHARDS) if not (SITE_DATA / "career" / f"{i}.json").exists()]
+    chk(not missing, f"missing career shards: {missing[:5]}")
+    base = os.environ.get("VALIDATE_BASELINE")
+    if base:
+        old = json.loads(Path(base).read_bytes())
+        oc, op = len(old["clubs"]), len(old["names"])
+        chk(nc >= 0.97 * oc, f"clubs shrank {oc} -> {nc}")
+        chk(np >= 0.97 * op, f"players shrank {op} -> {np}")
+        print(f"  vs baseline: clubs {oc} -> {nc}, players {op} -> {np}")
+    if errs:
+        sys.exit("validate FAILED:\n  " + "\n  ".join(errs[:20]))
+    print(f"validate: OK ({nc} clubs, {np} players)")
+
 STAGES = {"clubs": stage_clubs, "members": stage_members, "attrs": stage_attrs,
-          "careers": stage_careers, "teams": stage_teams, "build": stage_build}
+          "careers": stage_careers, "teams": stage_teams, "build": stage_build,
+          "validate": stage_validate}
 
 if __name__ == "__main__":
     DATA.mkdir(exist_ok=True)
