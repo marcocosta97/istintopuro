@@ -155,8 +155,10 @@ const initialsOf = (s) => norm(s).split(" ").filter(w => w.length > 2).map(w => 
 // sorting or prefix ranking: "AC Milan" sorts under M and matches "mil" as a prefix
 const LEGAL = new Set(["fc", "afc", "cf", "cfc", "ac", "acf", "as", "ss", "ssc", "sc",
   "us", "usd", "ud", "sd", "cd", "rcd", "ca", "rc", "ad", "aj", "es", "og", "ogc", "usl",
-  "calcio", "club", "football", "futbol", "associazione", "sportiva", "societa",
-  "unione", "spa", "ssd", "tsv", "vfb", "vfl", "sv", "fsv", "bsc", "bc", "spvgg", "tsg"]);
+  "sco", "osc", "af", "fco", "calcio", "club", "football", "futbol", "foot", "ball",
+  "sport", "balompie", "associazione", "sportiva", "societa", "unione", "de", "di", "en", "avant",
+  "centre", "esports", "alsace", "herault",
+  "spa", "ssd", "tsv", "vfb", "vfl", "sv", "fsv", "bsc", "bc", "spvgg", "tsg"]);
 const sortName = (s) => {
   const w = norm(s).split(" ");  // single letters/digits = abbreviation debris ("U.C.", "1.")
   while (w.length > 1 && (LEGAL.has(w[0]) || w[0].length === 1 || /^\d+$/.test(w[0]))) w.shift();
@@ -168,7 +170,9 @@ const isLegal = (word) => {
   const toks = norm(word).split(" ").filter(Boolean);
   return toks.length > 0 && toks.every(x => LEGAL.has(x) || x.length === 1 || /^\d+$/.test(x));
 };
+const KEEP = new Set(["Athletic Club", "Paris FC", "Hamburger SV", "Karlsruher SC"]);
 const coreClub = (name) => {
+  if (KEEP.has(name)) return name;  // stripping would maim or disambiguate these away
   const w = name.split(" ");
   let a = 0, b = w.length;
   while (a < w.length - 1 && isLegal(w[a])) a++;
