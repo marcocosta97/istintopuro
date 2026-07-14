@@ -12,7 +12,6 @@ let clubIds = [];            // selected club indices
 let sortBy = "apps", sortDir = -1;
 const decoded = new Map();   // club index -> Int32Array of player ids
 const careerCache = new Map();
-const NSHARDS = 128;
 
 // ---------------------------------------------------------------- i18n
 const REPO = "https://github.com/marcocosta97/istintopuro";
@@ -373,7 +372,7 @@ async function toggleCareer(li, pid) {
   const open = li.querySelector(".career");
   if (open) { open.remove(); li.querySelector(".expand").textContent = "▸"; return; }
   li.querySelector(".expand").textContent = "▾";
-  const shard = pid % NSHARDS;
+  const shard = pid % (DB.nshards || 128);  // shard count stamped in the index by the pipeline
   if (!careerCache.has(shard))  // versioned by dataset stamp: a stale cached shard would pair wrong careers with a fresh index
     careerCache.set(shard, fetch(`data/career/${shard}.json?v=${DB.built || 0}`)
       .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }));

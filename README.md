@@ -13,8 +13,9 @@ get every player who wore all of those shirts.
   QID, dissolvedYear]` — `dissolvedYear` (Wikidata P576, `0` if active)
   drives the `†year` marker on defunct clubs. The browser intersects posting
   lists client-side in well under a millisecond.
-- **Careers** are sharded into `site/data/career/*.json` (128 files) and
-  lazy-loaded when a player row is expanded. Each entry is
+- **Careers** are sharded into `site/data/career/*.json` (128 files; the
+  count is stamped into the index as `nshards`) and lazy-loaded when a
+  player row is expanded. Each entry is
   `[QID number, spells]`; the QID links the player's Wikipedia article
   (it/en per UI language) via Wikidata's `Special:GoToLinkedPage`, so no
   article titles need to be stored.

@@ -324,7 +324,7 @@ def stage_build():
     SITE_DATA.mkdir(parents=True, exist_ok=True)
     # data freshness = newest Wikidata checkpoint, not build time
     built = time.strftime("%Y-%m-%d", time.localtime(max(p.stat().st_mtime for p in DATA.glob("*.json*"))))
-    index = {"built": built,
+    index = {"built": built, "nshards": NSHARDS,  # app.js reads the shard count from here
              "leagues": [list(LEAGUES[q]) for q in LEAGUE_ORDER],
              "clubs": out_clubs, "postings": postings, "apps": apps_col,
              "goals": goals_col,
