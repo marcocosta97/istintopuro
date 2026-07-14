@@ -170,7 +170,7 @@ const isLegal = (word) => {
   const toks = norm(word).split(" ").filter(Boolean);
   return toks.length > 0 && toks.every(x => LEGAL.has(x) || x.length === 1 || /^\d+$/.test(x));
 };
-const KEEP = new Set(["Athletic Club", "Paris FC", "Hamburger SV", "Karlsruher SC"]);
+const KEEP = new Set(["Athletic Club", "Paris FC", "FC Lyon", "Hamburger SV", "Karlsruher SC"]);
 const coreClub = (name) => {
   if (KEEP.has(name)) return name;  // stripping would maim or disambiguate these away
   const w = name.split(" ");
@@ -267,7 +267,8 @@ search.addEventListener("keydown", (e) => {
     if (!items.length) return;
     cursor = (cursor + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
     items.forEach((li, i) => li.className = i === cursor ? "active" : "");
-  } else if (e.key === "Enter" && cursor >= 0 && !sugg.hidden) {
+  } else if ((e.key === "Enter" || e.key === "Tab") && cursor >= 0 && !sugg.hidden) {
+    e.preventDefault();  // Tab confirms like Enter instead of leaving the field
     addClub(matches(search.value)[cursor]);
   } else if (e.key === "Backspace" && !search.value && clubIds.length) {
     removeClub(clubIds[clubIds.length - 1]);
@@ -352,7 +353,7 @@ function renderBrowse() {
     const ccMask = DB.leagues.reduce((m, l, i) => l[2] === brCC ? m | (1 << i) : m, 0);
     const ids = [];
     DB.clubs.forEach((c, ci) => {
-      const cur = c[5] ?? -1;
+      const cur = c[4] ? -1 : (c[5] ?? -1);  // a dissolved club is never "current": Others only
       if (brLG === "x" ? cur < 0 && (c[2] & ccMask) : cur === brLG) ids.push(ci);
     });
     ids.sort((a, b) => DB.sortNames[a].localeCompare(DB.sortNames[b]));  // "AC Milan" under M
