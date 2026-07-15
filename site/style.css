@@ -182,7 +182,8 @@ h1 .accent { color: var(--accent); }
   background: var(--bg); border: 1px solid var(--line); border-radius: 7px;
   padding: .12rem .5rem;
 }
-#nattoggle::after { content: "▾"; font-size: .75em; margin-left: .35rem; color: var(--muted); }
+/* same glyph and size as #browsebtn, the UI's other dropdown arrow */
+#nattoggle::after { content: "▾"; font-size: .8rem; margin-left: .4rem; color: var(--muted); }
 #nattoggle:not(:disabled):hover, #natacts button:hover { border-color: var(--accent); }
 #nattoggle:disabled { opacity: .4; cursor: default; }
 #natcount { color: var(--accent); font-variant-numeric: tabular-nums; }
