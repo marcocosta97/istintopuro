@@ -173,8 +173,10 @@ h1 .accent { color: var(--accent); }
 }
 #advbody input[type=number] { width: 4.2rem; }
 #advbody input[type=checkbox] { accent-color: var(--accent); margin: 0; }
-/* nationality filter: dropdown with per-country checkboxes and counts */
-#natctl { position: relative; }
+/* nationality filter: dropdown with per-country checkboxes and counts.
+   Own full-width row: the n/m badge can grow without reflowing the other
+   controls, and the left-anchored popup can't overflow narrow screens. */
+#natctl { position: relative; flex-basis: 100%; justify-content: flex-start; }
 #nattoggle, #natacts button {
   cursor: pointer; font: inherit; font-size: .85rem; color: var(--fg);
   background: var(--bg); border: 1px solid var(--line); border-radius: 7px;
