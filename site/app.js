@@ -41,7 +41,7 @@ const STR = {
     combApps: (n) => `${n.toLocaleString("it")} presenze`,
     combGoals: (n) => `${n.toLocaleString("it")} gol`,
     comb: (apps) => apps ? "combinate" : "combinati",
-    apps: "pres", goals: "gol", noData: "nessun dato",
+    apps: "pres", goals: "gol", noData: "nessun dato", loan: "prestito",
     dissolved: (y) => `squadra sciolta nel ${y}`,
     more: (n) => `… mostra altri ${n}`,
     browse: "Sfoglia per campionato",
@@ -72,7 +72,7 @@ const STR = {
     combApps: (n) => `${n.toLocaleString("en")} apps`,
     combGoals: (n) => `${n.toLocaleString("en")} goals`,
     comb: () => "combined",
-    apps: "apps", goals: "goals", noData: "no data",
+    apps: "apps", goals: "goals", noData: "no data", loan: "loan",
     dissolved: (y) => `club dissolved in ${y}`,
     more: (n) => `… show ${n} more`,
     browse: "Browse by league",
@@ -599,9 +599,13 @@ async function toggleCareer(li, pid) {
   const gk = DB.gkSet.has(pid);  // goalkeeper goal counts are unreliable, show apps only
   const div = document.createElement("div");
   div.className = "career";
-  div.innerHTML = (career.filter(e => e[0]).map(([team, s, e, apps, goals]) =>
+  const spells = career.filter(e => e[0]);
+  // a spell strictly inside an earlier spell's known range reads as a loan from that club
+  const loan = spells.map(([, s, e], i) => s && e && spells.slice(0, i).some(
+    ([, s2, e2]) => s2 && e2 && s2 <= s && e <= e2 && e2 - s2 > e - s));
+  div.innerHTML = (spells.map(([team, s, e, apps, goals], i) =>
     `<div class="crow${selNames.has(team) ? " hit" : ""}">
-       <span class="cyears">${s || "?"}–${e || (s ? "" : "?")}</span><span class="cteam">${esc(team)}</span>
+       <span class="cyears">${s && s === e ? s : `${s || "?"}–${e || (s ? "" : "?")}`}</span><span class="cteam">${loan[i] ? `<span class="loan" title="${t.loan}">↳</span> ` : ""}${esc(team)}</span>
        <span class="cstats">${apps != null ? apps + " " + t.apps : ""}${!gk && goals != null ? " · " + goals + " " + t.goals : ""}</span>
      </div>`).join("") || `<div class='crow'>${t.noData}</div>`)
     + (qid ? `<a class="wiki" href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${lang}wiki/Q${qid}" target="_blank" rel="noopener">Wikipedia ↗</a>

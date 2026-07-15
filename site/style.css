@@ -262,8 +262,9 @@ h1 .accent { color: var(--accent); }
 .career { flex-basis: 100%; border-top: 1px solid var(--line); margin-top: .4rem; padding-top: .4rem; cursor: default; }
 .crow { display: flex; gap: .8rem; font-size: .88rem; padding: .12rem 0; }
 .crow.hit { background: var(--hit); border-radius: 5px; }
-.cyears { color: var(--muted); min-width: 6.2ch; text-align: right; font-variant-numeric: tabular-nums; }
+.cyears { color: var(--muted); min-width: 9ch; text-align: right; font-variant-numeric: tabular-nums; }
 .cteam { flex: 1; }
+.cteam .loan { color: var(--muted); }
 .cstats { color: var(--muted); white-space: nowrap; }
 .career .wiki { display: inline-block; margin: .35rem .8rem 0 0; font-size: .8rem; color: var(--accent); text-decoration: none; }
 
