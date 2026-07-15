@@ -36,7 +36,7 @@ const STR = {
     nat: "Nazionalità", natAll: "tutte", natNone: "nessuna", natUnknown: "sconosciuta",
     stats: (p, c) => `${p.toLocaleString("it")} giocatori · ${c} squadre`,
     loadFail: "Errore nel caricamento dei dati.", retry: "riprova",
-    needTwo: "Aggiungi almeno una squadra.",
+    needOne: "Aggiungi almeno una squadra.",
     found: (n, ms) => `${n} giocator${n === 1 ? "e" : "i"} · ${ms} ms`,
     combApps: (n) => `${n.toLocaleString("it")} presenze`,
     combGoals: (n) => `${n.toLocaleString("it")} gol`,
@@ -67,7 +67,7 @@ const STR = {
     nat: "Nationality", natAll: "all", natNone: "none", natUnknown: "unknown",
     stats: (p, c) => `${p.toLocaleString("en")} players · ${c} clubs`,
     loadFail: "Failed to load data.", retry: "retry",
-    needTwo: "Add at least one club.",
+    needOne: "Add at least one club.",
     found: (n, ms) => `${n} player${n === 1 ? "" : "s"} · ${ms} ms`,
     combApps: (n) => `${n.toLocaleString("en")} apps`,
     combGoals: (n) => `${n.toLocaleString("en")} goals`,
@@ -422,7 +422,7 @@ function intersect(lists) {
 function solve() {
   results.innerHTML = "";
   if (clubIds.length === 0) {
-    status.textContent = t.needTwo;
+    status.textContent = t.needOne;
     natCounts.clear(); renderNats();
     return;
   }
@@ -538,7 +538,9 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
       : `<span class="avatar">${initials(pid)}</span>`;
     const apps = appsOf.get(pid), goals = goalsOf.get(pid);
     const parts = [apps ? t.combApps(apps) : "", goals || zeroGoals.has(pid) ? t.combGoals(goals || 0) : ""].filter(Boolean);
-    const meta = parts.length ? `${parts.join(" · ")} <span class="comb">(${t.comb(!!apps)})</span>` : "";
+    // "(combined)" only makes sense across two or more clubs
+    const comb = clubIds.length > 1 ? ` <span class="comb">(${t.comb(!!apps)})</span>` : "";
+    const meta = parts.length ? `${parts.join(" · ")}${comb}` : "";
     li.innerHTML = `${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.gkSet.has(pid) ? " <small>(GK)</small>" : ""}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span>
       <span class="pmeta">${meta}</span></div><span class="expand">▸</span>`;
     const im = li.querySelector("img");
