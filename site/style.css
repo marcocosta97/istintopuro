@@ -173,6 +173,36 @@ h1 .accent { color: var(--accent); }
 }
 #advbody input[type=number] { width: 4.2rem; }
 #advbody input[type=checkbox] { accent-color: var(--accent); margin: 0; }
+/* nationality filter: dropdown with per-country checkboxes and counts */
+#natctl { position: relative; }
+#nattoggle, #natacts button {
+  cursor: pointer; font: inherit; font-size: .85rem; color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 7px;
+  padding: .12rem .5rem;
+}
+#nattoggle::after { content: "▾"; font-size: .75em; margin-left: .35rem; color: var(--muted); }
+#nattoggle:not(:disabled):hover, #natacts button:hover { border-color: var(--accent); }
+#nattoggle:disabled { opacity: .4; cursor: default; }
+#natcount { color: var(--accent); font-variant-numeric: tabular-nums; }
+#natpanel {
+  position: absolute; z-index: 20; top: calc(100% + .4rem); left: 0;
+  width: min(16rem, calc(100vw - 3rem));
+  background: var(--card); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: .4rem;
+}
+#natacts { display: flex; gap: .4rem; margin-bottom: .4rem; }
+#natlist {
+  list-style: none; margin: 0; padding: 0;
+  max-height: 14rem; overflow-y: auto; font-size: .85rem;
+}
+#natlist label {
+  display: flex; align-items: center; gap: .45rem;
+  padding: .18rem .35rem; border-radius: 6px; cursor: pointer; color: var(--fg);
+}
+#natlist label:hover { background: var(--hit); }
+#natlist input[type=checkbox] { accent-color: var(--accent); margin: 0; flex-shrink: 0; }
+#natlist .ncount { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+
 .hint {
   cursor: help; padding: 0;
   width: 1.15rem; height: 1.15rem; border-radius: 50%;

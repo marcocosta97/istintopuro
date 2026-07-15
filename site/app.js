@@ -33,6 +33,7 @@ const STR = {
     born: "Nati", from: "dal", to: "al",
     noZero: "nascondi 0 presenze",
     noZeroHint: "Nasconde chi ha 0 presenze registrate in una delle squadre scelte. Chi ha giocato più volte nella stessa squadra e ha totalizzato almeno una presenza resta incluso.",
+    nat: "Nazionalità", natAll: "tutte", natNone: "nessuna", natUnknown: "sconosciuta",
     stats: (p, c) => `${p.toLocaleString("it")} giocatori · ${c} squadre`,
     loadFail: "Errore nel caricamento dei dati.", retry: "riprova",
     needTwo: "Aggiungi almeno una squadra.",
@@ -63,6 +64,7 @@ const STR = {
     born: "Born", from: "from", to: "to",
     noZero: "hide 0 apps",
     noZeroHint: "Hides players with 0 recorded appearances at one of the selected clubs. Players with multiple stints at the same club who made at least one appearance are kept.",
+    nat: "Nationality", natAll: "all", natNone: "none", natUnknown: "unknown",
     stats: (p, c) => `${p.toLocaleString("en")} players · ${c} clubs`,
     loadFail: "Failed to load data.", retry: "retry",
     needTwo: "Add at least one club.",
@@ -98,6 +100,8 @@ function applyLang() {
   $("l-adv").textContent = t.adv;
   $("l-born").textContent = t.born;
   byFrom.placeholder = t.from; byTo.placeholder = t.to;
+  $("l-nat").textContent = t.nat;
+  $("natall").textContent = t.natAll; $("natnone").textContent = t.natNone;
   $("l-nozero").textContent = t.noZero;
   $("tip-nozero").textContent = t.noZeroHint;
   $("hint-nozero").setAttribute("aria-label", t.noZeroHint);
@@ -416,7 +420,11 @@ function intersect(lists) {
 
 function solve() {
   results.innerHTML = "";
-  if (clubIds.length === 0) { status.textContent = t.needTwo; return; }
+  if (clubIds.length === 0) {
+    status.textContent = t.needTwo;
+    natCounts.clear(); renderNats();
+    return;
+  }
   const t0 = performance.now();
   const common = intersect(clubIds.map(postings));
   const commonSet = new Set(common);
@@ -442,6 +450,11 @@ function solve() {
   const yf = +byFrom.value || 0, yt = +byTo.value || 0;
   if (yf || yt)  // a set bound excludes unknown birth years
     ids = ids.filter(p => { const b = DB.births[p]; return b && (!yf || b >= yf) && (!yt || b <= yt); });
+  // nationality counts are taken before this filter, so unchecked rows keep their numbers
+  natCounts.clear();
+  for (const p of ids) { const cc = DB.nats[p]; natCounts.set(cc, (natCounts.get(cc) || 0) + 1); }
+  renderNats();
+  if (natOff.size) ids = ids.filter(p => !natOff.has(DB.nats[p]));
   const key = sortBy === "goals" ? (p) => goalsOf.get(p) || 0
             : sortBy === "birth" ? (p) => DB.births[p] || 9999 * sortDir  // unknown last
             : (p) => appsOf.get(p) || 0;
@@ -460,6 +473,59 @@ dirBtn.onclick = () => {
 };
 byFrom.oninput = byTo.oninput = solve;
 noZero.onchange = solve;
+
+// ------------------------------------------------------- nationality filter
+const natToggle = $("nattoggle"), natPanel = $("natpanel"), natList = $("natlist");
+let natOff = new Set();       // unchecked nationality codes ("" = unknown)
+let natCounts = new Map();    // current list's per-nationality counts (pre-nationality-filter)
+
+function renderNats() {
+  let dn = null;
+  try { dn = new Intl.DisplayNames([lang], { type: "region" }); } catch {}
+  const natName = (cc) => {
+    if (!cc) return t.natUnknown;
+    try { return (dn && dn.of(cc)) || cc; } catch { return cc; }
+  };
+  const rows = [...natCounts].map(([cc, n]) => [cc, n, natName(cc)])
+    .sort((a, b) => b[1] - a[1] || a[2].localeCompare(b[2]));
+  const st = natList.scrollTop;  // rebuilt on every solve: keep the reading position
+  natList.innerHTML = "";
+  for (const [cc, n, name] of rows) {
+    const li = document.createElement("li");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = !natOff.has(cc);
+    cb.onchange = () => { if (cb.checked) natOff.delete(cc); else natOff.add(cc); solve(); };
+    const lab = document.createElement("label");
+    lab.append(cb, ` ${cc ? flag(cc) + " " : ""}${name}`);
+    const cnt = document.createElement("span");
+    cnt.className = "ncount"; cnt.textContent = n.toLocaleString(lang);
+    lab.appendChild(cnt);
+    li.appendChild(lab); natList.appendChild(li);
+  }
+  natList.scrollTop = st;
+  const on = rows.reduce((k, [cc]) => k + !natOff.has(cc), 0);
+  $("natcount").textContent = on < rows.length ? ` ${on}/${rows.length}` : "";
+  natToggle.disabled = rows.length === 0;
+  if (!rows.length) natClose();
+}
+
+function natClose() {
+  natPanel.hidden = true;
+  natToggle.setAttribute("aria-expanded", false);
+}
+natToggle.onclick = (e) => {
+  e.stopPropagation();
+  const open = natPanel.hidden;
+  natPanel.hidden = !open;
+  natToggle.setAttribute("aria-expanded", open);
+};
+natPanel.onclick = (e) => e.stopPropagation();
+$("natall").onclick = () => { natOff.clear(); solve(); };
+$("natnone").onclick = () => { for (const cc of natCounts.keys()) natOff.add(cc); solve(); };
+document.addEventListener("click", natClose);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !natPanel.hidden) natClose();
+});
 
 function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
   const frag = document.createDocumentFragment();
