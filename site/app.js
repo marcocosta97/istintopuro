@@ -534,7 +534,7 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
     const li = document.createElement("li");
     li.className = "player";
     const img = DB.imgs[pid]
-      ? `<img loading="lazy" src="https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(DB.imgs[pid])}?width=96" alt="">`
+      ? `<img loading="lazy" src="${thumbURL(DB.imgs[pid])}" alt="">`
       : `<span class="avatar">${initials(pid)}</span>`;
     const apps = appsOf.get(pid), goals = goalsOf.get(pid);
     const parts = [apps ? t.combApps(apps) : "", goals || zeroGoals.has(pid) ? t.combGoals(goals || 0) : ""].filter(Boolean);
@@ -544,7 +544,10 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
     li.innerHTML = `${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.gkSet.has(pid) ? " <small>(GK)</small>" : ""}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span>
       <span class="pmeta">${meta}</span></div><span class="expand">▸</span>`;
     const im = li.querySelector("img");
-    if (im) im.onerror = () => im.replaceWith(avatar(initials(pid)));
+    if (im) im.onerror = () => {  // e.g. original narrower than 120px: the redirect resolves it
+      im.onerror = () => im.replaceWith(avatar(initials(pid)));
+      im.src = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(DB.imgs[pid].slice(2))}?width=96`;
+    };
     li.onclick = () => toggleCareer(li, pid);
     frag.appendChild(li);
   }
@@ -557,6 +560,18 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
     li.onclick = () => { li.remove(); renderResults(ids, appsOf, goalsOf, zeroGoals, shown); };
     results.appendChild(li);
   }
+}
+
+// imgs entries are "hh" (md5 prefix, the Commons hashed-directory path) + underscored
+// filename: enough to hit upload.wikimedia.org directly, skipping the two uncacheable
+// Special:FilePath redirects that made every re-render refetch
+function thumbURL(entry) {
+  const h = entry.slice(0, 2), f = entry.slice(2);
+  let t = `120px-${f}`;
+  if (/\.svg$/i.test(f)) t += ".png";
+  else if (/\.tiff?$/i.test(f)) t = `lossy-page1-${t}.jpg`;
+  else if (/\.pdf$/i.test(f)) t = `page1-${t}.jpg`;
+  return `https://upload.wikimedia.org/wikipedia/commons/thumb/${h[0]}/${h}/${encodeURIComponent(f)}/${encodeURIComponent(t)}`;
 }
 
 const initials = (pid) => DB.names[pid].split(" ").map(w => w[0]).slice(0, 2).join("");

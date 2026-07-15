@@ -25,7 +25,10 @@ get every player who wore all of those shirts.
   (it/en per UI language) via Wikidata's `Special:GoToLinkedPage`, so no
   article titles need to be stored.
 - **Photos** are the only runtime external dependency: thumbnails lazy-loaded
-  from Wikimedia Commons, with initials fallback.
+  from Wikimedia Commons, with initials fallback. `imgs` entries are the
+  filename prefixed with 2 hex chars of its md5 — the Commons hashed-directory
+  path, so the client can build direct thumb URLs (`Special:FilePath`'s
+  redirects are uncacheable).
 
 ## Data pipeline
 

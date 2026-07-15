@@ -12,7 +12,7 @@ Stages (each checkpoints to data/, reruns skip completed stages):
 
 Usage: python3 pipeline/pipeline.py [stage ...]   (default: all)
 """
-import json, os, re, sys, time, gzip
+import hashlib, json, os, re, sys, time, gzip
 from pathlib import Path
 from urllib.parse import unquote
 import requests
@@ -510,6 +510,14 @@ def merge_map(clubs, members):
         m.update({q: canon for q in qs if q != canon})
     return {old: canon for old, canon in m.items() if old in members and canon in members}
 
+def img_key(tail):
+    """P18 URL tail (%-encoded) -> "hh" + underscored filename. The 2-char md5
+    prefix is the Commons hashed-directory path, so the client can build the
+    direct upload.wikimedia.org thumb URL instead of going through the two
+    uncacheable Special:FilePath redirects."""
+    f = unquote(tail).replace(" ", "_")
+    return hashlib.md5(f.encode()).hexdigest()[:2] + f
+
 def stage_build():
     clubs, members, attrs = load("clubs"), load("members"), load("attrs")
     careers, teams = load("careers"), load("teams")
@@ -573,7 +581,7 @@ def stage_build():
     for i, q in enumerate(player_qids):
         a = attrs.get(q) or [None] * 5
         names.append(a[0] or q); births.append(a[1] or 0)
-        nats.append(a[2] or ""); imgs.append(unquote(a[3]) if a[3] else "")  # P18 URL tail is %-encoded
+        nats.append(a[2] or ""); imgs.append(img_key(a[3]) if a[3] else "")
         if len(a) > 4 and a[4]: gk_pids.append(i)  # P413 goalkeeper: their goal counts are unreliable
 
     SITE_DATA.mkdir(parents=True, exist_ok=True)
@@ -645,6 +653,8 @@ def stage_validate():
     for k in ("births", "nats", "imgs"):
         chk(len(idx[k]) == np, f"{k}: {len(idx[k])} rows != {np} players")
     chk(len({c[3] for c in idx["clubs"]}) == nc, "duplicate club QIDs")
+    chk(all(not i or re.fullmatch(r"[0-9a-f]{2}\S+", i) for i in idx["imgs"]),
+        "imgs: entry without md5 prefix or with spaces")
     nl = len(idx["leagues"])
     chk(all(len(c) == 6 and -1 <= c[5] < nl for c in idx["clubs"]), "bad current-league field")
     for i in range(nl):  # every league must keep a plausible current lineup
