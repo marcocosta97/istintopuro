@@ -196,6 +196,8 @@ async function boot() {
     status.appendChild(b);
     return;
   }
+  DB.gkSet = new Set();  // goalkeepers ("gks" delta-encoded like postings): goal counts are unreliable, never shown
+  { let acc = 0; for (const d of DB.gks || []) DB.gkSet.add(acc += d); }
   DB.searchNames = DB.clubs.map(c => norm(c[0]));
   DB.sortNames = DB.clubs.map(c => sortName(c[0]));
   DB.searchInitials = DB.clubs.map(c => initialsOf(c[0]));
@@ -427,7 +429,7 @@ function solve() {
       if (!commonSet.has(p)) continue;
       if (apps[i] >= 0) appsOf.set(p, (appsOf.get(p) || 0) + apps[i]);
       if (apps[i] === 0) zero.add(p);
-      if (goals[i] >= 0) {
+      if (goals[i] >= 0 && !DB.gkSet.has(p)) {
         goalsOf.set(p, (goalsOf.get(p) || 0) + goals[i]);
         gKnown.set(p, (gKnown.get(p) || 0) + 1);
       }
@@ -470,7 +472,7 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
     const apps = appsOf.get(pid), goals = goalsOf.get(pid);
     const parts = [apps ? t.combApps(apps) : "", goals || zeroGoals.has(pid) ? t.combGoals(goals || 0) : ""].filter(Boolean);
     const meta = parts.length ? `${parts.join(" · ")} <span class="comb">(${t.comb(!!apps)})</span>` : "";
-    li.innerHTML = `${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span>
+    li.innerHTML = `${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.gkSet.has(pid) ? " <small>(GK)</small>" : ""}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span>
       <span class="pmeta">${meta}</span></div><span class="expand">▸</span>`;
     const im = li.querySelector("img");
     if (im) im.onerror = () => im.replaceWith(avatar(initials(pid)));
@@ -510,12 +512,13 @@ async function toggleCareer(li, pid) {
   const [qid = 0, career = []] = table[pid] || [];
   if (li.querySelector(".career")) return;
   const selNames = new Set(clubIds.map(ci => DB.clubs[ci][0]));
+  const gk = DB.gkSet.has(pid);  // goalkeeper goal counts are unreliable, show apps only
   const div = document.createElement("div");
   div.className = "career";
   div.innerHTML = (career.filter(e => e[0]).map(([team, s, e, apps, goals]) =>
     `<div class="crow${selNames.has(team) ? " hit" : ""}">
        <span class="cyears">${s || "?"}–${e || (s ? "" : "?")}</span><span class="cteam">${esc(team)}</span>
-       <span class="cstats">${apps != null ? apps + " " + t.apps : ""}${goals != null ? " · " + goals + " " + t.goals : ""}</span>
+       <span class="cstats">${apps != null ? apps + " " + t.apps : ""}${!gk && goals != null ? " · " + goals + " " + t.goals : ""}</span>
      </div>`).join("") || `<div class='crow'>${t.noData}</div>`)
     + (qid ? `<a class="wiki" href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${lang}wiki/Q${qid}" target="_blank" rel="noopener">Wikipedia ↗</a>
               <a class="wiki" href="https://www.wikidata.org/wiki/Q${qid}" target="_blank" rel="noopener">Wikidata ↗</a>` : "");

@@ -381,20 +381,21 @@ def stage_attrs():
         vals = " ".join(f"wd:{q}" for q in batch)
         rows = sparql(f"""
           SELECT ?p (SAMPLE(?len) AS ?en) (SAMPLE(?lmul) AS ?mul) (MIN(?b) AS ?birth)
-                 (SAMPLE(?img) AS ?image) (SAMPLE(?cc) AS ?nat) WHERE {{
+                 (SAMPLE(?img) AS ?image) (SAMPLE(?cc) AS ?nat) (SAMPLE(?gk1) AS ?gk) WHERE {{
             VALUES ?p {{ {vals} }}
             OPTIONAL {{ ?p rdfs:label ?len FILTER(LANG(?len)="en") }}
             OPTIONAL {{ ?p rdfs:label ?lmul FILTER(LANG(?lmul) IN ("mul","it","es","de","fr")) }}
             OPTIONAL {{ ?p wdt:P569 ?b }}
             OPTIONAL {{ ?p wdt:P18 ?img }}
             OPTIONAL {{ ?p wdt:P27/wdt:P297 ?cc }}
+            OPTIONAL {{ ?p wdt:P413 wd:Q201330 . BIND(1 AS ?gk1) }}
           }} GROUP BY ?p""")
         out = []
         for r in rows:
             img = v(r, "image")
             out.append([qid(v(r, "p")), v(r, "en") or v(r, "mul"),
                         year(v(r, "birth", "")), v(r, "nat"),
-                        img.rsplit("/", 1)[1] if img else None])
+                        img.rsplit("/", 1)[1] if img else None, num(r, "gk")])
         return out
     rows = resumable("attrs", players, 350, fetch)
     save("attrs", {r[0]: r[1:] for r in rows})
@@ -547,19 +548,21 @@ def stage_build():
         apps_col.append([-1 if s[2] is None else s[2] for s in sp])  # -1 = unknown
         goals_col.append([-1 if s[3] is None else s[3] for s in sp])
 
-    names, births, nats, imgs = [], [], [], []
-    for q in player_qids:
-        a = attrs.get(q) or [None, None, None, None]
+    names, births, nats, imgs, gk_pids = [], [], [], [], []
+    for i, q in enumerate(player_qids):
+        a = attrs.get(q) or [None] * 5
         names.append(a[0] or q); births.append(a[1] or 0)
         nats.append(a[2] or ""); imgs.append(unquote(a[3]) if a[3] else "")  # P18 URL tail is %-encoded
+        if len(a) > 4 and a[4]: gk_pids.append(i)  # P413 goalkeeper: their goal counts are unreliable
 
     SITE_DATA.mkdir(parents=True, exist_ok=True)
     # data freshness = newest Wikidata checkpoint, not build time
     built = time.strftime("%Y-%m-%d", time.localtime(max(p.stat().st_mtime for p in DATA.glob("*.json*"))))
+    gks = [gk_pids[0]] + [b - a for a, b in zip(gk_pids, gk_pids[1:])] if gk_pids else []
     index = {"built": built, "nshards": NSHARDS,  # app.js reads the shard count from here
              "leagues": [list(LEAGUES[q]) for q in LEAGUE_ORDER],
              "clubs": out_clubs, "postings": postings, "apps": apps_col,
-             "goals": goals_col,
+             "goals": goals_col, "gks": gks,
              "names": names, "births": births, "nats": nats, "imgs": imgs}
     blob = json.dumps(index, ensure_ascii=False, separators=(",", ":")).encode()
     (SITE_DATA / "index.json").write_bytes(blob)
@@ -592,6 +595,7 @@ def stage_build():
     print(f"build: {len(out_clubs)} clubs, {len(names)} players, {n_post} postings")
     print(f"  index.json {len(blob)/1e6:.2f} MB raw, {gz/1e6:.2f} MB gzip")
     print(f"  career shards total {shard_bytes/1e6:.2f} MB ({NSHARDS} files)")
+    print(f"  goalkeepers: {len(gk_pids)} ({len(gk_pids)/len(names):.0%})")
     print(f"  coverage: birth {sum(1 for b in births if b)/len(names):.0%}, "
           f"img {sum(1 for i in imgs if i)/len(names):.0%}, "
           f"nat {sum(1 for n in nats if n)/len(names):.0%}, "
@@ -630,6 +634,9 @@ def stage_validate():
         chk(not d or (d[0] >= 0 and all(x > 0 for x in d[1:]) and sum(d) < np),
             f"club {c}: bad posting deltas")
         chk(all(x >= -1 for x in a + g), f"club {c}: apps/goals below -1")
+    gk = idx.get("gks")
+    chk(isinstance(gk, list) and (not gk or (gk[0] >= 0 and all(x > 0 for x in gk[1:])
+        and sum(gk) < np)), "bad gks list")
     missing = [i for i in range(NSHARDS) if not (SITE_DATA / "career" / f"{i}.json").exists()]
     chk(not missing, f"missing career shards: {missing[:5]}")
     base = os.environ.get("VALIDATE_BASELINE")

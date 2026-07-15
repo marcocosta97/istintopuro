@@ -9,7 +9,9 @@ get every player who wore all of those shirts.
   477 clubs from the top-5 leagues + their second divisions, all-time) is
   precomputed into `site/data/index.json` as an inverted index
   (club → delta-encoded sorted player IDs, plus per-pair appearances and
-  goals, `-1` = unknown). Each club record is `[name, country, leagueMask,
+  goals, `-1` = unknown; plus `gks`, a delta-encoded list of goalkeeper
+  player IDs — the UI marks them "(GK)" and hides their goal counts, which
+  are unreliable on Wikidata). Each club record is `[name, country, leagueMask,
   QID, dissolvedYear, currentLeague]` — `dissolvedYear` (Wikidata P576, `0`
   if active) drives the `†year` marker on defunct clubs; `currentLeague`
   (league index, `-1` if outside the covered leagues) drives the FM-style
@@ -47,7 +49,9 @@ Quality passes: women (Wikidata P21) are excluded at the `members` stage —
 they reach men's club items through women's-section P54 statements. In
 `build`, P54 statements with no qualifiers at all (no years/apps/goals)
 are discarded as unreliable, re-founded "phoenix" clubs are merged into
-one entry, and national sides are filtered out of career panels. The index is stamped with the extraction date (newest
+one entry, and national sides are filtered out of career panels.
+Goalkeepers (P413) are flagged in the index so the UI can suppress their
+goal counts. The index is stamped with the extraction date (newest
 checkpoint), shown in the site footer.
 
 Current league membership (`CURRENT` in `pipeline.py`) is a curated list
