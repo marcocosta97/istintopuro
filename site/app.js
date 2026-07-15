@@ -600,9 +600,10 @@ async function toggleCareer(li, pid) {
   const div = document.createElement("div");
   div.className = "career";
   const spells = career.filter(e => e[0]);
-  // a spell strictly inside an earlier spell's known range reads as a loan from that club
-  const loan = spells.map(([, s, e], i) => s && e && spells.slice(0, i).some(
-    ([, s2, e2]) => s2 && e2 && s2 <= s && e <= e2 && e2 - s2 > e - s));
+  // explicit Wikidata loan flag (P1642), else heuristic: a spell strictly inside
+  // an earlier spell's known range reads as a loan from that club
+  const loan = spells.map(([, s, e, , , ln], i) => !!ln || !!(s && e && spells.slice(0, i).some(
+    ([, s2, e2]) => s2 && e2 && s2 <= s && e <= e2 && e2 - s2 > e - s)));
   div.innerHTML = (spells.map(([team, s, e, apps, goals], i) =>
     `<div class="crow${selNames.has(team) ? " hit" : ""}">
        <span class="cyears">${s && s === e ? s : `${s || "?"}–${e || (s ? "" : "?")}`}</span><span class="cteam">${loan[i] ? `<span class="loan" title="${t.loan}">↳</span> ` : ""}${esc(team)}</span>

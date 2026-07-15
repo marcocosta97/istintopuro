@@ -429,32 +429,41 @@ def stage_careers():
     def fetch(batch):
         vals = " ".join(f"wd:{q}" for q in batch)
         rows = sparql(f"""
-          SELECT ?p ?team ?start ?end ?apps ?goals WHERE {{
+          SELECT ?p ?st ?team ?start ?end ?apps ?goals ?loan WHERE {{
             VALUES ?p {{ {vals} }}
             ?p p:P54 ?st . ?st ps:P54 ?team .
             OPTIONAL {{ ?st pq:P580 ?start }} OPTIONAL {{ ?st pq:P582 ?end }}
             OPTIONAL {{ ?st pq:P1350 ?apps }} OPTIONAL {{ ?st pq:P1351 ?goals }}
+            OPTIONAL {{ ?st pq:P1642 ?loan }}
           }}""")
-        return [[qid(v(r, "p")), qid(v(r, "team")), year(v(r, "start", "")),
-                 year(v(r, "end", "")), num(r, "apps"), num(r, "goals")] for r in rows]
+        return [[qid(v(r, "p")), qid(v(r, "st")), qid(v(r, "team")), year(v(r, "start", "")),
+                 year(v(r, "end", "")), num(r, "apps"), num(r, "goals"),
+                 1 if (v(r, "loan") or "").endswith("Q2914547") else 0] for r in rows]
     rows = resumable("careers", players, 250, fetch)
-    careers = {}
-    for p, team, s, e, a, g in rows:
+    # aggregate per statement, not per team: distinct spells at the same club
+    # (loan + return, re-signings) must stay separate career entries
+    sts = {}
+    for p, st, team, s, e, a, g, ln in rows:
         if s is not None and not 1850 <= s <= 2035: s = None  # junk precision-0 dates
         if e is not None and not 1850 <= e <= 2035: e = None
-        cur = careers.setdefault(p, {}).setdefault(team, [None, None, None, None])
-        # multiple qualifier values / duplicate rows: keep min start, max end, max apps/goals
-        if s is not None: cur[0] = min(cur[0], s) if cur[0] else s
-        if e is not None: cur[1] = max(cur[1], e) if cur[1] else e
-        if a is not None: cur[2] = max(cur[2] or 0, a)
-        if g is not None: cur[3] = max(cur[3] or 0, g)
+        cur = sts.setdefault(st, [p, team, None, None, None, None, 0])
+        # multiple qualifier values fan one statement out over several rows:
+        # keep min start, max end, max apps/goals
+        if s is not None: cur[2] = min(cur[2], s) if cur[2] else s
+        if e is not None: cur[3] = max(cur[3], e) if cur[3] else e
+        if a is not None: cur[4] = max(cur[4] or 0, a)
+        if g is not None: cur[5] = max(cur[5] or 0, g)
+        if ln: cur[6] = 1
+    careers = {}
+    for p, *sp in sts.values():  # sp = [team, start, end, apps, goals, loan]
+        careers.setdefault(p, []).append(sp)
     save("careers", careers)
-    print(f"careers: {sum(map(len, careers.values()))} statements, {len(careers)} players")
+    print(f"careers: {len(sts)} spells, {len(careers)} players")
 
 # ----------------------------------------------------------------- stage: teams
 def stage_teams():
     careers, clubs = load("careers"), load("clubs")
-    teams = sorted({t for c in careers.values() for t in c} - set(clubs))
+    teams = sorted({sp[0] for c in careers.values() for sp in c} - set(clubs))
     def fetch(batch):
         vals = " ".join(f"wd:{q}" for q in batch)
         rows = sparql(f"""
@@ -532,13 +541,13 @@ def stage_build():
     # (start/end/apps/goals); bare P54 statements are too often wrong
     def spell(p, qs):  # aggregated career entry of player p across a club group
         s = e = a = g = None
-        for q in qs:
-            ent = careers.get(p, {}).get(q)
-            if not ent: continue
-            if ent[0] is not None: s = min(s, ent[0]) if s else ent[0]
-            if ent[1] is not None: e = max(e, ent[1]) if e else ent[1]
-            if ent[2] is not None: a = (a or 0) + ent[2]
-            if ent[3] is not None: g = (g or 0) + ent[3]
+        qs = set(qs)
+        for team, s2, e2, a2, g2, _ in careers.get(p, ()):
+            if team not in qs: continue
+            if s2 is not None: s = min(s, s2) if s else s2
+            if e2 is not None: e = max(e, e2) if e else e2
+            if a2 is not None: a = (a or 0) + a2  # sums across spells and group members
+            if g2 is not None: g = (g or 0) + g2
         return s, e, a, g
 
     kept_members, n_dropped = {}, 0
@@ -602,10 +611,11 @@ def stage_build():
     for q, career in careers.items():
         if q not in pid: continue  # all memberships dropped as unqualified
         i = pid[q]
-        entries = [[club_name.get(t, ""), c[0], c[1], c[2], c[3]] for t, c in career.items()
-                   if any(x is not None for x in c)
+        entries = [[club_name.get(t, ""), s, e, a, g] + ([1] if ln else [])
+                   for t, s, e, a, g, ln in career
+                   if any(x is not None for x in (s, e, a, g))
                    and not NATIONAL.search(club_name.get(t, ""))]
-        entries.sort(key=lambda e: e[1] or 9999)
+        entries.sort(key=lambda x: (x[1] or 9999, x[2] or 9999))
         shards[i % NSHARDS][str(i)] = [int(q[1:]), entries]  # QID number -> Wikipedia via Special:GoToLinkedPage
     (SITE_DATA / "career").mkdir(exist_ok=True)
     shard_bytes = 0

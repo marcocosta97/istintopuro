@@ -21,7 +21,11 @@ get every player who wore all of those shirts.
 - **Careers** are sharded into `site/data/career/*.json` (128 files; the
   count is stamped into the index as `nshards`) and lazy-loaded when a
   player row is expanded. Each entry is
-  `[QID number, spells]`; the QID links the player's Wikipedia article
+  `[QID number, spells]` — one spell per P54 statement (a loan and a later
+  return stay separate rows), each `[team, start, end, apps, goals]` plus
+  a trailing `1` when Wikidata marks it a loan (P1642); the UI also infers
+  loans from a spell nested inside an earlier one's range. The QID links
+  the player's Wikipedia article
   (it/en per UI language) via Wikidata's `Special:GoToLinkedPage`, so no
   article titles need to be stored.
 - **Photos** are the only runtime external dependency: thumbnails lazy-loaded
