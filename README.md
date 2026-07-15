@@ -51,7 +51,10 @@ they reach men's club items through women's-section P54 statements. In
 are discarded as unreliable, re-founded "phoenix" clubs are merged into
 one entry, and national sides are filtered out of career panels.
 Goalkeepers (P413) are flagged in the index so the UI can suppress their
-goal counts. The index is stamped with the extraction date (newest
+goal counts. Citizenships pointing at states without an ISO code resolve
+through a curated map (`NAT_FIX`: Kingdom of Denmark → DK, Kingdom of
+Italy → IT, the German Reich lineage → DE, …); ambiguous ones (USSR,
+Yugoslavia, Czechoslovakia) stay unknown. The index is stamped with the extraction date (newest
 checkpoint), shown in the site footer.
 
 Current league membership (`CURRENT` in `pipeline.py`) is a curated list

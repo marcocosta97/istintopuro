@@ -373,6 +373,23 @@ def stage_members():
     n_players = len({p for ps in members.values() for p in ps})
     print(f"members: {sum(map(len, members.values()))} postings, {n_players} distinct players")
 
+# citizenship (P27) states without an ISO code (P297) whose modern country is
+# unambiguous — historical/umbrella items like Eriksen's "Kingdom of Denmark".
+# Genuinely ambiguous ones (USSR, Yugoslavia, Czechoslovakia, Austria-Hungary)
+# stay unknown rather than guessing a successor.
+NAT_FIX = {
+    "Q174193": "GB",  # United Kingdom of Great Britain and Ireland (pre-1922)
+    "Q21":     "GB",  # England
+    "Q756617": "DK",  # Kingdom of Denmark (the realm; ISO code sits on Q35)
+    "Q172579": "IT",  # Kingdom of Italy
+    "Q43287":  "DE",  # German Empire
+    "Q1206012": "DE", # German Reich
+    "Q41304":  "DE",  # Weimar Republic
+    "Q7318":   "DE",  # Nazi Germany
+    "Q713750": "DE",  # West Germany
+    "Q207272": "PL",  # Second Polish Republic
+}
+
 # ---------------------------------------------------------------- stage: attrs
 def stage_attrs():
     members = load("members")
@@ -381,20 +398,24 @@ def stage_attrs():
         vals = " ".join(f"wd:{q}" for q in batch)
         rows = sparql(f"""
           SELECT ?p (SAMPLE(?len) AS ?en) (SAMPLE(?lmul) AS ?mul) (MIN(?b) AS ?birth)
-                 (SAMPLE(?img) AS ?image) (SAMPLE(?cc) AS ?nat) (SAMPLE(?gk1) AS ?gk) WHERE {{
+                 (SAMPLE(?img) AS ?image) (SAMPLE(?cc) AS ?nat) (SAMPLE(?ctry) AS ?natq)
+                 (SAMPLE(?gk1) AS ?gk) WHERE {{
             VALUES ?p {{ {vals} }}
             OPTIONAL {{ ?p rdfs:label ?len FILTER(LANG(?len)="en") }}
             OPTIONAL {{ ?p rdfs:label ?lmul FILTER(LANG(?lmul) IN ("mul","it","es","de","fr")) }}
             OPTIONAL {{ ?p wdt:P569 ?b }}
             OPTIONAL {{ ?p wdt:P18 ?img }}
-            OPTIONAL {{ ?p wdt:P27/wdt:P297 ?cc }}
+            OPTIONAL {{ ?p wdt:P27 ?ctry . OPTIONAL {{ ?ctry wdt:P297 ?cc }} }}
             OPTIONAL {{ ?p wdt:P413 wd:Q201330 . BIND(1 AS ?gk1) }}
           }} GROUP BY ?p""")
         out = []
         for r in rows:
             img = v(r, "image")
+            nat = v(r, "nat")
+            if not nat and "natq" in r:  # citizenship without ISO code: curated map
+                nat = NAT_FIX.get(qid(v(r, "natq")))
             out.append([qid(v(r, "p")), v(r, "en") or v(r, "mul"),
-                        year(v(r, "birth", "")), v(r, "nat"),
+                        year(v(r, "birth", "")), nat,
                         img.rsplit("/", 1)[1] if img else None, num(r, "gk")])
         return out
     rows = resumable("attrs", players, 350, fetch)
