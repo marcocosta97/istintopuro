@@ -396,7 +396,8 @@ function renderChips() {
     const c = DB.clubs[ci];
     const el = document.createElement("span");
     el.className = "chip";
-    el.innerHTML = `${countryFlag(c[1])} ${esc(c[0])}${defunct(c)} <button aria-label="${t.remove}">×</button>`;
+    el.title = c[0];  // chips show the short FM-style name; full name in search + careers
+    el.innerHTML = `${countryFlag(c[1])} ${esc(coreClub(c[0]))}${defunct(c)} <button aria-label="${t.remove}">×</button>`;
     el.querySelector("button").onclick = () => removeClub(ci);
     chips.appendChild(el);
   });
