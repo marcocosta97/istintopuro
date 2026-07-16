@@ -12,6 +12,7 @@ let mode = "club";           // "club" (players in common) | "player" (clubs in 
 let clubIds = [];            // selected club indices
 let playerIds = [];          // selected player ids (player mode keeps its own selection)
 let solveGen = 0;            // stale-async guard: only the newest player solve may render
+let detail = localStorage.pdetail === "1";  // shared-club cards: show apps/goals + per-team totals
 let sortBy = "apps", sortDir = -1;
 const decoded = new Map();   // club index -> Int32Array of player ids
 const careerCache = new Map();
@@ -30,6 +31,8 @@ const STR = {
     foundClubs: (n, ms) => `${n} squadr${n === 1 ? "a" : "e"} in comune · ${ms} ms`,
     mates: (span) => `compagni ${span}`,
     noOverlap: "(mai insieme)",
+    selPlayers: "giocatori selezionati",
+    detail: "dettagli",
     loading: "Caricamento dati…",
     footer: `dati: <a href="https://www.wikidata.org">Wikidata</a> · foto: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
     built: (d) => `aggiornato al ${d}`,
@@ -68,6 +71,8 @@ const STR = {
     foundClubs: (n, ms) => `${n} shared club${n === 1 ? "" : "s"} · ${ms} ms`,
     mates: (span) => `teammates ${span}`,
     noOverlap: "(never overlapped)",
+    selPlayers: "selected players",
+    detail: "details",
     loading: "Loading data…",
     footer: `data: <a href="https://www.wikidata.org">Wikidata</a> · photos: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
     built: (d) => `updated ${d}`,
@@ -556,9 +561,11 @@ function solve() {
 
 // ------------------------------------------------------ solve: player mode
 // one player = plain lookup: the usual result row with the career panel open
+let sharedNames = new Set();  // shared clubs of the current selection: highlighted in expanded careers
 async function solvePlayers() {
   results.innerHTML = "";
   const g = ++solveGen;
+  sharedNames = new Set();
   if (!playerIds.length) { status.textContent = t.needPlayer; return; }
   if (playerIds.length === 1) {
     status.textContent = "";
@@ -572,23 +579,32 @@ async function solvePlayers() {
   if (g !== solveGen || mode !== "player") return;  // selection or mode changed mid-fetch
   const t0 = performance.now();
   const curYear = +(DB.built || "").slice(0, 4) || new Date().getFullYear();
-  // per player: team name -> [[start, end, effEnd], ...]; distinct spells stay
-  // separate. An open-ended spell effectively runs until the player's next
-  // transfer (loans out don't end it) or, with no later move, the dataset year.
+  // per player: team name -> [[start, end, effEnd, apps, goals], ...]; distinct
+  // spells stay separate. An open-ended spell effectively runs until the player's
+  // next transfer (loans out don't end it) or, with no later move, the dataset year.
   const maps = careers.map(([, career = []]) => {
     const spells = career.filter(e => e[0]);
     const m = new Map();
-    spells.forEach(([team, s, e], i) => {
+    spells.forEach(([team, s, e, a, gl], i) => {
       let eff = e;
       if (s && !e) {
         const next = spells.slice(i + 1).find(sp => sp[1] && sp[1] >= s && !sp[5]);
         eff = next ? next[1] : curYear;
       }
       if (!m.has(team)) m.set(team, []);
-      m.get(team).push([s, e, eff]);
+      m.get(team).push([s, e, eff, a, gl]);
     });
     return m;
   });
+  // apps/goals of player k at a club: known values summed across their spells
+  const sums = (k, name) => {
+    let a = null, gl = null;
+    for (const sp of maps[k].get(name) || []) {
+      if (sp[3] != null) a = (a || 0) + sp[3];
+      if (sp[4] != null) gl = (gl || 0) + sp[4];
+    }
+    return [a, gl];
+  };
   // career team names are canonical within a build, so a plain string match
   // is exact — same trick as the career panel's `hit` highlight
   const smallest = maps.reduce((a, b) => a.size <= b.size ? a : b);
@@ -596,6 +612,10 @@ async function solvePlayers() {
     Math.min(...maps.map(m => Math.min(...m.get(name).map(([s]) => s || Infinity))));
   const shared = [...smallest.keys()].filter(name => maps.every(m => m.has(name)))
     .sort((a, b) => startOf(a) - startOf(b) || a.localeCompare(b));
+  // with a single shared team every figure equals the combined meta on the
+  // player rows below — stats and totals only from two teams up, and only
+  // when the "dettagli" toggle is on (the compact view stays years-only)
+  const multi = shared.length > 1, showStats = multi && detail;
 
   DB.clubByName ||= new Map(DB.clubs.map((c, i) => [c[0], i]));
   const frag = document.createDocumentFragment();
@@ -624,13 +644,73 @@ async function solvePlayers() {
     }
     const li = document.createElement("li");
     li.className = "player sclub";
-    li.innerHTML = `<div class="pinfo"><span class="pname">${c ? countryFlag(c[1]) + " " : ""}${esc(name)}${c ? defunct(c) : ""}${badge}</span></div>`
-      + playerIds.map((pid, k) =>  // name left, spells right: multi-range strings vary too much to column-align
-        `<div class="crow"><span class="cteam">${esc(DB.names[pid])}</span><span class="cstats">${maps[k].get(name).map(([s, e]) => yspan(s, e)).join(", ")}</span></div>`).join("");
+    const lg = c && c[5] >= 0 ? DB.leagues[c[5]][0] : t.others;  // current league; outside/dissolved/uncovered = Others
+    li.innerHTML = `<div class="pinfo"><span class="pname"><span class="cname${c ? " link" : ""}">${c ? countryFlag(c[1]) + " " : ""}${esc(name)}</span>${c ? defunct(c) : ""} <small class="clg">· ${lg}</small>${badge}</span></div>`
+      + playerIds.map((pid, k) => {  // name left, spells right: multi-range strings vary too much to column-align
+        const [a, gl] = sums(k, name);
+        const st = showStats ? [a != null ? a + " " + t.apps : "",
+                                gl != null && !DB.gkSet.has(pid) ? gl + " " + t.goals : ""].filter(Boolean).join(" · ") : "";
+        return `<div class="crow"><span class="cteam">${esc(DB.names[pid])}${st ? ` <small class="cst">${st}</small>` : ""}</span><span class="cstats">${maps[k].get(name).map(([s, e]) => yspan(s, e)).join(", ")}</span></div>`;
+      }).join("");
+    if (showStats) {  // team total: everyone's known figures at this club together
+      let a = null, gl = null;
+      playerIds.forEach((pid, k) => {
+        const [sa, sg] = sums(k, name);
+        if (sa != null) a = (a || 0) + sa;
+        if (sg != null && !DB.gkSet.has(pid)) gl = (gl || 0) + sg;
+      });
+      const st = [a != null ? a + " " + t.apps : "", gl != null ? gl + " " + t.goals : ""].filter(Boolean).join(" · ");
+      if (st) li.innerHTML += `<div class="crow tcrow"><span class="cteam"><small class="cst">(${t.comb(a != null)}) ${st}</small></span></div>`;
+    }
+    if (c)  // covered club: click through to club mode, showing its full roster
+      li.querySelector(".cname").onclick = () => { clubIds = [ci]; syncHash(); setMode("club"); };
     frag.appendChild(li);
   }
   results.appendChild(frag);
+  sharedNames = new Set(shared);
+  // the selected players themselves, expandable to their full careers —
+  // all there is to show when they share no club at all. Their meta mirrors
+  // club mode: apps/goals combined across the shared clubs, 0 goals only
+  // when known at every one of them.
+  const appsOf = new Map(), goalsOf = new Map(), zeroGoals = new Set();
+  playerIds.forEach((pid, k) => {
+    let a = null, gl = null, gClubs = 0;
+    for (const name of shared) {
+      const [sa, sg] = sums(k, name);
+      if (sa != null) a = (a || 0) + sa;
+      if (sg != null) { gl = (gl || 0) + sg; gClubs++; }
+    }
+    if (a != null) appsOf.set(pid, a);
+    if (!DB.gkSet.has(pid)) {
+      if (gl != null) goalsOf.set(pid, gl);
+      if (shared.length && gClubs === shared.length && !gl) zeroGoals.add(pid);
+    }
+  });
+  const sep = document.createElement("li");
+  sep.className = "lsep";
+  sep.textContent = t.selPlayers;
+  if (appsOf.size || goalsOf.size) {  // grand total: everyone, every shared team — always on
+    let a = 0, gl = 0;
+    for (const x of appsOf.values()) a += x;
+    for (const x of goalsOf.values()) gl += x;
+    const st = [appsOf.size ? a.toLocaleString(lang) + " " + t.apps : "",
+                goalsOf.size ? gl.toLocaleString(lang) + " " + t.goals : ""].filter(Boolean).join(" · ");
+    sep.innerHTML = `<span>${t.selPlayers}</span><span class="tot">${st} <span class="comb">(${t.comb(!!appsOf.size)})</span></span>`;
+  }
+  results.appendChild(sep);
+  renderResults(playerIds, appsOf, goalsOf, zeroGoals);
   status.textContent = t.foundClubs(shared.length, (performance.now() - t0).toFixed(1));
+  if (multi) {  // dettagli switch, right-aligned: apps/goals + per-team totals in the cards
+    const lab = document.createElement("label");
+    lab.className = "dtg";
+    lab.innerHTML = `${t.detail}<input type="checkbox"${detail ? " checked" : ""}><span class="knob"></span>`;
+    lab.querySelector("input").onchange = (e) => {
+      detail = e.target.checked;
+      localStorage.pdetail = detail ? "1" : "0";
+      solvePlayers();
+    };
+    status.appendChild(lab);
+  }
 }
 
 sortSel.onchange = () => { sortBy = sortSel.value; solve(); };
@@ -706,8 +786,10 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
       : `<span class="avatar">${initials(pid)}</span>`;
     const apps = appsOf.get(pid), goals = goalsOf.get(pid);
     const parts = [apps ? t.combApps(apps) : "", goals || zeroGoals.has(pid) ? t.combGoals(goals || 0) : ""].filter(Boolean);
-    // "(combined)" only makes sense across two or more clubs
-    const comb = clubIds.length > 1 ? ` <span class="comb">(${t.comb(!!apps)})</span>` : "";
+    // "(combined)" only makes sense across two or more clubs — the selected
+    // ones in club mode, the shared ones under a player-mode selection
+    const nsel = mode === "club" ? clubIds.length : sharedNames.size;
+    const comb = nsel > 1 ? ` <span class="comb">(${t.comb(!!apps)})</span>` : "";
     const meta = parts.length ? `${parts.join(" · ")}${comb}` : "";
     li.innerHTML = `${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.gkSet.has(pid) ? " <small>(GK)</small>" : ""}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span>
       <span class="pmeta">${meta}</span></div><span class="expand">▸</span>`;
@@ -768,8 +850,8 @@ async function toggleCareer(li, pid) {
   try { [qid = 0, career = []] = await careerOf(pid); }
   catch { li.querySelector(".expand").textContent = "▸"; return; }
   if (li.querySelector(".career")) return;
-  // in player mode the (persisted) club selection must not highlight rows
-  const selNames = new Set(mode === "club" ? clubIds.map(ci => DB.clubs[ci][0]) : []);
+  // club mode highlights the selected clubs; player mode the shared ones
+  const selNames = mode === "club" ? new Set(clubIds.map(ci => DB.clubs[ci][0])) : sharedNames;
   const gk = DB.gkSet.has(pid);  // goalkeeper goal counts are unreliable, show apps only
   const div = document.createElement("div");
   div.className = "career";

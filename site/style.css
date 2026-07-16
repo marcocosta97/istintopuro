@@ -243,12 +243,30 @@ h1 .accent { color: var(--accent); }
 .hint.show .tip { display: block; }
 @media (hover: hover) { .hint:hover .tip { display: block; } }  /* hover only on real pointers; touch uses .show toggle */
 
-#status { color: var(--muted); font-size: .9rem; margin: 1rem 0 .5rem; min-height: 1.4em; }
+#status {
+  color: var(--muted); font-size: .9rem; margin: 1rem 0 .5rem; min-height: 1.4em;
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+}
 #status button {
   cursor: pointer; font: inherit; font-size: .85rem; color: var(--fg); background: var(--card);
   border: 1px solid var(--line); border-radius: 7px; padding: .12rem .5rem;
 }
 #status button:hover { border-color: var(--accent); }
+/* dettagli switch, pushed to the right edge of the status row */
+.dtg { margin-left: auto; display: inline-flex; align-items: center; gap: .4rem; cursor: pointer; font-size: .85rem; }
+.dtg input { position: absolute; opacity: 0; pointer-events: none; }
+.dtg .knob {
+  width: 1.9rem; height: 1.05rem; border-radius: 999px; background: var(--line);
+  position: relative; transition: background .15s; flex-shrink: 0;
+}
+.dtg .knob::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: calc(1.05rem - 4px); height: calc(1.05rem - 4px); border-radius: 50%;
+  background: var(--card); transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25);
+}
+.dtg input:checked + .knob { background: var(--accent); }
+.dtg input:checked + .knob::after { transform: translateX(.85rem); }
+.dtg input:focus-visible + .knob { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 #results { list-style: none; padding: 0; }
 .player {
@@ -284,10 +302,25 @@ h1 .accent { color: var(--accent); }
 
 /* player mode: one card per shared club, a .crow per selected player */
 .sclub { display: block; cursor: default; }
-.sclub:hover { border-color: var(--line); }  /* inert card: no click affordance */
+.sclub:hover { border-color: var(--line); }  /* the card itself isn't clickable */
 .sclub .pinfo { margin-bottom: .2rem; }
+/* header as a flex row: the teammates badge right-aligns over the year columns */
+.sclub .pname { display: flex; align-items: baseline; flex-wrap: wrap; gap: .1rem .35rem; }
+.sclub .mates, .sclub .nomates { margin-left: auto; }
+.sclub .cname.link { cursor: pointer; }
+.sclub .cname.link:hover { color: var(--accent); text-decoration: underline; }
+.clg { color: var(--muted); font-weight: 400; white-space: nowrap; }
+.cst { color: var(--muted); white-space: nowrap; }  /* player's apps/goals at the shared club */
 .mates { color: var(--accent); font-size: .8rem; white-space: nowrap; }
 .nomates { color: var(--muted); font-size: .8rem; white-space: nowrap; }
+.sclub .tcrow { border-top: 1px solid var(--line); margin-top: .2rem; padding-top: .25rem; }
+.lsep {  /* divider before the selected players' own expandable rows */
+  color: var(--muted); font-size: .72rem; text-transform: uppercase;
+  letter-spacing: .05em; margin: .9rem 0 .4rem; padding: 0 .2rem;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 1rem;
+}
+.lsep .tot { text-transform: none; letter-spacing: normal; font-size: .78rem; white-space: nowrap; }
+.lsep .comb { opacity: .55; }
 
 footer { margin-top: 3rem; color: var(--muted); font-size: .8rem; text-align: center; }
 footer a { color: inherit; }

@@ -33,10 +33,23 @@ player mode and go the other way: pick players, get the clubs they shared.
   fetch per selected player, clubs intersected by their canonical name
   strings (any career team counts, not just the covered universe; a single
   player just gets their career panel). A "compagni/teammates" window is
-  claimed only for years every selected player provably spent at the club
-  (fully-dated spells); "(mai insieme)" only when everyone's spells there
-  are dated and still disjoint. Player selections aren't hash-synced —
-  player QIDs aren't in the index, so a shared link couldn't be restored.
+  claimed only for years every selected player provably spent at the club:
+  an open-ended spell counts until the player's next transfer (loans out
+  don't end it) or, with no later move, the dataset year — windows reaching
+  the dataset year render open ("2021–"). "(mai insieme)" appears only when
+  everyone's spells there have known starts and still don't meet. Cards
+  carry the club's current league ("Altre" when outside the covered
+  leagues) and click through to club mode. Cards are compact (years only)
+  by default; a "dettagli" toggle on the status line (persisted) adds each
+  player's apps/goals at that club (known values summed across spells) and
+  a closing "(combinate)" row with everyone's figures there together. The
+  divider carries the grand total across all shared teams; with a single
+  shared team the numbers appear once, in the selected players' meta.
+  Below the cards the selected players stay listed with expandable
+  careers, shared clubs highlighted, and club-mode-style combined
+  apps/goals across the shared clubs. Player
+  selections aren't hash-synced — player QIDs aren't in the index, so a
+  shared link couldn't be restored.
 - **Photos** are the only runtime external dependency: thumbnails lazy-loaded
   from Wikimedia Commons, with initials fallback. `imgs` entries are the
   filename prefixed with 2 hex chars of its md5 — the Commons hashed-directory
@@ -70,7 +83,10 @@ Goalkeepers (P413) are flagged in the index so the UI can suppress their
 goal counts. Citizenships pointing at states without an ISO code resolve
 through a curated map (`NAT_FIX`: Kingdom of Denmark → DK, Kingdom of
 Italy → IT, the German Reich lineage → DE, …); ambiguous ones (USSR,
-Yugoslavia, Czechoslovakia) stay unknown. The index is stamped with the extraction date (newest
+Yugoslavia, Czechoslovakia) stay unknown. Dissolved states that still
+carry a P297 code (East Germany DD, Yugoslavia YU) have no emoji flag:
+a current citizenship is preferred when the player has one, else the
+unambiguous successor (`ISO_OBSOLETE`: DD → DE), else unknown. The index is stamped with the extraction date (newest
 checkpoint), shown in the site footer.
 
 Current league membership (`CURRENT` in `pipeline.py`) is a curated list
