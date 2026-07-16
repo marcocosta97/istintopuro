@@ -174,23 +174,37 @@ h1 .accent { color: var(--accent); }
 #advtoggle::before { content: "▸"; font-size: .7em; transition: transform .15s; }
 #advtoggle[aria-expanded="true"]::before { transform: rotate(90deg); }
 #advtoggle:hover { border-color: var(--accent); color: var(--fg); }
+/* filters: label+control pairs flowing on as many per line as fit, "|"-divided */
 #advbody {
   position: relative;
-  display: flex; flex-wrap: wrap; gap: .5rem 1.1rem; align-items: center;
-  margin-top: .5rem; padding: .6rem .7rem; color: var(--muted); font-size: .85rem;
+  margin-top: .5rem; padding: .5rem .8rem; color: var(--muted); font-size: .85rem;
   background: var(--card); border: 1px solid var(--line); border-radius: 9px;
 }
 #advbody[hidden] { display: none; }
-#advbody select, #advbody input[type=number] {
+/* every group draws a left "|"; the wrapper's negative margin pulls each
+   line's first separator out of #fclip, whose overflow clips it — wrap-safe
+   (the clip must live on a wrapper: #frows' own box moves with the margin) */
+#fclip { overflow: hidden; }
+#frows {
+  display: flex; flex-wrap: wrap; align-items: center; row-gap: .5rem;
+  margin-left: calc(-.9rem - 1px);
+}
+.frow {
+  display: inline-flex; align-items: center; gap: .5rem;
+  border-left: 1px solid var(--line); padding: .1rem .9rem;
+}
+@media (max-width: 560px) {  /* phones: one filter per row, hairline-divided */
+  #frows { display: block; margin-left: 0; }
+  .frow { display: flex; border-left: none; padding: .4rem 0; }
+  .frow + .frow { border-top: 1px solid var(--line); }
+}
+.fctl, .flab { display: inline-flex; align-items: center; gap: .35rem; }
+label.frow { cursor: pointer; }
+#advbody input[type=number] {
   font: inherit; color: var(--fg); background: var(--bg);
   border: 1px solid var(--line); border-radius: 7px; padding: .12rem .3rem;
+  width: 4.2rem;
 }
-#advbody input[type=number] { width: 4.2rem; }
-#advbody input[type=checkbox] { accent-color: var(--accent); margin: 0; }
-/* nationality filter: dropdown with per-country checkboxes and counts.
-   Own full-width row: the n/m badge can grow without reflowing the other
-   controls, and the left-anchored popup can't overflow narrow screens. */
-#natctl { position: relative; flex-basis: 100%; justify-content: flex-start; }
 #nattoggle, #natacts button {
   cursor: pointer; font: inherit; font-size: .85rem; color: var(--fg);
   background: var(--bg); border: 1px solid var(--line); border-radius: 7px;
@@ -200,9 +214,10 @@ h1 .accent { color: var(--accent); }
 #nattoggle::after { content: "▾"; font-size: .8rem; margin-left: .4rem; color: var(--muted); }
 #nattoggle:not(:disabled):hover, #natacts button:hover { border-color: var(--accent); }
 #nattoggle:disabled { opacity: .4; cursor: default; }
-#natcount { color: var(--accent); font-variant-numeric: tabular-nums; }
-#natpanel {
-  position: absolute; z-index: 20; top: calc(100% + .4rem); left: 0;
+#natcount { font-variant-numeric: tabular-nums; }
+#natcount.on { color: var(--accent); }  /* a country subset is active */
+#natpanel {  /* under the Nazionalità row: top/left set on open from #natctl's offsets */
+  position: absolute; z-index: 20; top: calc(100% + .35rem); left: 0;
   width: min(16rem, calc(100vw - 3rem));
   background: var(--card); border: 1px solid var(--line); border-radius: 9px;
   box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: .4rem;

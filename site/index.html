@@ -52,22 +52,31 @@
       </select><button id="dirbtn" aria-label="direzione">↓</button></span>
   </div>
   <div id="advbody" hidden>
-    <span class="ctl"><label id="l-born" for="byfrom">Nati</label>
-      <input id="byfrom" type="number" min="1850" max="2035" placeholder="dal">–<input
-       id="byto" type="number" min="1850" max="2035" placeholder="al"></span>
-    <span class="ctl">
-      <label><input id="nozero" type="checkbox"> <span id="l-nozero">nascondi 0 presenze</span></label>
-      <button class="hint" id="hint-nozero" type="button" aria-expanded="false">?<span class="tip" id="tip-nozero"></span></button>
-    </span>
-    <span class="ctl" id="natctl">
-      <button id="nattoggle" type="button" aria-controls="natpanel" aria-expanded="false" disabled><span
-        id="l-nat">Nazionalità</span><span id="natcount"></span></button>
-      <div id="natpanel" hidden>
-        <div id="natacts"><button id="natall" type="button">tutte</button><button
-          id="natnone" type="button">nessuna</button></div>
-        <ul id="natlist"></ul>
+    <div id="fclip">
+    <div id="frows">
+      <div class="frow" id="natctl">
+        <span id="l-nat">Nazionalità</span>
+        <button id="nattoggle" type="button" aria-controls="natpanel" aria-expanded="false" disabled><span
+          id="natcount"></span></button>
+        <div id="natpanel" hidden>
+          <div id="natacts"><button id="natall" type="button">tutte</button><button
+            id="natnone" type="button">nessuna</button></div>
+          <ul id="natlist"></ul>
+        </div>
       </div>
-    </span>
+      <div class="frow">
+        <label id="l-born" for="byfrom">Nati</label>
+        <span class="fctl"><input id="byfrom" type="number" min="1850" max="2035" placeholder="dal">–<input
+         id="byto" type="number" min="1850" max="2035" placeholder="al"></span>
+      </div>
+      <label class="frow" for="nozero">
+        <span class="flab"><span id="l-nozero">Nascondi 0 presenze</span>
+          <button class="hint" id="hint-nozero" type="button" aria-expanded="false">?<span class="tip" id="tip-nozero"></span></button>
+        </span>
+        <span class="dtg"><input id="nozero" type="checkbox"><span class="knob"></span></span>
+      </label>
+    </div>
+    </div>
   </div>
   <div id="status" aria-live="polite">Caricamento dati…</div>
   <ul id="results"></ul>

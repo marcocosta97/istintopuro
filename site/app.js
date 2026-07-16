@@ -44,7 +44,7 @@ const STR = {
     asc: "crescente", desc: "decrescente",
     adv: "Filtri",
     born: "Nati", from: "dal", to: "al",
-    noZero: "nascondi 0 presenze",
+    noZero: "Nascondi 0 presenze",
     noZeroHint: "Nasconde chi ha 0 presenze registrate in una delle squadre scelte. Chi ha giocato più volte nella stessa squadra e ha totalizzato almeno una presenza resta incluso.",
     nat: "Nazionalità", natAll: "tutte", natNone: "nessuna", natUnknown: "sconosciuta",
     stats: (p, c) => `${p.toLocaleString("it")} giocatori · ${c} squadre`,
@@ -84,7 +84,7 @@ const STR = {
     asc: "ascending", desc: "descending",
     adv: "Filters",
     born: "Born", from: "from", to: "to",
-    noZero: "hide 0 apps",
+    noZero: "Hide 0 apps",
     noZeroHint: "Hides players with 0 recorded appearances at one of the selected clubs. Players with multiple stints at the same club who made at least one appearance are kept.",
     nat: "Nationality", natAll: "all", natNone: "none", natUnknown: "unknown",
     stats: (p, c) => `${p.toLocaleString("en")} players · ${c} clubs`,
@@ -145,7 +145,7 @@ function applyLang() {
     renderChips();
     const sel = mode === "club" ? clubIds : playerIds;
     if (sel.length) solve();
-    else { results.innerHTML = ""; status.textContent = t.stats(DB.names.length, DB.clubs.length); }
+    else { results.innerHTML = ""; status.textContent = t.stats(DB.names.length, DB.clubs.length); renderNats(); }
   }
   else status.textContent = t.loading;
 }
@@ -753,7 +753,9 @@ function renderNats() {
   }
   natList.scrollTop = st;
   const on = rows.reduce((k, [cc]) => k + !natOff.has(cc), 0);
-  $("natcount").textContent = on < rows.length ? ` ${on}/${rows.length}` : "";
+  const filtered = on < rows.length;  // the button reads "tutte" until a subset is picked
+  $("natcount").textContent = filtered ? `${on}/${rows.length}` : t.natAll;
+  $("natcount").classList.toggle("on", filtered);
   natToggle.disabled = rows.length === 0;
   if (!rows.length) natClose();
 }
@@ -765,6 +767,11 @@ function natClose() {
 natToggle.onclick = (e) => {
   e.stopPropagation();
   const open = natPanel.hidden;
+  if (open) {  // anchor under the Nazionalità row, wherever the layout put it
+    const ctl = $("natctl");
+    natPanel.style.top = `${ctl.offsetTop + ctl.offsetHeight + 6}px`;
+    natPanel.style.left = `${ctl.offsetLeft}px`;
+  }
   natPanel.hidden = !open;
   natToggle.setAttribute("aria-expanded", open);
 };
