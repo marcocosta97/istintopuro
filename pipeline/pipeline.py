@@ -390,6 +390,16 @@ NAT_FIX = {
     "Q207272": "PL",  # Second Polish Republic
 }
 
+# dissolved states that DO carry a P297 code — no emoji flag exists for these, so
+# they must never reach the index. DD's successor is unambiguous; the Yugoslav
+# lineage is not (same policy as NAT_FIX: don't guess a successor).
+ISO_OBSOLETE = {"DD": "DE", "YU": None, "SU": None, "CS": None}
+
+def pick_nat(ccs):  # prefer a current-ISO citizenship, else an unambiguous successor
+    cur = sorted(c for c in ccs if c and c not in ISO_OBSOLETE)
+    if cur: return cur[0]
+    return next((ISO_OBSOLETE[c] for c in ccs if ISO_OBSOLETE.get(c)), None)
+
 # ---------------------------------------------------------------- stage: attrs
 def stage_attrs():
     members = load("members")
@@ -398,8 +408,8 @@ def stage_attrs():
         vals = " ".join(f"wd:{q}" for q in batch)
         rows = sparql(f"""
           SELECT ?p (SAMPLE(?len) AS ?en) (SAMPLE(?lmul) AS ?mul) (MIN(?b) AS ?birth)
-                 (SAMPLE(?img) AS ?image) (SAMPLE(?cc) AS ?nat) (SAMPLE(?ctry) AS ?natq)
-                 (SAMPLE(?gk1) AS ?gk) WHERE {{
+                 (SAMPLE(?img) AS ?image) (GROUP_CONCAT(DISTINCT ?cc; separator=",") AS ?ccs)
+                 (SAMPLE(?ctry) AS ?natq) (SAMPLE(?gk1) AS ?gk) WHERE {{
             VALUES ?p {{ {vals} }}
             OPTIONAL {{ ?p rdfs:label ?len FILTER(LANG(?len)="en") }}
             OPTIONAL {{ ?p rdfs:label ?lmul FILTER(LANG(?lmul) IN ("mul","it","es","de","fr")) }}
@@ -411,7 +421,7 @@ def stage_attrs():
         out = []
         for r in rows:
             img = v(r, "image")
-            nat = v(r, "nat")
+            nat = pick_nat((v(r, "ccs") or "").split(","))
             if not nat and "natq" in r:  # citizenship without ISO code: curated map
                 nat = NAT_FIX.get(qid(v(r, "natq")))
             out.append([qid(v(r, "p")), v(r, "en") or v(r, "mul"),
