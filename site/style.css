@@ -56,6 +56,19 @@ h1 .accent { color: var(--accent); }
   border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: .85rem; padding: .15rem .8rem;
 }
 
+/* Club/Player segmented mode switch, right-aligned above the picker */
+#modebar { display: flex; justify-content: flex-end; margin-bottom: .45rem; }
+#modebar button {
+  cursor: pointer; background: transparent; color: var(--muted);
+  border: 1px solid var(--line); font: inherit; font-size: .8rem; padding: .12rem .6rem;
+}
+#modebar button:first-child { border-radius: 7px 0 0 7px; }
+#modebar button:last-child { border-radius: 0 7px 7px 0; margin-left: -1px; }
+#modebar button:hover { color: var(--fg); }
+#modebar button[aria-pressed="true"] {  /* lifted so the accent border wins the -1px overlap */
+  background: var(--hit); color: var(--accent); border-color: var(--accent); position: relative;
+}
+
 #picker {
   position: relative;  /* anchors the #browse panel to the full picker width */
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
@@ -139,6 +152,7 @@ h1 .accent { color: var(--accent); }
   display: flex; flex-wrap: wrap; gap: .5rem 1.1rem; align-items: center;
   margin-top: .8rem; color: var(--muted); font-size: .85rem;
 }
+#controls[hidden] { display: none; }  /* player mode: sort/filters don't apply to clubs */
 .ctl { display: inline-flex; align-items: center; gap: .35rem; }
 #controls select, #controls input[type=number], #controls button {
   font: inherit; color: var(--fg); background: var(--card);
@@ -267,6 +281,13 @@ h1 .accent { color: var(--accent); }
 .cteam .loan { color: var(--muted); }
 .cstats { color: var(--muted); white-space: nowrap; }
 .career .wiki { display: inline-block; margin: .35rem .8rem 0 0; font-size: .8rem; color: var(--accent); text-decoration: none; }
+
+/* player mode: one card per shared club, a .crow per selected player */
+.sclub { display: block; cursor: default; }
+.sclub:hover { border-color: var(--line); }  /* inert card: no click affordance */
+.sclub .pinfo { margin-bottom: .2rem; }
+.mates { color: var(--accent); font-size: .8rem; white-space: nowrap; }
+.nomates { color: var(--muted); font-size: .8rem; white-space: nowrap; }
 
 footer { margin-top: 3rem; color: var(--muted); font-size: .8rem; text-align: center; }
 footer a { color: inherit; }

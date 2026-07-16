@@ -1,7 +1,8 @@
 # Istinto Puro — solver
 
 Solver for the game "Istinto Puro": pick two or more clubs and instantly
-get every player who wore all of those shirts.
+get every player who wore all of those shirts — or flip the toggle to
+player mode and go the other way: pick players, get the clubs they shared.
 
 ## How it works
 
@@ -28,6 +29,14 @@ get every player who wore all of those shirts.
   the player's Wikipedia article
   (it/en per UI language) via Wikidata's `Special:GoToLinkedPage`, so no
   article titles need to be stored.
+- **Player mode** is a reverse lookup over the same career shards: one
+  fetch per selected player, clubs intersected by their canonical name
+  strings (any career team counts, not just the covered universe; a single
+  player just gets their career panel). A "compagni/teammates" window is
+  claimed only for years every selected player provably spent at the club
+  (fully-dated spells); "(mai insieme)" only when everyone's spells there
+  are dated and still disjoint. Player selections aren't hash-synced —
+  player QIDs aren't in the index, so a shared link couldn't be restored.
 - **Photos** are the only runtime external dependency: thumbnails lazy-loaded
   from Wikimedia Commons, with initials fallback. `imgs` entries are the
   filename prefixed with 2 hex chars of its md5 — the Commons hashed-directory

@@ -8,7 +8,10 @@ const search = $("search"), sugg = $("suggestions"), chips = $("chips"),
       byFrom = $("byfrom"), byTo = $("byto"), noZero = $("nozero"), langSel = $("langsel");
 
 let DB = null;               // raw index.json
+let mode = "club";           // "club" (players in common) | "player" (clubs in common)
 let clubIds = [];            // selected club indices
+let playerIds = [];          // selected player ids (player mode keeps its own selection)
+let solveGen = 0;            // stale-async guard: only the newest player solve may render
 let sortBy = "apps", sortDir = -1;
 const decoded = new Map();   // club index -> Int32Array of player ids
 const careerCache = new Map();
@@ -19,7 +22,14 @@ const REPO = "https://github.com/marcocosta97/istintopuro";
 const STR = {
   it: {
     tagline: "Scegli una o più squadre — chi ha giocato per tutte?",
+    taglineP: "Scegli uno o più giocatori — in quali squadre hanno giocato insieme?",
     placeholder: "Aggiungi una squadra…",
+    placeholderP: "Aggiungi un giocatore…",
+    modeClub: "Squadre", modePlayer: "Giocatori",
+    needPlayer: "Aggiungi almeno un giocatore.",
+    foundClubs: (n, ms) => `${n} squadr${n === 1 ? "a" : "e"} in comune · ${ms} ms`,
+    mates: (span) => `compagni ${span}`,
+    noOverlap: "(mai insieme)",
     loading: "Caricamento dati…",
     footer: `dati: <a href="https://www.wikidata.org">Wikidata</a> · foto: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
     built: (d) => `aggiornato al ${d}`,
@@ -50,7 +60,14 @@ const STR = {
   },
   en: {
     tagline: "Pick one or more clubs — who played for them all?",
+    taglineP: "Pick one or more players — which clubs did they share?",
     placeholder: "Add a club…",
+    placeholderP: "Add a player…",
+    modeClub: "Clubs", modePlayer: "Players",
+    needPlayer: "Add at least one player.",
+    foundClubs: (n, ms) => `${n} shared club${n === 1 ? "" : "s"} · ${ms} ms`,
+    mates: (span) => `teammates ${span}`,
+    noOverlap: "(never overlapped)",
     loading: "Loading data…",
     footer: `data: <a href="https://www.wikidata.org">Wikidata</a> · photos: <a href="https://commons.wikimedia.org">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE">MIT</a> · <a href="${REPO}">GitHub</a>`,
     built: (d) => `updated ${d}`,
@@ -88,9 +105,11 @@ function applyLang() {
   t = STR[lang];
   document.documentElement.lang = lang;
   langSel.value = lang;
-  $("tagline").textContent = t.tagline;
+  $("tagline").textContent = mode === "club" ? t.tagline : t.taglineP;
   $("foot").innerHTML = t.footer + (DB && DB.built ? `<div id="built">${t.built(DB.built)}</div>` : "");
-  search.placeholder = t.placeholder;
+  search.placeholder = mode === "club" ? t.placeholder : t.placeholderP;
+  $("mode-club").textContent = t.modeClub;
+  $("mode-player").textContent = t.modePlayer;
   browseBtn.title = t.browse;
   browseBtn.setAttribute("aria-label", t.browse);
   if (DB && !browse.hidden) renderBrowse();
@@ -117,7 +136,12 @@ function applyLang() {
     $("aboutleagues").innerHTML = t.aboutLeagues + "<br>" + rows.map(g =>
       `${countryFlag(g.cc)} ` + g.names.map(n => `<span class="lg">${n}</span>`).join(" · ")).join("<br>");
   } else $("aboutleagues").textContent = t.aboutLeagues;
-  if (DB) { renderChips(); clubIds.length ? solve() : status.textContent = t.stats(DB.names.length, DB.clubs.length); }
+  if (DB) {
+    renderChips();
+    const sel = mode === "club" ? clubIds : playerIds;
+    if (sel.length) solve();
+    else { results.innerHTML = ""; status.textContent = t.stats(DB.names.length, DB.clubs.length); }
+  }
   else status.textContent = t.loading;
 }
 langSel.onchange = () => { lang = localStorage.lang = langSel.value; applyLang(); };
@@ -135,6 +159,26 @@ $("hint-nozero").onclick = (e) => {
   h.setAttribute("aria-expanded", on);
 };
 document.addEventListener("click", () => $("hint-nozero").classList.remove("show"));
+
+// Club/Player mode switch: each mode keeps its own selection; the club-mode
+// controls (sort, filters, browse) don't apply to a list of shared clubs
+function setMode(m) {
+  if (mode === m || !DB) return;
+  mode = m;
+  $("mode-club").setAttribute("aria-pressed", m === "club");
+  $("mode-player").setAttribute("aria-pressed", m === "player");
+  browseOpen(false); sugg.hidden = true; search.value = "";
+  browseBtn.hidden = m === "player";
+  $("controls").hidden = m === "player";
+  if (m === "player") {
+    $("advbody").hidden = true;
+    DB.pNorm ||= DB.names.map(norm);  // one-time (~62k names), on the toggle click, not per keystroke
+  } else $("advbody").hidden = $("advtoggle").getAttribute("aria-expanded") !== "true";
+  applyLang();  // mode-aware: swaps tagline/placeholder, re-renders chips + results
+  search.focus();
+}
+$("mode-club").onclick = () => setMode("club");
+$("mode-player").onclick = () => setMode("player");
 
 // small alias map for names people actually type (keyed by club QID)
 const ALIASES = {
@@ -184,6 +228,8 @@ const coreClub = (name) => {
 const flag = (cc) => cc ? String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1A5 + c.charCodeAt(0))) : "";
 // defunct marker: a dagger + dissolution year for clubs with Wikidata P576 (c[4])
 const defunct = (c) => c[4] ? ` <span class="defunct" title="${t.dissolved(c[4])}">†${c[4]}</span>` : "";
+// year span of a career spell: single-year ranges collapse, unknown bounds show "?"
+const yspan = (s, e) => s && s === e ? String(s) : `${s || "?"}–${e || (s ? "" : "?")}`;
 
 // ---------------------------------------------------------------- data loading
 async function boot() {
@@ -226,8 +272,10 @@ function postings(ci) {
   return arr;
 }
 
-// ---------------------------------------------------------------- club search
-function matches(q) {
+// ---------------------------------------------------------------- search
+const matches = (q) => mode === "club" ? clubMatches(q) : playerMatches(q);
+
+function clubMatches(q) {
   const nq = norm(q);
   if (!nq) return [];
   const out = [];
@@ -244,20 +292,40 @@ function matches(q) {
   return out.sort((a, b) => a[0] - b[0] || a[3] - b[3] || b[1] - a[1]).slice(0, 8).map(x => x[2]);
 }
 
+function playerMatches(q) {
+  const nq = norm(q), word = " " + nq;
+  if (!nq) return [];
+  const out = [];
+  for (let i = 0; i < DB.pNorm.length; i++) {
+    if (playerIds.includes(i)) continue;
+    const n = DB.pNorm[i];
+    let rank = -1;
+    if (n.startsWith(nq) || n.includes(word)) rank = 0;  // full-name or surname/word prefix
+    else if (n.includes(nq)) rank = 1;
+    if (rank >= 0) out.push([rank, DB.imgs[i] ? 0 : 1, i]);  // a photo is a cheap notability proxy
+  }
+  return out.sort((a, b) => a[0] - b[0] || a[1] - b[1]
+    || DB.names[a[2]].localeCompare(DB.names[b[2]])).slice(0, 8).map(x => x[2]);
+}
+
 let cursor = -1;
 function renderSuggestions(ids) {
   sugg.innerHTML = "";
   sugg.hidden = ids.length === 0;
   cursor = ids.length ? 0 : -1;
-  ids.forEach((ci, i) => {
-    const c = DB.clubs[ci];
+  ids.forEach((id, i) => {
     const li = document.createElement("li");
-    li.innerHTML = `<span>${countryFlag(c[1])} ${esc(c[0])}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
+    if (mode === "club") {
+      const c = DB.clubs[id];
+      li.innerHTML = `<span>${countryFlag(c[1])} ${esc(c[0])}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
+    } else  // birth year in the meta slot disambiguates homonyms
+      li.innerHTML = `<span>${flag(DB.nats[id])} ${esc(DB.names[id])}</span><small>${DB.births[id] || ""}</small>`;
     li.className = i === cursor ? "active" : "";
-    li.onmousedown = (e) => { e.preventDefault(); addClub(ci); };
+    li.onmousedown = (e) => { e.preventDefault(); addSel(id); };
     sugg.appendChild(li);
   });
 }
+const addSel = (id) => mode === "club" ? addClub(id) : addPlayer(id);
 
 function leagueNames(mask) {
   return DB.leagues.filter((_, i) => mask & (1 << i)).map(l => l[0]).join(" · ");
@@ -273,9 +341,10 @@ search.addEventListener("keydown", (e) => {
     items.forEach((li, i) => li.className = i === cursor ? "active" : "");
   } else if ((e.key === "Enter" || e.key === "Tab") && cursor >= 0 && !sugg.hidden) {
     e.preventDefault();  // Tab confirms like Enter instead of leaving the field
-    addClub(matches(search.value)[cursor]);
-  } else if (e.key === "Backspace" && !search.value && clubIds.length) {
-    removeClub(clubIds[clubIds.length - 1]);
+    addSel(matches(search.value)[cursor]);
+  } else if (e.key === "Backspace" && !search.value) {
+    if (mode === "club" && clubIds.length) removeClub(clubIds[clubIds.length - 1]);
+    else if (mode === "player" && playerIds.length) removePlayer(playerIds[playerIds.length - 1]);
   } else if (e.key === "Escape") { sugg.hidden = true; }
 });
 search.addEventListener("blur", () => setTimeout(() => {
@@ -390,17 +459,36 @@ function removeClub(ci) {
   clubIds = clubIds.filter(x => x !== ci);
   renderChips(); solve(); syncHash();
 }
+// player selections aren't hash-synced: player QIDs aren't in the index,
+// so a shared link couldn't be restored without loading every career shard
+function addPlayer(pid) {
+  if (pid === undefined || playerIds.includes(pid)) return;
+  playerIds.push(pid);
+  search.value = ""; sugg.hidden = true;
+  renderChips(); solve();
+  search.focus();
+}
+function removePlayer(pid) {
+  playerIds = playerIds.filter(x => x !== pid);
+  renderChips(); solve();
+}
 function renderChips() {
   chips.innerHTML = "";
-  clubIds.forEach(ci => {
-    const c = DB.clubs[ci];
+  const mk = (html, title, onRemove) => {
     const el = document.createElement("span");
     el.className = "chip";
-    el.title = c[0];  // chips show the short FM-style name; full name in search + careers
-    el.innerHTML = `${countryFlag(c[1])} ${esc(coreClub(c[0]))}${defunct(c)} <button aria-label="${t.remove}">×</button>`;
-    el.querySelector("button").onclick = () => removeClub(ci);
+    if (title) el.title = title;
+    el.innerHTML = `${html} <button aria-label="${t.remove}">×</button>`;
+    el.querySelector("button").onclick = onRemove;
     chips.appendChild(el);
+  };
+  if (mode === "club") clubIds.forEach(ci => {
+    const c = DB.clubs[ci];  // chips show the short FM-style name; full name in search + careers
+    mk(`${countryFlag(c[1])} ${esc(coreClub(c[0]))}${defunct(c)}`, c[0], () => removeClub(ci));
   });
+  else playerIds.forEach(pid =>  // birth year confirms which homonym was picked
+    mk(`${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}`,
+       "", () => removePlayer(pid)));
 }
 
 // ---------------------------------------------------------------- solve
@@ -420,6 +508,7 @@ function intersect(lists) {
 }
 
 function solve() {
+  if (mode === "player") return solvePlayers();
   results.innerHTML = "";
   if (clubIds.length === 0) {
     status.textContent = t.needOne;
@@ -463,6 +552,85 @@ function solve() {
   const ms = performance.now() - t0;
   status.textContent = t.found(ids.length, ms.toFixed(1));
   renderResults(ids, appsOf, goalsOf, zeroGoals);
+}
+
+// ------------------------------------------------------ solve: player mode
+// one player = plain lookup: the usual result row with the career panel open
+async function solvePlayers() {
+  results.innerHTML = "";
+  const g = ++solveGen;
+  if (!playerIds.length) { status.textContent = t.needPlayer; return; }
+  if (playerIds.length === 1) {
+    status.textContent = "";
+    renderResults(playerIds, new Map(), new Map(), new Set());
+    toggleCareer(results.firstChild, playerIds[0]);
+    return;
+  }
+  let careers;
+  try { careers = await Promise.all(playerIds.map(careerOf)); }
+  catch { if (g === solveGen) status.textContent = t.loadFail; return; }
+  if (g !== solveGen || mode !== "player") return;  // selection or mode changed mid-fetch
+  const t0 = performance.now();
+  const curYear = +(DB.built || "").slice(0, 4) || new Date().getFullYear();
+  // per player: team name -> [[start, end, effEnd], ...]; distinct spells stay
+  // separate. An open-ended spell effectively runs until the player's next
+  // transfer (loans out don't end it) or, with no later move, the dataset year.
+  const maps = careers.map(([, career = []]) => {
+    const spells = career.filter(e => e[0]);
+    const m = new Map();
+    spells.forEach(([team, s, e], i) => {
+      let eff = e;
+      if (s && !e) {
+        const next = spells.slice(i + 1).find(sp => sp[1] && sp[1] >= s && !sp[5]);
+        eff = next ? next[1] : curYear;
+      }
+      if (!m.has(team)) m.set(team, []);
+      m.get(team).push([s, e, eff]);
+    });
+    return m;
+  });
+  // career team names are canonical within a build, so a plain string match
+  // is exact — same trick as the career panel's `hit` highlight
+  const smallest = maps.reduce((a, b) => a.size <= b.size ? a : b);
+  const startOf = (name) =>  // earliest known arrival of any of them, unknowns last
+    Math.min(...maps.map(m => Math.min(...m.get(name).map(([s]) => s || Infinity))));
+  const shared = [...smallest.keys()].filter(name => maps.every(m => m.has(name)))
+    .sort((a, b) => startOf(a) - startOf(b) || a.localeCompare(b));
+
+  DB.clubByName ||= new Map(DB.clubs.map((c, i) => [c[0], i]));
+  const frag = document.createDocumentFragment();
+  for (const name of shared) {
+    const ci = DB.clubByName.get(name);
+    const c = ci !== undefined ? DB.clubs[ci] : null;
+    // teammate window: years every player provably spent there (spells with a
+    // known start). If someone's spells there are all startless, claim nothing.
+    let badge = "";
+    const dated = maps.map(m => m.get(name).filter(([s, , eff]) => s && eff));
+    if (dated.every(k => k.length)) {
+      const years = dated.map(k => {
+        const st = new Set();
+        for (const [s, , eff] of k) for (let y = s; y <= eff; y++) st.add(y);
+        return st;
+      });
+      const com = [...years[0]].filter(y => years.every(st => st.has(y))).sort((a, b) => a - b);
+      const runs = [];
+      for (const y of com) {
+        const last = runs[runs.length - 1];
+        if (last && last[1] === y - 1) last[1] = y; else runs.push([y, y]);
+      }
+      badge = runs.length  // a window reaching the dataset year is ongoing: leave it open
+        ? ` <span class="mates">${t.mates(runs.map(([s, e]) => e === curYear ? `${s}–` : yspan(s, e)).join(", "))}</span>`
+        : ` <span class="nomates">${t.noOverlap}</span>`;
+    }
+    const li = document.createElement("li");
+    li.className = "player sclub";
+    li.innerHTML = `<div class="pinfo"><span class="pname">${c ? countryFlag(c[1]) + " " : ""}${esc(name)}${c ? defunct(c) : ""}${badge}</span></div>`
+      + playerIds.map((pid, k) =>  // name left, spells right: multi-range strings vary too much to column-align
+        `<div class="crow"><span class="cteam">${esc(DB.names[pid])}</span><span class="cstats">${maps[k].get(name).map(([s, e]) => yspan(s, e)).join(", ")}</span></div>`).join("");
+    frag.appendChild(li);
+  }
+  results.appendChild(frag);
+  status.textContent = t.foundClubs(shared.length, (performance.now() - t0).toFixed(1));
 }
 
 sortSel.onchange = () => { sortBy = sortSel.value; solve(); };
@@ -582,20 +750,26 @@ const avatar = (txt) => {
 };
 
 // ---------------------------------------------------------------- career panel
+function fetchShard(shard) {
+  if (!careerCache.has(shard))  // versioned by dataset stamp: a stale cached shard would pair wrong careers with a fresh index
+    careerCache.set(shard, fetch(`data/career/${shard}.json?v=${DB.built || 0}`)
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .catch(err => { careerCache.delete(shard); throw err; }));
+  return careerCache.get(shard);
+}
+const careerOf = async (pid) =>  // [qidNumber, spells] — shard count stamped in the index by the pipeline
+  (await fetchShard(pid % (DB.nshards || 128)))[pid] || [];
+
 async function toggleCareer(li, pid) {
   const open = li.querySelector(".career");
   if (open) { open.remove(); li.querySelector(".expand").textContent = "▸"; return; }
   li.querySelector(".expand").textContent = "▾";
-  const shard = pid % (DB.nshards || 128);  // shard count stamped in the index by the pipeline
-  if (!careerCache.has(shard))  // versioned by dataset stamp: a stale cached shard would pair wrong careers with a fresh index
-    careerCache.set(shard, fetch(`data/career/${shard}.json?v=${DB.built || 0}`)
-      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }));
-  let table;
-  try { table = await careerCache.get(shard); }
-  catch { careerCache.delete(shard); li.querySelector(".expand").textContent = "▸"; return; }
-  const [qid = 0, career = []] = table[pid] || [];
+  let qid, career;
+  try { [qid = 0, career = []] = await careerOf(pid); }
+  catch { li.querySelector(".expand").textContent = "▸"; return; }
   if (li.querySelector(".career")) return;
-  const selNames = new Set(clubIds.map(ci => DB.clubs[ci][0]));
+  // in player mode the (persisted) club selection must not highlight rows
+  const selNames = new Set(mode === "club" ? clubIds.map(ci => DB.clubs[ci][0]) : []);
   const gk = DB.gkSet.has(pid);  // goalkeeper goal counts are unreliable, show apps only
   const div = document.createElement("div");
   div.className = "career";
@@ -606,7 +780,7 @@ async function toggleCareer(li, pid) {
     ([, s2, e2]) => s2 && e2 && s2 <= s && e <= e2 && e2 - s2 > e - s)));
   div.innerHTML = (spells.map(([team, s, e, apps, goals], i) =>
     `<div class="crow${selNames.has(team) ? " hit" : ""}">
-       <span class="cyears">${s && s === e ? s : `${s || "?"}–${e || (s ? "" : "?")}`}</span><span class="cteam">${loan[i] ? `<span class="loan" title="${t.loan}">↳</span> ` : ""}${esc(team)}</span>
+       <span class="cyears">${yspan(s, e)}</span><span class="cteam">${loan[i] ? `<span class="loan" title="${t.loan}">↳</span> ` : ""}${esc(team)}</span>
        <span class="cstats">${apps != null ? apps + " " + t.apps : ""}${!gk && goals != null ? " · " + goals + " " + t.goals : ""}</span>
      </div>`).join("") || `<div class='crow'>${t.noData}</div>`)
     + (qid ? `<a class="wiki" href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${lang}wiki/Q${qid}" target="_blank" rel="noopener">Wikipedia ↗</a>
