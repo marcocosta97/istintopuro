@@ -188,7 +188,8 @@ $("mode-player").onclick = () => setMode("player");
 // small alias map for names people actually type (keyed by club QID)
 const ALIASES = {
   Q483020: ["psg"], Q8682: ["real madrid"], Q8701: ["atletico madrid"],
-  Q631: ["inter"], Q1543: ["milan"], Q10329: ["siviglia"], Q8723: ["betis"],
+  Q631: ["inter", "internazionale", "internazionale milano", "fc internazionale milano"],
+  Q1543: ["milan"], Q10329: ["siviglia"], Q8723: ["betis"],
   Q18656: ["man united", "manchester united"], Q50602: ["man city", "manchester city"],
   Q15789: ["bayern", "bayern monaco"], Q41420: ["borussia dortmund", "bvb"],
   Q7156: ["barca", "barcellona"], Q8687: ["athletic bilbao", "bilbao"],
@@ -291,10 +292,12 @@ function clubMatches(q) {
     else if (DB.searchNames[i].includes(nq)) rank = 1;
     else if (DB.searchInitials[i] === nq.replace(/ /g, "")) rank = 0;
     else if (DB.aliasNorm[i].some(a => a.startsWith(nq))) rank = 0;
-    if (rank >= 0) out.push([rank, DB.postings[i].length, i, DB.clubs[i][4] ? 1 : 0]);
+    const c = DB.clubs[i];  // clubs currently in a covered league outrank lower-tier and dissolved ones
+    const cur = !c[4] && (c[5] ?? -1) >= 0 ? 0 : 1;
+    if (rank >= 0) out.push([rank, DB.postings[i].length, i, c[4] ? 1 : 0, cur]);
   }
-  // best rank first, then active before dissolved, then bigger clubs first
-  return out.sort((a, b) => a[0] - b[0] || a[3] - b[3] || b[1] - a[1]).slice(0, 8).map(x => x[2]);
+  // best rank first, then current-league > alive > dissolved, then bigger clubs first
+  return out.sort((a, b) => a[0] - b[0] || a[4] - b[4] || a[3] - b[3] || b[1] - a[1]).slice(0, 8).map(x => x[2]);
 }
 
 function playerMatches(q) {
