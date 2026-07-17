@@ -50,6 +50,7 @@ const STR = {
     stats: (p, c) => `${p.toLocaleString("it")} giocatori · ${c} squadre`,
     loadFail: "Errore nel caricamento dei dati.", retry: "riprova",
     needOne: "Aggiungi almeno una squadra.",
+    combNote: "presenze e gol combinati",
     found: (n, ms) => `${n} giocator${n === 1 ? "e" : "i"} · ${ms} ms`,
     combApps: (n) => `${n.toLocaleString("it")} presenze`,
     combGoals: (n) => `${n.toLocaleString("it")} gol`,
@@ -90,6 +91,7 @@ const STR = {
     stats: (p, c) => `${p.toLocaleString("en")} players · ${c} clubs`,
     loadFail: "Failed to load data.", retry: "retry",
     needOne: "Add at least one club.",
+    combNote: "combined apps and goals",
     found: (n, ms) => `${n} player${n === 1 ? "" : "s"} · ${ms} ms`,
     combApps: (n) => `${n.toLocaleString("en")} apps`,
     combGoals: (n) => `${n.toLocaleString("en")} goals`,
@@ -558,7 +560,8 @@ function solve() {
             : (p) => appsOf.get(p) || 0;
   ids.sort((a, b) => sortDir * (key(a) - key(b)) || DB.names[a].localeCompare(DB.names[b]));
   const ms = performance.now() - t0;
-  status.textContent = t.found(ids.length, ms.toFixed(1));
+  status.innerHTML = t.found(ids.length, ms.toFixed(1))
+    + (ids.length && clubIds.length > 1 ? ` <span class="comb">(${t.combNote})</span>` : "");
   renderResults(ids, appsOf, goalsOf, zeroGoals);
 }
 
@@ -795,12 +798,10 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
       ? `<img loading="lazy" src="${thumbURL(DB.imgs[pid])}" alt="">`
       : `<span class="avatar">${initials(pid)}</span>`;
     const apps = appsOf.get(pid), goals = goalsOf.get(pid);
+    // no per-row "(combined)" tag: club mode states it once in the status row,
+    // player mode in the selected-players divider
     const parts = [apps ? t.combApps(apps) : "", goals || zeroGoals.has(pid) ? t.combGoals(goals || 0) : ""].filter(Boolean);
-    // "(combined)" only makes sense across two or more clubs — the selected
-    // ones in club mode, the shared ones under a player-mode selection
-    const nsel = mode === "club" ? clubIds.length : sharedNames.size;
-    const comb = nsel > 1 ? ` <span class="comb">(${t.comb(!!apps)})</span>` : "";
-    const meta = parts.length ? `${parts.join(" · ")}${comb}` : "";
+    const meta = parts.join(" · ");
     li.innerHTML = `${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.gkSet.has(pid) ? " <small>(GK)</small>" : ""}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span>
       <span class="pmeta">${meta}</span></div><span class="expand">▸</span>`;
     const im = li.querySelector("img");
