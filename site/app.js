@@ -50,6 +50,10 @@ const STR = {
     stats: (p, c) => `${p.toLocaleString("it")} giocatori · ${c} squadre`,
     loadFail: "Errore nel caricamento dei dati.", retry: "riprova",
     needOne: "Aggiungi almeno una squadra.",
+    try: "Prova:",
+    randClubs: "squadre a caso", randPlayers: "giocatori a caso",
+    noneCommon: "Nessun giocatore ha vestito tutte queste maglie — togli una squadra.",
+    noneFilter: "Nessun giocatore corrisponde ai filtri.",
     combNote: "presenze e gol combinati",
     found: (n, ms) => `${n} giocator${n === 1 ? "e" : "i"} · ${ms} ms`,
     combApps: (n) => `${n.toLocaleString("it")} presenze`,
@@ -91,6 +95,10 @@ const STR = {
     stats: (p, c) => `${p.toLocaleString("en")} players · ${c} clubs`,
     loadFail: "Failed to load data.", retry: "retry",
     needOne: "Add at least one club.",
+    try: "Try:",
+    randClubs: "random clubs", randPlayers: "random players",
+    noneCommon: "No player has played for all these clubs — remove one to widen the search.",
+    noneFilter: "No players match the filters.",
     combNote: "combined apps and goals",
     found: (n, ms) => `${n} player${n === 1 ? "" : "s"} · ${ms} ms`,
     combApps: (n) => `${n.toLocaleString("en")} apps`,
@@ -147,7 +155,10 @@ function applyLang() {
     renderChips();
     const sel = mode === "club" ? clubIds : playerIds;
     if (sel.length) solve();
-    else { results.innerHTML = ""; status.textContent = t.stats(DB.names.length, DB.clubs.length); renderNats(); }
+    else {
+      results.innerHTML = ""; status.textContent = t.stats(DB.names.length, DB.clubs.length);
+      renderNats(); renderExamples();
+    }
   }
   else status.textContent = t.loading;
 }
@@ -260,8 +271,8 @@ async function boot() {
   DB.sortNames = DB.clubs.map(c => sortName(c[0]));
   DB.searchInitials = DB.clubs.map(c => initialsOf(c[0]));
   DB.aliasNorm = DB.clubs.map(c => (ALIASES[c[3]] || []).map(norm));
-  const byQid = new Map(DB.clubs.map((c, i) => [c[3], i]));  // restore a shared selection from the hash
-  clubIds = location.hash.slice(1).split(",").map(q => byQid.get(q)).filter(i => i !== undefined);
+  DB.byQid = new Map(DB.clubs.map((c, i) => [c[3], i]));  // hash restore + example queries
+  clubIds = location.hash.slice(1).split(",").map(q => DB.byQid.get(q)).filter(i => i !== undefined);
   search.disabled = false;
   browseBtn.disabled = false;
   search.focus();
@@ -501,6 +512,49 @@ function renderChips() {
        "", () => removePlayer(pid)));
 }
 
+// ------------------------------------------------------- random demo query
+// shown whenever the current mode has no selection: one tap rolls 2–3
+// current top-division clubs, or 2–3 players born within a couple of years
+// of each other (photo + known birth year as the notability proxy)
+function renderExamples() {
+  const li = document.createElement("li");
+  li.className = "examples";
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = `🎲 ${mode === "club" ? t.randClubs : t.randPlayers}`;
+  b.onclick = runRandom;
+  li.append(Object.assign(document.createElement("span"), { textContent: t.try }), b);
+  results.appendChild(li);
+}
+const draw = (pool, n) => {  // n distinct random picks
+  const p = [...pool], out = [];
+  while (out.length < n && p.length) out.push(p.splice(Math.random() * p.length | 0, 1)[0]);
+  return out;
+};
+function runRandom() {
+  const n = 2 + (Math.random() < .35 ? 1 : 0);
+  if (mode === "club") {
+    // first league index of each country group = the top division
+    DB.topLeagues ||= new Set(DB.leagues.reduce((a, l, i) =>
+      (i === 0 || DB.leagues[i - 1][2] !== l[2]) ? (a.push(i), a) : a, []));
+    const pool = DB.clubs.map((c, i) => i)
+      .filter(i => !DB.clubs[i][4] && DB.topLeagues.has(DB.clubs[i][5] ?? -1));
+    clubIds = draw(pool, n);
+    renderChips(); solve(); syncHash();
+  } else {
+    if (!DB.randPool) {
+      DB.randPool = [];
+      for (let i = 0; i < DB.names.length; i++) if (DB.imgs[i] && DB.births[i]) DB.randPool.push(i);
+    }
+    for (let tries = 0; tries < 20; tries++) {
+      const a = DB.randPool[Math.random() * DB.randPool.length | 0];
+      const near = DB.randPool.filter(p => p !== a && Math.abs(DB.births[p] - DB.births[a]) <= 2);
+      if (near.length >= n - 1) { playerIds = [a, ...draw(near, n - 1)]; break; }
+    }
+    renderChips(); solve();
+  }
+}
+
 // ---------------------------------------------------------------- solve
 function intersect(lists) {
   lists.sort((a, b) => a.length - b.length);
@@ -522,7 +576,7 @@ function solve() {
   results.innerHTML = "";
   if (clubIds.length === 0) {
     status.textContent = t.needOne;
-    natCounts.clear(); renderNats();
+    natCounts.clear(); renderNats(); renderExamples();
     return;
   }
   const t0 = performance.now();
@@ -562,6 +616,12 @@ function solve() {
   const ms = performance.now() - t0;
   status.innerHTML = t.found(ids.length, ms.toFixed(1))
     + (ids.length && clubIds.length > 1 ? ` <span class="comb">(${t.combNote})</span>` : "");
+  if (ids.length === 0) {  // a dead end still deserves a way forward
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = clubIds.length > 1 && common.length === 0 ? t.noneCommon : t.noneFilter;
+    results.appendChild(li);
+  }
   renderResults(ids, appsOf, goalsOf, zeroGoals);
 }
 
@@ -572,7 +632,7 @@ async function solvePlayers() {
   results.innerHTML = "";
   const g = ++solveGen;
   sharedNames = new Set();
-  if (!playerIds.length) { status.textContent = t.needPlayer; return; }
+  if (!playerIds.length) { status.textContent = t.needPlayer; renderExamples(); return; }
   if (playerIds.length === 1) {
     status.textContent = "";
     renderResults(playerIds, new Map(), new Map(), new Set());

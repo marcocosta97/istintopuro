@@ -288,6 +288,15 @@ label.frow { cursor: pointer; }
 .dtg input:focus-visible + .knob { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 #results { list-style: none; padding: 0; }
+/* first-visit example queries and the no-match guidance line */
+.examples { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; color: var(--muted); font-size: .85rem; padding: .2rem 0; }
+.examples button {
+  cursor: pointer; font: inherit; font-size: .85rem; color: var(--fg);
+  background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+  padding: .15rem .65rem;
+}
+.examples button:hover { border-color: var(--accent); color: var(--accent); }
+.empty { color: var(--muted); font-size: .9rem; padding: .3rem .2rem; }
 .player {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: .55rem .8rem; margin-bottom: .5rem; cursor: pointer;
