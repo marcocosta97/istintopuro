@@ -11,6 +11,28 @@ Stages (each checkpoints to data/, reruns skip completed stages):
   validate - sanity-check the emitted index; fail instead of shipping junk
 
 Usage: python3 pipeline/pipeline.py [stage ...]   (default: all)
+
+Emitted formats — site/data/index.json (one file, whole club-mode dataset):
+  clubs     [name, country, leagueMask, QID, dissolvedYear, currentLeague]
+            dissolvedYear: P576, 0 = active (drives the †year marker);
+            currentLeague: index into leagues, -1 = outside covered ones
+            (drives the browse panel)
+  postings  per club: sorted player ids, delta-encoded (first id, then gaps)
+  apps/goals per club: one value per posting, summed across the player's
+            spells there, -1 = unknown
+  gks       delta-encoded ids of P413 goalkeepers (UI hides their goals)
+  names/births/nats  one entry per player id
+  imgs      Commons filename prefixed with 2 hex md5 chars — the hashed
+            directory path, so the client builds direct thumb URLs and
+            skips Special:FilePath's uncacheable redirects
+  leagues/nshards/built  league table, shard count, extraction date
+            (footer stamp + shard-fetch cache-buster)
+
+site/data/career/<pid % nshards>.json — lazy-loaded careers, per player:
+  [QID number, spells]   QID links Wikipedia via Special:GoToLinkedPage
+  spell = [team, start, end, apps, goals(, 1)]  one per P54 statement, so
+  a loan and a later return stay separate; trailing 1 = P1642 loan flag
+  (app.js also infers loans from a spell inside an earlier one's range)
 """
 import hashlib, json, os, re, sys, time, gzip
 from pathlib import Path
