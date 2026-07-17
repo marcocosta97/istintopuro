@@ -806,6 +806,10 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
       im.src = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(DB.imgs[pid].slice(2))}?width=96`;
     };
     li.onclick = () => toggleCareer(li, pid);
+    li.tabIndex = 0;  // keyboard: Enter/Space toggles the career like a click
+    li.onkeydown = (e) => {
+      if (e.target === li && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggleCareer(li, pid); }
+    };
     frag.appendChild(li);
   }
   results.appendChild(frag);
@@ -814,7 +818,9 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
     const li = document.createElement("li");
     li.className = "more";
     li.textContent = t.more(ids.length - shown);
+    li.tabIndex = 0;
     li.onclick = () => { li.remove(); renderResults(ids, appsOf, goalsOf, zeroGoals, shown); };
+    li.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); li.click(); } };
     results.appendChild(li);
   }
 }
