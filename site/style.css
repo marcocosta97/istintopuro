@@ -70,7 +70,7 @@ h1 .accent { color: var(--accent); }
 }
 
 #picker {
-  position: relative;  /* anchors the #browse panel to the full picker width */
+  position: relative;  /* anchors the #browse and #suggestions panels to the full picker width */
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: .5rem; display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
 }
@@ -84,7 +84,7 @@ h1 .accent { color: var(--accent); }
 }
 .chip button:hover { color: var(--fg); }
 #chips { display: contents; }
-#searchwrap { position: relative; flex: 1; min-width: 12rem; display: flex; align-items: center; }
+#searchwrap { flex: 1; min-width: 12rem; display: flex; align-items: center; }
 #search {
   flex: 1; min-width: 0; border: none; outline: none; background: transparent;
   color: var(--fg); font: inherit; padding: .3rem;
