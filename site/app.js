@@ -38,7 +38,7 @@ const STR = {
     built: (d) => `aggiornato al ${d}`,
     about: "Solver per il gioco «Istinto Puro»: scegli una o più squadre e scopri all'istante tutti i giocatori che hanno giocato per tutte, ordinati per presenze combinate. Dati estratti da Wikidata.",
     aboutLeagues: "Campionati coperti (tutte le stagioni):",
-    disclaimer: `Nessun dato viene raccolto: tutto avviene nel tuo browser, senza server né tracciamento. Codice open source (<a href="${REPO}">MIT su GitHub</a>).`,
+    disclaimer: `Nessun dato viene raccolto: tutto avviene nel tuo browser, senza server né tracciamento. Codice open source (<a href="${REPO}">MIT su GitHub</a>). Carattere: <a href="https://github.com/jpt/barlow">Barlow Semi Condensed</a> (SIL OFL).`,
     remove: "rimuovi",
     sort: "Ordina per", sortApps: "presenze", sortGoals: "gol", sortBirth: "nascita",
     asc: "crescente", desc: "decrescente",
@@ -83,7 +83,7 @@ const STR = {
     built: (d) => `updated ${d}`,
     about: "Solver for the game “Istinto Puro”: pick one or more clubs and instantly see every player who played for them all, ranked by combined appearances. Data extracted from Wikidata.",
     aboutLeagues: "Leagues covered (all seasons):",
-    disclaimer: `No data is collected: everything happens in your browser, with no server or tracking. Open source (<a href="${REPO}">MIT on GitHub</a>).`,
+    disclaimer: `No data is collected: everything happens in your browser, with no server or tracking. Open source (<a href="${REPO}">MIT on GitHub</a>). Typeface: <a href="https://github.com/jpt/barlow">Barlow Semi Condensed</a> (SIL OFL).`,
     remove: "remove",
     sort: "Sort by", sortApps: "apps", sortGoals: "goals", sortBirth: "birth",
     asc: "ascending", desc: "descending",
@@ -851,9 +851,10 @@ document.addEventListener("keydown", (e) => {
 
 function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
   const frag = document.createDocumentFragment();
-  for (const pid of ids.slice(from, from + PAGE)) {
+  ids.slice(from, from + PAGE).forEach((pid, i) => {
     const li = document.createElement("li");
     li.className = "player";
+    li.style.animationDelay = `${Math.min(i, 14) * 22}ms`;  // solve cascade, capped
     const img = DB.imgs[pid]
       ? `<img loading="lazy" src="${thumbURL(DB.imgs[pid])}" alt="">`
       : `<span class="avatar">${initials(pid)}</span>`;
@@ -862,8 +863,9 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
     // player mode in the selected-players divider
     const parts = [apps ? t.combApps(apps) : "", goals || zeroGoals.has(pid) ? t.combGoals(goals || 0) : ""].filter(Boolean);
     const meta = parts.join(" · ");
-    li.innerHTML = `${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.gkSet.has(pid) ? " <small>(GK)</small>" : ""}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span>
-      <span class="pmeta">${meta}</span></div><span class="expand">▸</span>`;
+    // rank numeral = position in the current sort; meaningless for a hand-picked selection
+    const rank = mode === "club" ? `<span class="rank">${from + i + 1}</span>` : "";
+    li.innerHTML = `${rank}${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.gkSet.has(pid) ? " <small>(GK)</small>" : ""}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span></div>${meta ? `<span class="pstats">${meta}</span>` : ""}<span class="expand">▸</span>`;
     const im = li.querySelector("img");
     if (im) im.onerror = () => {  // e.g. original narrower than 120px: the redirect resolves it
       im.onerror = () => im.replaceWith(avatar(initials(pid)));
@@ -875,7 +877,7 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
       if (e.target === li && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggleCareer(li, pid); }
     };
     frag.appendChild(li);
-  }
+  });
   results.appendChild(frag);
   const shown = Math.min(from + PAGE, ids.length);
   if (ids.length > shown) {

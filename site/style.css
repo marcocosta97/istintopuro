@@ -1,11 +1,21 @@
-:root {
-  --bg: #fafaf8; --fg: #1a1a1a; --muted: #6c6c68; --line: #e4e4df;
-  --card: #ffffff; --accent: #0a7d4f; --hit: #e8f5ee;
+/* Barlow Semi Condensed (SIL OFL, fonts/LICENSE): masthead, names, numerals */
+@font-face {
+  font-family: "Barlow Semi Condensed"; font-style: italic; font-weight: 700; font-display: swap;
+  src: url(fonts/barlow-semi-condensed-latin-700-italic.woff2) format("woff2");
 }
-@media (prefers-color-scheme: dark) {
+@font-face {
+  font-family: "Barlow Semi Condensed"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url(fonts/barlow-semi-condensed-latin-600-normal.woff2) format("woff2");
+}
+:root {
+  --bg: #fafaf8; --fg: #1a1a1a; --muted: #6c6c68; --line: #e2e6e1;
+  --card: #ffffff; --accent: #0a7d4f; --hit: #e8f5ee;
+  --display: "Barlow Semi Condensed", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {  /* floodlit night: green-tinted near-black */
   :root {
-    --bg: #111113; --fg: #ececec; --muted: #8f8f95; --line: #2a2a2e;
-    --card: #1a1a1e; --accent: #3dba82; --hit: #16281f;
+    --bg: #0c1210; --fg: #e9ede9; --muted: #93a099; --line: #243029;
+    --card: #131b16; --accent: #3fc287; --hit: #17281f;
   }
 }
 * { box-sizing: border-box; margin: 0; }
@@ -16,22 +26,29 @@ li[tabindex]:focus-visible, .chip button:focus-visible {
 body {
   background: var(--bg); color: var(--fg);
   font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;  /* stats align wherever they stack */
   max-width: 640px; margin: 0 auto; padding: 2rem 1rem 4rem;
 }
-header {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
-  margin-bottom: 1.5rem; padding-bottom: 1.2rem;
-  border-bottom: 1px solid var(--line);
+/* masthead: wordmark + tools over a double rule, tagline in spaced caps below */
+header { margin-bottom: .7rem; }
+.mast {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding-bottom: .5rem; position: relative;
+  border-bottom: 1px solid var(--fg);
 }
-.brand { display: flex; align-items: center; gap: .7rem; }
-.mark {
-  width: 2.5rem; height: 2.5rem; flex-shrink: 0; border-radius: 13px;
-  background: var(--hit); border: 1px solid var(--line);
-  display: grid; place-items: center; font-size: 1.4rem; line-height: 1;
+.mast::after {  /* the second hairline of the double rule */
+  content: ""; position: absolute; left: 0; right: 0; bottom: -4px;
+  border-bottom: 1px solid var(--fg);
 }
-h1 { font-size: 1.6rem; letter-spacing: -.02em; font-weight: 700; }
+h1 {
+  font-family: var(--display); font-style: italic; font-weight: 700;
+  font-size: 2.05rem; line-height: 1.05; text-transform: uppercase; letter-spacing: .01em;
+}
 h1 .accent { color: var(--accent); }
-.sub { color: var(--muted); font-size: .95rem; }
+.sub {
+  color: var(--muted); font-size: .76rem; margin-top: .7rem;
+  text-transform: uppercase; letter-spacing: .08em;
+}
 .htools { display: flex; gap: .4rem; flex-shrink: 0; }
 #langsel, #aboutbtn {
   cursor: pointer; background: transparent; color: var(--muted);
@@ -48,7 +65,11 @@ h1 .accent { color: var(--accent); }
 }
 #aboutleagues .lg { white-space: nowrap; }
 #about::backdrop { background: rgba(0, 0, 0, .45); }
-#about h2 { font-size: 1.05rem; margin-bottom: .6rem; }
+#about h2 {
+  font-family: var(--display); font-style: italic; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .01em;
+  font-size: 1.2rem; margin-bottom: .6rem;
+}
 #aboutleagues { color: var(--muted); margin-top: .6rem; line-height: 1.7; }
 .disclaimer {
   margin-top: .8rem; padding-top: .7rem; border-top: 1px solid var(--line);
@@ -60,7 +81,7 @@ h1 .accent { color: var(--accent); }
   border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: .85rem; padding: .15rem .8rem;
 }
 
-/* Club/Player segmented mode switch, right-aligned above the picker */
+/* Club/Player segmented mode switch: its own tight row under the tagline */
 #modebar { display: flex; justify-content: flex-end; margin-bottom: .45rem; }
 #modebar button {
   cursor: pointer; background: transparent; color: var(--muted);
@@ -299,12 +320,12 @@ label.frow { cursor: pointer; }
 .empty { color: var(--muted); font-size: .9rem; padding: .3rem .2rem; }
 .player {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-  padding: .55rem .8rem; margin-bottom: .5rem; cursor: pointer;
-  display: flex; align-items: center; gap: .8rem; flex-wrap: wrap;
+  padding: .4rem .65rem; margin-bottom: .45rem; cursor: pointer;
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
 }
 .player:hover { border-color: var(--accent); }
 .player img, .avatar {
-  width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+  width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
 }
 .avatar {
   background: var(--hit); color: var(--accent);
@@ -312,16 +333,47 @@ label.frow { cursor: pointer; }
   font-weight: 600; font-size: .85rem;
 }
 .pinfo { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-.pname small { color: var(--muted); font-weight: 400; }
-.pmeta { color: var(--muted); font-size: .82rem; }
-.pmeta .comb { opacity: .55; }
+/* formazione sheet: rank numeral | photo | name | stats in a right column */
+.rank {
+  font-family: var(--display); font-style: italic; font-weight: 700; font-size: 1.15rem;
+  color: var(--muted); opacity: .65; min-width: 2.4ch; text-align: right; flex-shrink: 0;
+}
+.pname { font-family: var(--display); font-weight: 600; font-size: 1.05rem; }
+.pname small {  /* birth year / GK tags: quiet body face, only the name carries weight */
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--muted); font-weight: 400; font-size: .74rem;
+}
+.pstats { margin-left: auto; color: var(--muted); font-size: .85rem; white-space: nowrap; }
+@media (max-width: 560px) {  /* phones: stats drop to a score line under the name,
+    the expand arrow pins to the corner, and every right edge shares one rail */
+  .pinfo { min-width: 55%; margin-right: 1.2rem; }
+  .player { position: relative; }
+  .expand { position: absolute; right: .6rem; top: .7rem; }
+  /* career rows stay single-line: one right rail, long names ellipsize */
+  .crow { font-size: .84rem; gap: .5rem; }
+  .cyears { min-width: 7.5ch; }
+  .cteam { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cstats { font-size: .8rem; }
+}
 .expand { color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) {  /* rows take the field on solve */
+  #results li.player { animation: rise .3s cubic-bezier(.2, .7, .3, 1) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(7px); } }
+}
 .more { color: var(--accent); padding: .5rem .8rem; cursor: pointer; }
 .more:hover { text-decoration: underline; }
 
-.career { flex-basis: 100%; border-top: 1px solid var(--line); margin-top: .4rem; padding-top: .4rem; cursor: default; }
+.career {  /* full-bleed section of the card: as a flex item, negative margins only
+    shift — the basis must grow by the same amount so the panel truly widens */
+  flex: 0 0 calc(100% + 1.3rem); border-top: 1px solid var(--line);
+  margin: .4rem -.65rem 0; padding: .4rem .65rem 0; cursor: default;
+}
 .crow { display: flex; gap: .8rem; font-size: .88rem; padding: .12rem 0; }
-.crow.hit { background: var(--hit); border-radius: 5px; }
+.crow.hit {  /* full-bleed tint with the scudetto stripe on the card edge;
+    horizontal padding compensates so columns stay aligned with plain rows */
+  background: var(--hit); border-left: 3px solid var(--accent);
+  margin: 0 -.65rem; padding-left: calc(.65rem - 3px); padding-right: .65rem;
+}
 .cyears { color: var(--muted); min-width: 9ch; text-align: right; font-variant-numeric: tabular-nums; }
 .cteam { flex: 1; }
 .cteam .loan { color: var(--muted); }
@@ -341,7 +393,10 @@ label.frow { cursor: pointer; }
 .cst { color: var(--muted); white-space: nowrap; }  /* player's apps/goals at the shared club */
 .mates { color: var(--accent); font-size: .8rem; white-space: nowrap; }
 .nomates { color: var(--muted); font-size: .8rem; white-space: nowrap; }
-.sclub .tcrow { border-top: 1px solid var(--line); margin-top: .2rem; padding-top: .25rem; }
+.sclub .tcrow {  /* totals divider bleeds like the career divider in club mode */
+  border-top: 1px solid var(--line);
+  margin: .2rem -.65rem 0; padding: .25rem .65rem 0;
+}
 .lsep {  /* divider before the selected players' own expandable rows */
   color: var(--muted); font-size: .72rem; text-transform: uppercase;
   letter-spacing: .05em; margin: .9rem 0 .4rem; padding: 0 .2rem;
