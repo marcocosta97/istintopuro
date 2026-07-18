@@ -38,7 +38,7 @@ const STR = {
     about: "Solver per il gioco «Istinto Puro»: scegli una o più squadre e scopri all'istante tutti i giocatori che hanno giocato per tutte, ordinati per presenze combinate. Dati estratti da Wikidata.",
     aboutLeagues: "Campionati coperti (tutte le stagioni):",
     disclaimer: `Nessun dato viene raccolto: tutto avviene nel tuo browser, senza server né tracciamento. Codice open source (<a href="${REPO}">MIT su GitHub</a>). Carattere: <a href="https://github.com/jpt/barlow">Barlow Semi Condensed</a> (SIL OFL).`,
-    remove: "rimuovi",
+    remove: "rimuovi", clearAll: "svuota",
     sort: "Ordina per", sortApps: "presenze", sortGoals: "gol", sortBirth: "nascita",
     asc: "crescente", desc: "decrescente",
     adv: "Filtri",
@@ -81,7 +81,7 @@ const STR = {
     about: "Solver for the game “Istinto Puro”: pick one or more clubs and instantly see every player who played for them all, ranked by combined appearances. Data extracted from Wikidata.",
     aboutLeagues: "Leagues covered (all seasons):",
     disclaimer: `No data is collected: everything happens in your browser, with no server or tracking. Open source (<a href="${REPO}">MIT on GitHub</a>). Typeface: <a href="https://github.com/jpt/barlow">Barlow Semi Condensed</a> (SIL OFL).`,
-    remove: "remove",
+    remove: "remove", clearAll: "clear",
     sort: "Sort by", sortApps: "apps", sortGoals: "goals", sortBirth: "birth",
     asc: "ascending", desc: "descending",
     adv: "Filters",
@@ -510,6 +510,19 @@ function renderChips() {
   else playerIds.forEach(pid =>  // birth year confirms which homonym was picked
     mk(`${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}`,
        "", () => removePlayer(pid)));
+  const sel = mode === "club" ? clubIds : playerIds;
+  if (sel.length >= 2) {  // clear-all rides the chip row; one chip has its own × already
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "clearchip";
+    b.textContent = `✕ ${t.clearAll}`;
+    b.onclick = () => {
+      if (mode === "club") { clubIds = []; syncHash(); } else playerIds = [];
+      renderChips(); solve();
+      search.focus();
+    };
+    chips.appendChild(b);
+  }
 }
 
 // ------------------------------------------------------- random demo query

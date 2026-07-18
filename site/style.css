@@ -109,6 +109,12 @@ h1 .accent { color: var(--accent); }
   all: unset; cursor: pointer; padding: 0 .3rem; color: var(--muted); font-size: 1rem;
 }
 .chip button:hover { color: var(--fg); }
+.clearchip {  /* ghost chip at the end of the row: clears the whole selection */
+  cursor: pointer; font: inherit; font-size: .8rem; color: var(--muted);
+  background: transparent; border: 1px dashed var(--line); border-radius: 999px;
+  padding: .15rem .6rem; white-space: nowrap;
+}
+.clearchip:hover { border-color: var(--accent); color: var(--fg); }
 #chips { display: contents; }
 #searchwrap { flex: 1; min-width: 12rem; display: flex; align-items: center; }
 #search {
