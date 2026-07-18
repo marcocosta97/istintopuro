@@ -27,7 +27,6 @@ const STR = {
     placeholder: "Aggiungi una squadra…",
     placeholderP: "Aggiungi un giocatore…",
     modeClub: "Squadre", modePlayer: "Giocatori",
-    needPlayer: "Aggiungi almeno un giocatore.",
     foundClubs: (n, ms) => `${n} squadr${n === 1 ? "a" : "e"} in comune · ${ms} ms`,
     mates: (span) => `compagni ${span}`,
     noOverlap: "(mai insieme)",
@@ -49,8 +48,7 @@ const STR = {
     nat: "Nazionalità", natAll: "tutte", natNone: "nessuna", natUnknown: "sconosciuta",
     stats: (p, c) => `${p.toLocaleString("it")} giocatori · ${c} squadre`,
     loadFail: "Errore nel caricamento dei dati.", retry: "riprova",
-    needOne: "Aggiungi almeno una squadra.",
-    try: "Prova:",
+    spin: "Non sai da dove partire? Tira il dado 🎲",
     randClubs: "squadre a caso", randPlayers: "giocatori a caso",
     noneCommon: "Nessun giocatore ha vestito tutte queste maglie — togli una squadra.",
     noneFilter: "Nessun giocatore corrisponde ai filtri.",
@@ -72,7 +70,6 @@ const STR = {
     placeholder: "Add a club…",
     placeholderP: "Add a player…",
     modeClub: "Clubs", modePlayer: "Players",
-    needPlayer: "Add at least one player.",
     foundClubs: (n, ms) => `${n} shared club${n === 1 ? "" : "s"} · ${ms} ms`,
     mates: (span) => `teammates ${span}`,
     noOverlap: "(never overlapped)",
@@ -94,8 +91,7 @@ const STR = {
     nat: "Nationality", natAll: "all", natNone: "none", natUnknown: "unknown",
     stats: (p, c) => `${p.toLocaleString("en")} players · ${c} clubs`,
     loadFail: "Failed to load data.", retry: "retry",
-    needOne: "Add at least one club.",
-    try: "Try:",
+    spin: "Not sure where to start? Roll the dice 🎲",
     randClubs: "random clubs", randPlayers: "random players",
     noneCommon: "No player has played for all these clubs — remove one to widen the search.",
     noneFilter: "No players match the filters.",
@@ -127,6 +123,9 @@ function applyLang() {
   $("mode-player").textContent = t.modePlayer;
   browseBtn.title = t.browse;
   browseBtn.setAttribute("aria-label", t.browse);
+  const rl = mode === "club" ? t.randClubs : t.randPlayers;
+  $("randbtn").title = rl;
+  $("randbtn").setAttribute("aria-label", rl);
   if (DB && !browse.hidden) renderBrowse();
   $("l-sort").textContent = t.sort;
   [t.sortApps, t.sortGoals, t.sortBirth].forEach((s, i) => sortSel.options[i].text = s);
@@ -275,6 +274,7 @@ async function boot() {
   clubIds = location.hash.slice(1).split(",").map(q => DB.byQid.get(q)).filter(i => i !== undefined);
   search.disabled = false;
   browseBtn.disabled = false;
+  $("randbtn").disabled = false;
   search.focus();
   applyLang();  // refresh status + footer now that DB (and its built date) exist
 }
@@ -516,14 +516,10 @@ function renderChips() {
 // shown whenever the current mode has no selection: one tap rolls 2–3
 // current top-division clubs, or 2–3 players born within a couple of years
 // of each other (photo + known birth year as the notability proxy)
-function renderExamples() {
+function renderExamples() {  // a nudge toward the picker dice, not a control of its own
   const li = document.createElement("li");
   li.className = "examples";
-  const b = document.createElement("button");
-  b.type = "button";
-  b.textContent = `🎲 ${mode === "club" ? t.randClubs : t.randPlayers}`;
-  b.onclick = runRandom;
-  li.append(Object.assign(document.createElement("span"), { textContent: t.try }), b);
+  li.textContent = t.spin;
   results.appendChild(li);
 }
 const draw = (pool, n) => {  // n distinct random picks
@@ -531,29 +527,44 @@ const draw = (pool, n) => {  // n distinct random picks
   while (out.length < n && p.length) out.push(p.splice(Math.random() * p.length | 0, 1)[0]);
   return out;
 };
-function runRandom() {
-  const n = 2 + (Math.random() < .35 ? 1 : 0);
-  if (mode === "club") {
+// a roll must land on something to show: clubs re-draw until they intersect;
+// players are drawn same-age from one random roster, so a shared club is
+// guaranteed by construction. Both ease 3 picks down to 2 if draws keep failing.
+function runRandom(m) {
+  let n = 2 + (Math.random() < .35 ? 1 : 0);
+  if (m === "club") {
     // first league index of each country group = the top division
     DB.topLeagues ||= new Set(DB.leagues.reduce((a, l, i) =>
       (i === 0 || DB.leagues[i - 1][2] !== l[2]) ? (a.push(i), a) : a, []));
     const pool = DB.clubs.map((c, i) => i)
       .filter(i => !DB.clubs[i][4] && DB.topLeagues.has(DB.clubs[i][5] ?? -1));
-    clubIds = draw(pool, n);
-    renderChips(); solve(); syncHash();
+    let pick = draw(pool, n);
+    for (let tries = 1; tries <= 80 && intersect(pick.map(postings)).length === 0; tries++) {
+      if (tries === 30) n = 2;
+      pick = draw(pool, n);
+    }
+    clubIds = pick;
+    syncHash();
   } else {
-    if (!DB.randPool) {
-      DB.randPool = [];
-      for (let i = 0; i < DB.names.length; i++) if (DB.imgs[i] && DB.births[i]) DB.randPool.push(i);
+    let pick = null;
+    for (let tries = 1; !pick && tries <= 80; tries++) {
+      if (tries === 40) n = 2;
+      const arr = postings(Math.random() * DB.clubs.length | 0);
+      const cand = [];
+      for (let k = 0; k < arr.length; k++)
+        if (DB.imgs[arr[k]] && DB.births[arr[k]]) cand.push(arr[k]);
+      const a = cand[Math.random() * cand.length | 0];
+      if (a === undefined) continue;
+      const near = cand.filter(p => p !== a && Math.abs(DB.births[p] - DB.births[a]) <= 2);
+      if (near.length >= n - 1) pick = [a, ...draw(near, n - 1)];
     }
-    for (let tries = 0; tries < 20; tries++) {
-      const a = DB.randPool[Math.random() * DB.randPool.length | 0];
-      const near = DB.randPool.filter(p => p !== a && Math.abs(DB.births[p] - DB.births[a]) <= 2);
-      if (near.length >= n - 1) { playerIds = [a, ...draw(near, n - 1)]; break; }
-    }
-    renderChips(); solve();
+    if (!pick) return;
+    playerIds = pick;
   }
+  if (mode !== m) setMode(m);  // setMode re-renders chips + results for the new selection
+  else { renderChips(); solve(); }
 }
+$("randbtn").onclick = () => runRandom(mode);  // the picker dice re-rolls in the current mode
 
 // ---------------------------------------------------------------- solve
 function intersect(lists) {
@@ -574,8 +585,8 @@ function intersect(lists) {
 function solve() {
   if (mode === "player") return solvePlayers();
   results.innerHTML = "";
-  if (clubIds.length === 0) {
-    status.textContent = t.needOne;
+  if (clubIds.length === 0) {  // no nagging: the stats line + dice nudge are the empty state
+    status.textContent = t.stats(DB.names.length, DB.clubs.length);
     natCounts.clear(); renderNats(); renderExamples();
     return;
   }
@@ -632,7 +643,10 @@ async function solvePlayers() {
   results.innerHTML = "";
   const g = ++solveGen;
   sharedNames = new Set();
-  if (!playerIds.length) { status.textContent = t.needPlayer; renderExamples(); return; }
+  if (!playerIds.length) {
+    status.textContent = t.stats(DB.names.length, DB.clubs.length);
+    renderExamples(); return;
+  }
   if (playerIds.length === 1) {
     status.textContent = "";
     renderResults(playerIds, new Map(), new Map(), new Set());
