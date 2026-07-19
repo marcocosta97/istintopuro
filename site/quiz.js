@@ -83,6 +83,11 @@ function qEase(clubs, answers) {
   for (const p of answers) { const f = qFame(p, clubs); if (f > f0) { f1 = f0; f0 = f; } else if (f > f1) f1 = f; }
   return f0 + 0.25 * f1 + Math.min(answers.length, 25) * 2;
 }
+// the "real" answers for difficulty: drop players with a KNOWN 0 appearances at
+// one of the clubs (they were registered but never played — nobody thinks of
+// them). They stay guessable in play, but a puzzle whose only overlap is such
+// players counts as no solution. apps === 0 is known-zero; -1 is unknown (kept).
+const qEffective = (clubs, answers) => answers.filter(p => !clubs.some(ci => qApps(ci, p) === 0));
 
 // per-stage constraint ladders: QT seeded attempts per tier, then relax. This
 // table is the whole difficulty tuning surface — rerun quizDebug() after
@@ -142,10 +147,12 @@ function qStage(rng, ladder, used) {
       const c0 = A[rng() * A.length | 0];
       const c1 = B[rng() * B.length | 0];
       if (c0 === c1) continue;
-      const clubs = [c0, c1], I = intersect(clubs.map(postings));
-      if (I.length < tier.size[0] || I.length > tier.size[1]) continue;
-      if (tier.birth && !DB.births[I[0]]) continue;
-      if (tier.ease) { const e = qEase(clubs, I); if (e < tier.ease[0] || e >= tier.ease[1]) continue; }
+      // I = every shared player (all guessable); eff = those who actually played,
+      // which is what sizing and difficulty judge
+      const clubs = [c0, c1], I = intersect(clubs.map(postings)), eff = qEffective(clubs, I);
+      if (eff.length < tier.size[0] || eff.length > tier.size[1]) continue;
+      if (tier.birth && !DB.births[eff[0]]) continue;
+      if (tier.ease) { const e = qEase(clubs, eff); if (e < tier.ease[0] || e >= tier.ease[1]) continue; }
       cands.set(c0 < c1 ? c0 + "," + c1 : c1 + "," + c0, { clubs, answers: I, tier: ti });
     }
     if (cands.size) return qChoose(cands, rng, used);
@@ -286,6 +293,7 @@ const QSTR = {
     qsSize: (n) => n === 1 ? "c'è una sola risposta valida" : `le risposte valide sono ${n}`,
     qsIni: (ini, dec) => `iniziali ${ini}` + (dec ? `, nato negli anni ${dec >= 2000 ? dec : "'" + String(dec).slice(2)}` : ""),
     qsAtClub: "gioca ancora in una delle due squadre", qsActive: "ancora in attività",
+    qsApps: (n) => `${n} pres`, qsGoals: (n) => `${n} gol`,
     qOk: "Giusto!", qNo: "No…", qDup: "già provato",
     qWon: "Schedina completata!", qLost: "Tentativi finiti.",
     qNewDay: "È mezzanotte: c'è una nuova schedina", qPlay: "gioca",
@@ -311,6 +319,7 @@ const QSTR = {
     qsSize: (n) => n === 1 ? "there is a single valid answer" : `there are ${n} valid answers`,
     qsIni: (ini, dec) => `initials ${ini}` + (dec ? `, born in the ${dec}s` : ""),
     qsAtClub: "still plays for one of the two clubs", qsActive: "still an active player",
+    qsApps: (n) => `${n} apps`, qsGoals: (n) => `${n} goals`,
     qOk: "Correct!", qNo: "No…", qDup: "already tried",
     qWon: "Quiz completed!", qLost: "Out of guesses.",
     qNewDay: "It's past midnight: a new quiz is out", qPlay: "play it",
@@ -534,12 +543,18 @@ function qHintText(kind, st) {
       .map(([cc, n]) => `${n} ${cc ? flag(cc) : "?"}`).join(" · ");
   }
   const p = qFace(st), b = DB.births[p];
-  let s = q.qsIni(DB.names[p].split(" ").map(w => w[0] + ".").join(" "), b ? Math.floor(b / 10) * 10 : 0);
+  let apps = 0, goals = 0;  // combined at the two clubs
+  for (const ci of st.clubs) { const a = qApps(ci, p); if (a > 0) apps += a; const g = qGoals(ci, p); if (g > 0) goals += g; }
+  // initials + decade, then nationality flag and the combined apps/goals
+  let s = esc(q.qsIni(DB.names[p].split(" ").map(w => w[0] + ".").join(" "), b ? Math.floor(b / 10) * 10 : 0));
+  const extra = [DB.nats[p] ? flag(DB.nats[p]) : "", apps ? q.qsApps(apps) : "",
+                 goals && !DB.gkSet.has(p) ? q.qsGoals(goals) : ""].filter(Boolean);
+  if (extra.length) s += " · " + extra.join(" · ");
   const note = qCareerNote.get(p);
   if (note === undefined) qLoadFace(st);  // not fetched yet: load, re-render appends the note
-  else if (note && note.at) s += " · " + q.qsAtClub;
-  else if (note && note.active) s += " · " + q.qsActive;
-  return esc(s);
+  else if (note && note.at) s += " · " + esc(q.qsAtClub);
+  else if (note && note.active) s += " · " + esc(q.qsActive);
+  return s;
 }
 
 function qSummary() {  // shared by the end screen and the share text
@@ -693,20 +708,21 @@ function quizReset(stats) {
 const qTierTag = (t) => t > 0 ? `/T${t + 1}` : t < 0 ? "/FB" : "";
 function quizGen(date = qToday()) {
   const p = qGen(date);
-  return { ...p, stages: p.stages.map(st => ({
-    clubs: st.clubs.map(ci => DB.clubs[ci][0]),
-    n: st.answers.length, tier: st.tier, ease: Math.round(qEase(st.clubs, st.answers)),
-    answers: st.answers.slice(0, 12).map(pid => DB.names[pid]),
-    face: DB.names[qFace(st)],
-  })) };
+  return { ...p, stages: p.stages.map(st => {
+    const eff = qEffective(st.clubs, st.answers);
+    return { clubs: st.clubs.map(ci => DB.clubs[ci][0]),
+      n: st.answers.length, real: eff.length, tier: st.tier, ease: Math.round(qEase(st.clubs, eff)),
+      answers: st.answers.slice(0, 12).map(pid => DB.names[pid]), face: DB.names[qFace(st)] };
+  }) };
 }
 function quizDebug(days = 14) {
   const rows = [], d = new Date();
   for (let k = 0; k < days; k++) {
     const p = qGen(qFmt(d)), row = { date: p.date };
     p.stages.forEach((st, i) => {
+      const eff = qEffective(st.clubs, st.answers);
       row[`s${i + 1}`] = st.clubs.map(ci => coreClub(DB.clubs[ci][0])).join(" × ");
-      row[`n${i + 1}`] = `${st.answers.length}·e${Math.round(qEase(st.clubs, st.answers))}${qTierTag(st.tier)}`;
+      row[`n${i + 1}`] = `${eff.length}·e${Math.round(qEase(st.clubs, eff))}${qTierTag(st.tier)}`;
     });
     rows.push(row);
     d.setDate(d.getDate() + 1);
