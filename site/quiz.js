@@ -144,6 +144,85 @@ function qFace(st) {
   return best;
 }
 
+// ---------------------------------------------------------------- game state
+// fresh → playing(stage 0-3, lives 5-1) → won | lost; terminal for the day.
+// Persisted after every action so a reload lands exactly where the player left.
+let qs = null;   // stored state (localStorage.quiz)
+let qPz = null;  // resolved puzzle: stages of {clubs:[ci], answers:[pid]}
+const qSave = () => localStorage.quiz = JSON.stringify(qs);
+const qRolled = () => qs && qs.date !== qToday();  // played past midnight
+
+function qLoad() {
+  const today = qToday();
+  let s = null;
+  try { s = JSON.parse(localStorage.quiz || ""); } catch {}
+  if (s && s.v === 1 && s.date === today) {
+    // the stored QIDs pin the puzzle: resolve against the current build and
+    // recompute the answers — a mid-day dataset refresh must not swap the
+    // clubs under the player, and ok guesses are grandfathered regardless
+    const stages = s.stages.map(qids => {
+      const clubs = qids.map(q => DB.byQid.get(q));
+      return clubs.every(ci => ci !== undefined)
+        ? { clubs, answers: intersect(clubs.map(postings)) } : null;
+    });
+    if (stages.every(Boolean)) { qs = s; qPz = { stages }; return; }
+  }
+  // no state, a stale day, or a club dropped from the build: fresh puzzle
+  const p = qGen(today);
+  qPz = { stages: p.stages };
+  qs = { v: 1, date: today, num: p.num, built: DB.built,
+         stages: p.stages.map(st => st.clubs.map(ci => DB.clubs[ci][3])),
+         stage: 0, lives: 5, guesses: [], hints: { size: null, nat: null, ini: null },
+         startedAt: Date.now(), done: false, won: false };
+  qSave();
+}
+
+// one confirmed guess. Returns what happened, for the UI to react to:
+// "dup" (free) | "wrong" | "stage" | "won" | "lost" | null (game frozen)
+function qGuess(pid) {
+  if (!qs || qs.done || qRolled()) return null;
+  const st = qPz.stages[qs.stage];
+  if (qs.guesses.some(g => g.stage === qs.stage && g.pid === pid)) return "dup";
+  const ok = st.answers.includes(pid);
+  qs.guesses.push({ name: DB.names[pid], pid, stage: qs.stage, ok });
+  let ev;
+  if (ok) {
+    if (qs.stage === 3) { qs.done = qs.won = true; ev = "won"; }
+    else { qs.stage++; ev = "stage"; }
+  } else if (--qs.lives <= 0) { qs.done = true; ev = "lost"; }
+  else ev = "wrong";
+  if (qs.done) qStats();
+  qSave();
+  return ev;
+}
+
+function qHint(kind) {  // "size" | "nat" | "ini" — each usable once per run
+  if (!qs || qs.done || qs.hints[kind] !== null || qRolled()) return false;
+  qs.hints[kind] = qs.stage;  // remember where it was spent, for the share text
+  qSave();
+  return true;
+}
+
+// daily streak + histogram, updated exactly once as a run reaches done
+function qStats() {
+  const st = qGetStats() ||
+    { v: 1, played: 0, streak: 0, maxStreak: 0, lastWinDate: null, byStage: [0, 0, 0, 0, 0] };
+  st.played++;
+  st.byStage[qs.won ? 4 : qs.stage]++;
+  if (qs.won) {  // UTC day numbers: "yesterday" survives DST shifts
+    const dayN = (ds) => { const [y, m, d] = ds.split("-").map(Number); return Date.UTC(y, m - 1, d) / 864e5; };
+    st.streak = st.lastWinDate && dayN(qs.date) - dayN(st.lastWinDate) === 1 ? st.streak + 1 : 1;
+    st.maxStreak = Math.max(st.maxStreak, st.streak);
+    st.lastWinDate = qs.date;
+  } else st.streak = 0;
+  localStorage.quizStats = JSON.stringify(st);
+  return st;
+}
+function qGetStats() {
+  try { const s = JSON.parse(localStorage.quizStats || ""); if (s && s.v === 1) return s; } catch {}
+  return null;
+}
+
 // ---------------------------------------------------------------- calibration
 // console-only helpers. quizGen("2026-07-25") → one resolved puzzle;
 // quizDebug(30) → a table of the next N days for difficulty eyeballing.
