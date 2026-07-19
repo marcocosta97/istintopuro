@@ -34,36 +34,49 @@ function qPools() {
   if (DB.qPools) return DB.qPools;
   DB.topLeagues ||= new Set(DB.leagues.reduce((a, l, i) =>
     (i === 0 || DB.leagues[i - 1][2] !== l[2]) ? (a.push(i), a) : a, []));
-  const big = [], mid = [], obs = [], any300 = [], any100 = [];
+  DB.qRecentCut = (+(DB.built || "").slice(0, 4) || new Date().getFullYear()) - 34;  // "recent" = <=34
+  const big = [], star = [], sub = [], mid = [], obs = [], any300 = [], any100 = [];
   DB.clubs.forEach((c, i) => {
-    const n = DB.postings[i].length;
+    const n = DB.postings[i].length, topDiv = !c[4] && DB.topLeagues.has(c[5] ?? -1);
     if (n < 30) return;
-    if (!c[4] && DB.topLeagues.has(c[5] ?? -1) && n >= 700) big.push(i);
+    if (topDiv && n >= 700) big.push(i);
+    // STAR (roster >= 400) drops all five leagues' current giants into the
+    // easy pool — the 700 cut kept only IT/GB, so easy skewed English/Italian
+    if (topDiv && n >= 400) star.push(i);
+    if (!c[4] && (c[5] ?? -1) >= 0 && n >= 120 && n < 400) sub.push(i);  // a lesser covered club
     if (!c[4] && (c[5] ?? -1) >= 0 && n >= 250 && n < 700) mid.push(i);
     if (n < 250) obs.push(i);  // dissolved and out-of-league clubs welcome
     if (n >= 300) any300.push(i);
     if (n >= 100) any100.push(i);
   });
-  return DB.qPools = { big, mid, obs, any300, any100 };
+  return DB.qPools = { big, star, sub, mid, obs, any300, any100 };
 }
+const qRecentN = (ids) => {  // answers young enough to be recognisable to a casual fan
+  let n = 0; for (const p of ids) if (DB.births[p] >= DB.qRecentCut) n++; return n;
+};
 
-// per-stage constraint ladders: QT seeded attempts per tier, then relax.
-// |I| bands measured on the 2026-07-15 build (same-country big-pair
-// intersections: min 10, median 42, max 122) — this table is the whole
-// difficulty tuning surface, check quizDebug() after touching it.
-// s: pools per club slot; same: 1 = slots share slot 1's country, 0 = must
-// differ (absent = free); birth: the lone answer needs a known birth year
-// (the identikit hint would otherwise have nothing to say on a 1-player set).
+// per-stage constraint ladders: QT seeded attempts per tier, then relax. This
+// table is the whole difficulty tuning surface — rerun quizDebug() after
+// touching it or after a dataset refresh. Fields per tier:
+//   s        pool per club slot
+//   same     1 = later slots share slot-1's country, 0 = must differ (absent = free)
+//   balance  1 = draw the anchor country-first (uniform over countries), so
+//            easy/medium rotate fairly across leagues instead of following the
+//            English/Italian-heavy pool sizes
+//   recent   minimum answers born >= qRecentCut (recognisable, current-ish)
+//   birth    the lone answer needs a known birth year (identikit hint fuel)
+// Bands measured on the 2026-07-15 build (same-country STAR pairs: |I| med
+// 22-60 by country, >=2 recent in ~60% of pairs).
 const QT = 200;
 const QEASY = [
-  { s: ["big", "big"], same: 1, lo: 25, hi: 1e9 },
-  { s: ["big", "big"], same: 1, lo: 10, hi: 1e9 },
-  { s: ["big", "big"], same: 1, lo: 8, hi: 1e9 },
+  { s: ["star", "star"], same: 1, balance: 1, lo: 22, hi: 1e9, recent: 3 },
+  { s: ["star", "star"], same: 1, balance: 1, lo: 14, hi: 1e9, recent: 2 },
+  { s: ["star", "star"], same: 1, balance: 1, lo: 10, hi: 1e9, recent: 1 },
 ];
 const QMEDIUM = [
-  { s: ["big", "mid"], same: 1, lo: 8, hi: 30 },
-  { s: ["big", "mid"], same: 1, lo: 5, hi: 40 },
-  { s: ["big", "mid"], same: 1, lo: 3, hi: 60 },
+  { s: ["star", "sub"], same: 1, balance: 1, lo: 8, hi: 30, recent: 1 },
+  { s: ["star", "sub"], same: 1, balance: 1, lo: 5, hi: 40 },
+  { s: ["star", "sub"], same: 1, balance: 1, lo: 3, hi: 60 },
 ];
 const QHARD = [  // two flavours, a daily coin picks which leads
   { s: ["big", "big"], same: 0, lo: 2, hi: 6 },
@@ -81,17 +94,27 @@ function qStage(rng, ladder, used) {
     const tier = ladder[ti];
     for (let a = 0; a < QT; a++) {
       const picks = [];
-      for (const slot of tier.s) {
-        // filter before drawing (never draw-and-reject): one rng call per slot
-        const cc = picks.length && tier.same !== undefined ? DB.clubs[picks[0]][1] : null;
-        const pool = P[slot].filter(i => !used.has(i) && !picks.includes(i)
-          && (cc === null || (DB.clubs[i][1] === cc) === !!tier.same));
-        if (!pool.length) { picks.length = 0; break; }
+      for (let si = 0; si < tier.s.length; si++) {
+        let pool;
+        if (si === 0 && tier.balance) {  // country-balanced anchor: country first, uniform
+          const base = P[tier.s[0]].filter(i => !used.has(i));
+          const ccs = [...new Set(base.map(i => DB.clubs[i][1]))];
+          if (!ccs.length) break;
+          const cc = ccs[rng() * ccs.length | 0];
+          pool = base.filter(i => DB.clubs[i][1] === cc);
+        } else {  // filter before drawing (never draw-and-reject): one rng call per slot
+          const cc = picks.length && tier.same !== undefined ? DB.clubs[picks[0]][1] : null;
+          pool = P[tier.s[si]].filter(i => !used.has(i) && !picks.includes(i)
+            && (cc === null || (DB.clubs[i][1] === cc) === !!tier.same));
+        }
+        if (!pool.length) break;
         picks.push(pool[rng() * pool.length | 0]);
       }
-      if (!picks.length) continue;
+      if (picks.length !== tier.s.length) continue;
       const I = intersect(picks.map(postings));
-      if (I.length >= tier.lo && I.length <= tier.hi && (!tier.birth || DB.births[I[0]])) {
+      if (I.length >= tier.lo && I.length <= tier.hi
+          && (!tier.birth || DB.births[I[0]])
+          && (!tier.recent || qRecentN(I) >= tier.recent)) {
         picks.forEach(i => used.add(i));
         return { clubs: picks, answers: I, tier: ti };
       }
@@ -244,11 +267,13 @@ const QSTR = {
     qNewDay: "È mezzanotte: c'è una nuova schedina", qPlay: "gioca",
     qErrS: (n) => `Errori ${n}/5`, qHintS: (n) => `Aiuti ${n}/3`,
     qStreakS: (n) => `Serie ${n}`, qLetters: { size: "D", nat: "N", ini: "I" },
-    qStatLine: (p, s, m) => `${p} giocate · serie ${s} · record ${m}`,
+    qStatPlayed: "giocate", qStatStreak: "serie", qStatBest: "record",
     qHisto: "sfide superate",
     qReveal: (n) => n === 1 ? "la risposta era" : `le ${n} risposte erano`,
     qOthers: (n) => `e altr${n === 1 ? "o" : "i"} ${n}`,
     qShare: "condividi", qCopied: "copiato!", qOpen: "apri nel solver",
+    qResignBtn: "mi arrendo", qResignWarn: "Abbandonare la schedina di oggi?",
+    qLeaveWarn: "Se esci abbandoni la schedina di oggi. Continuare?",
   },
   en: {
     qTag: "the daily quiz — four challenges, five guesses",
@@ -265,11 +290,13 @@ const QSTR = {
     qNewDay: "It's past midnight: a new quiz is out", qPlay: "play it",
     qErrS: (n) => `Misses ${n}/5`, qHintS: (n) => `Hints ${n}/3`,
     qStreakS: (n) => `Streak ${n}`, qLetters: { size: "S", nat: "N", ini: "I" },
-    qStatLine: (p, s, m) => `${p} played · streak ${s} · best ${m}`,
+    qStatPlayed: "played", qStatStreak: "streak", qStatBest: "best",
     qHisto: "stages cleared",
     qReveal: (n) => n === 1 ? "the answer was" : `the ${n} answers were`,
     qOthers: (n) => `and ${n} more`,
     qShare: "share", qCopied: "copied!", qOpen: "open in solver",
+    qResignBtn: "give up", qResignWarn: "Give up on today's quiz?",
+    qLeaveWarn: "Leaving forfeits today's quiz. Continue?",
   },
 };
 
@@ -281,7 +308,7 @@ let qBuilt = false;
 
 function qBuild() {  // static skeleton, rendered once on first entry
   qEl.innerHTML = `
-    <div id="qhead"><span id="qnum"></span><span id="qtag"></span></div>
+    <div id="qhead"><span id="qnum"></span></div>
     <ol id="qstages"></ol>
     <div id="qcard">
       <div id="qchips"></div>
@@ -299,8 +326,9 @@ function qBuild() {  // static skeleton, rendered once on first entry
         </span>
       </div>
       <div id="qhint" hidden></div>
+      <div id="qmsg" aria-live="polite"></div>
+      <button id="qresign" type="button"></button>
     </div>
-    <div id="qmsg" aria-live="polite"></div>
     <ul id="qlog"></ul>
     <div id="qend" hidden></div>
     <div id="qnewday" hidden></div>`;
@@ -323,6 +351,17 @@ function qBuild() {  // static skeleton, rendered once on first entry
   }, 100));
   for (const kind of ["size", "nat", "ini"])  // render either way: a rolled-over
     $("qh-" + kind).onclick = () => { qHint(kind); qRender(); };  // day shows its bar
+  $("qresign").onclick = () => { if (confirm(QSTR[lang].qResignWarn)) qResign(); };
+}
+
+// give up: end the run as a loss (reveal + stats), stay on the quiz page
+function qResign() {
+  if (!qs || qs.done) return;
+  qs.done = true; qs.won = false;
+  qStats();
+  qSave();
+  $("qsugg").hidden = true;
+  qRender();
 }
 
 let qCur = -1;
@@ -370,7 +409,7 @@ const qClubNames = (st) => st.clubs.map(ci => coreClub(DB.clubs[ci][0])).join(" 
 function qRender() {
   const q = QSTR[lang];
   $("qnum").textContent = q.qNum(qs.num);
-  $("qtag").textContent = q.qTag;
+  $("tagline").textContent = q.qTag;  // reuse the masthead tagline slot: content never shifts
   // stage board: cleared rows show clubs + the winning answer, the failed row
   // its clubs, unreached rows stay covered — no spoilers for a lost run
   const ol = $("qstages");
@@ -416,6 +455,7 @@ function qRender() {
       .map(k => qHintText(k, st));
     $("qhint").hidden = lines.length === 0;
     $("qhint").innerHTML = lines.map(l => `<div>${l}</div>`).join("");
+    $("qresign").textContent = q.qResignBtn;
   }
   // guess history, newest first
   const log = $("qlog");
@@ -466,16 +506,22 @@ function qShareText() {
     + `\nhttps://istintopuro.mcosta.it/`;
 }
 
-async function qShareOut() {
-  const text = qShareText();
+async function qShareOut(e) {
+  const btn = e.currentTarget, text = qShareText();
   if (navigator.share) { try { await navigator.share({ text }); return; } catch {} }
-  try { await navigator.clipboard.writeText(text); qFlash(QSTR[lang].qCopied, "ok"); } catch {}
+  // feedback goes on the button itself: #qmsg lives in the card, hidden at game end
+  try {
+    await navigator.clipboard.writeText(text);
+    btn.textContent = QSTR[lang].qCopied;
+    setTimeout(() => { btn.textContent = QSTR[lang].qShare; }, 1500);
+  } catch {}
 }
 
 function qRenderEnd() {
   const el = $("qend"), q = QSTR[lang];
   el.hidden = !qs.done;
   if (el.hidden) return;
+  el.className = qs.won ? "qend-win" : "qend-lost";
   const { cleared, sq, line } = qSummary(), st = qGetStats();
   let html = `<div class="qres">${qs.won ? q.qWon : q.qLost}</div>
     <div class="qsq">${sq} <b>${cleared}/4</b></div>
@@ -483,17 +529,18 @@ function qRenderEnd() {
   if (!qs.won) {  // reveal the stage that ended the run, best-documented first
     const stg = qPz.stages[qs.stage];
     const byDoc = [...stg.answers].sort((a, b) => qDoc(stg, b) - qDoc(stg, a));
-    html += `<div class="qreveal">${q.qReveal(stg.answers.length)}: `
+    html += `<div class="qreveal"><b>${q.qReveal(stg.answers.length)}</b>`
       + byDoc.slice(0, 10).map(p => esc(DB.names[p])).join(", ")
       + (byDoc.length > 10 ? ` ${q.qOthers(byDoc.length - 10)}` : "") + `</div>`;
   }
-  if (st) {
+  if (st) {  // three stat tiles + stages-cleared histogram
+    const tile = (n, k) => `<div class="qtile"><span class="n">${n}</span><span class="k">${k}</span></div>`;
+    html += `<div class="qtiles">${tile(st.played, q.qStatPlayed)}${tile(st.streak, q.qStatStreak)}${tile(st.maxStreak, q.qStatBest)}</div>`;
     const max = Math.max(...st.byStage, 1);
-    html += `<div class="qmeta">${q.qStatLine(st.played, st.streak, st.maxStreak)}</div>
-      <div id="qhisto" title="${q.qHisto}">` + st.byStage.map((n, i) =>
-        `<div class="qh${i === cleared ? " me" : ""}"><span class="qhl">${i}</span>`
-        + `<span class="qhb"><span style="width:${n / max * 100}%"></span></span>`
-        + `<span class="qhn">${n}</span></div>`).join("") + `</div>`;
+    html += `<div id="qhisto"><span class="qhcap">${q.qHisto}</span>` + st.byStage.map((n, i) =>
+      `<div class="qh${i === cleared ? " me" : ""}"><span class="qhl">${i}</span>`
+      + `<span class="qhb"><span style="width:${n / max * 100}%"></span></span>`
+      + `<span class="qhn">${n}</span></div>`).join("") + `</div>`;
   }
   el.innerHTML = html + `<button id="qsharebtn" type="button">${q.qShare}</button>`;
   $("qsharebtn").onclick = qShareOut;
@@ -528,15 +575,39 @@ function qEnter() {
 function qExit() {
   if (!document.body.classList.contains("quiz")) return;
   document.body.classList.remove("quiz");
+  $("tagline").textContent = mode === "club" ? t.tagline : t.taglineP;  // restore solver tagline
   $("mode-quiz").setAttribute("aria-pressed", "false");
   $("mode-club").setAttribute("aria-pressed", mode === "club");
   $("mode-player").setAttribute("aria-pressed", mode === "player");
 }
+// a run in progress (some guess or hint spent) is worth confirming before a
+// switch abandons it; a fresh or finished board leaves freely. Capture phase
+// on the bar runs before the buttons' own setMode/qExit handlers, so cancelling
+// can stopImmediatePropagation before the solver mode flips underneath.
+const qInProgress = () => qs && !qs.done && !qRolled()
+  && (qs.guesses.length || Object.values(qs.hints).some(h => h !== null));
+$("modebar").addEventListener("click", (e) => {
+  const btn = e.target.closest("button");
+  if (!btn || btn.id === "mode-quiz" || !document.body.classList.contains("quiz")) return;
+  if (!qInProgress()) return;
+  if (confirm(QSTR[lang].qLeaveWarn)) qResign();  // ends the run, then the switch proceeds
+  else { e.stopImmediatePropagation(); e.preventDefault(); }
+}, true);
 $("mode-quiz").addEventListener("click", qEnter);
 $("mode-club").addEventListener("click", qExit);
 $("mode-player").addEventListener("click", qExit);
 // langsel's own handler has already swapped `lang` when this one runs
 langSel.addEventListener("change", () => { if (qBuilt && qs) qRender(); });
+
+// debug escape hatch: quizReset() clears today's game (keep stats),
+// quizReset(true) wipes stats too. Re-renders if the quiz is open.
+function quizReset(stats) {
+  delete localStorage.quiz;
+  if (stats) delete localStorage.quizStats;
+  if (document.body.classList.contains("quiz")) { qLoad(); qRender(); }
+  else { qs = qPz = null; }
+  return "quiz reset";
+}
 
 // ---------------------------------------------------------------- calibration
 // console-only helpers. quizGen("2026-07-25") → one resolved puzzle;
