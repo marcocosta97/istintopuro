@@ -425,19 +425,18 @@ footer a { color: inherit; }
 /* ------------- daily quiz ("schedina"): a green-tinted page of the same paper */
 #quiz { display: none; }
 body.quiz #quiz { display: block; }
-body.quiz :is(#picker, #controls, #advbody, #status, #results, #tagline) { display: none; }
+body.quiz :is(#picker, #controls, #advbody, #status, #results) { display: none; }
 body.quiz {
   --bg: #eef6f0; --card: #f6fbf7; --line: #cfe3d6; --hit: #dcefe3; --bad: #b0392f;
 }
 @media (prefers-color-scheme: dark) {
   body.quiz { --bg: #0a1712; --card: #102019; --line: #1f3a2c; --hit: #173425; --bad: #e0705f; }
 }
-#qhead { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: .7rem; }
+#qhead { margin-bottom: .6rem; }
 #qnum {
   font-family: var(--display); font-style: italic; font-weight: 700;
   text-transform: uppercase; letter-spacing: .01em; font-size: 1.05rem; white-space: nowrap;
 }
-#qtag { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; text-align: right; }
 /* stage board: hairline rows, not cards — the almanacco's results table */
 #qstages { list-style: none; padding: 0; margin: 0 0 .9rem; }
 #qstages li {
@@ -491,9 +490,15 @@ body.quiz {
 #qhbtns button:not(:disabled):hover { border-color: var(--accent); color: var(--fg); }
 #qhbtns button:disabled { opacity: .4; cursor: default; }
 #qhint { color: var(--muted); font-size: .85rem; margin-top: .45rem; line-height: 1.6; }
-#qmsg { min-height: 1.5em; font-size: .9rem; margin: .45rem 0 0; }
+#qmsg { min-height: 1.5em; font-size: .9rem; margin: .45rem 0 0; font-weight: 600; }
 #qmsg.ok { color: var(--accent); }
 #qmsg.no { color: var(--bad); }
+#qresign {  /* quiet give-up link, right-aligned under the card actions */
+  display: block; margin: .5rem 0 0 auto; cursor: pointer;
+  background: transparent; border: none; color: var(--muted);
+  font: inherit; font-size: .78rem; text-decoration: underline; text-underline-offset: 2px;
+}
+#qresign:hover { color: var(--bad); }
 @media (prefers-reduced-motion: no-preference) {
   #qcard.shake { animation: qshake .3s; }
   @keyframes qshake {
@@ -507,32 +512,61 @@ body.quiz {
   padding: .18rem .2rem; border-top: 1px solid var(--line);
 }
 #qlog li small { margin-left: auto; color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
-#qend { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .8rem; margin-top: .2rem; }
+/* end card: centred result sheet — headline, big scoreline, stat tiles, histogram */
+#qend {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 1.4rem 1rem 1.2rem; margin-top: .2rem; text-align: center;
+}
 #qend[hidden] { display: none; }
-.qres { font-family: var(--display); font-style: italic; font-weight: 700; font-size: 1.25rem; text-transform: uppercase; }
-.qsq { font-size: 1.05rem; margin-top: .4rem; letter-spacing: .1em; }
-.qsq b { font-family: var(--display); font-style: italic; font-weight: 700; margin-left: .3rem; }
-.qmeta { color: var(--muted); font-size: .85rem; margin-top: .3rem; }
+.qres {
+  font-family: var(--display); font-style: italic; font-weight: 700;
+  font-size: 1.7rem; text-transform: uppercase; line-height: 1.05;
+}
+.qend-win .qres { color: var(--accent); }
+.qsq {
+  font-size: 1.75rem; margin-top: .55rem; letter-spacing: .12em;
+  display: flex; align-items: center; justify-content: center; gap: .5rem;
+}
+.qsq b {
+  font-family: var(--display); font-style: italic; font-weight: 700;
+  font-size: 1.15rem; letter-spacing: 0; color: var(--muted);
+}
+.qmeta { color: var(--muted); font-size: .85rem; margin-top: .5rem; }
 .qreveal {
-  color: var(--muted); font-size: .85rem; line-height: 1.5;
-  margin-top: .55rem; padding-top: .5rem; border-top: 1px solid var(--line);
+  color: var(--fg); font-size: .85rem; line-height: 1.55; text-align: center;
+  margin: .9rem auto 0; padding-top: .7rem; border-top: 1px solid var(--line); max-width: 32rem;
 }
-#qhisto {  /* stages-cleared histogram: label | bar | count */
-  display: grid; grid-template-columns: auto 1fr auto; gap: .18rem .5rem;
-  align-items: center; max-width: 17rem; margin-top: .4rem;
+.qreveal b { color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: .74rem; display: block; margin-bottom: .25rem; }
+/* three stat tiles: played / streak / best */
+.qtiles { display: flex; justify-content: center; gap: .5rem; margin: 1rem 0 .2rem; }
+.qtile {
+  flex: 1; max-width: 8rem; padding: .6rem .3rem;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--bg);
 }
+.qtile .n { font-family: var(--display); font-style: italic; font-weight: 700; font-size: 1.6rem; display: block; line-height: 1; }
+.qtile .k { color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; margin-top: .35rem; display: block; }
+/* stages-cleared histogram: label | bar | count, centred under the tiles */
+#qhisto {
+  display: grid; grid-template-columns: auto 1fr auto; gap: .2rem .55rem;
+  align-items: center; max-width: 19rem; margin: .9rem auto 0;
+}
+.qhcap { grid-column: 1 / -1; color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; text-align: left; margin-bottom: .1rem; }
 .qh { display: contents; }
-.qhl, .qhn { color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; }
+.qhl, .qhn { color: var(--muted); font-size: .74rem; font-variant-numeric: tabular-nums; }
 .qhn { text-align: right; }
-.qhb span { display: block; height: .5rem; background: var(--line); min-width: 2px; }
-.qh.me .qhb span { background: var(--accent); }
+.qhb { background: var(--line); border-radius: 999px; overflow: hidden; }
+.qhb span { display: block; height: .55rem; background: var(--muted); opacity: .5; min-width: 2px; border-radius: 999px; }
+.qh.me .qhl, .qh.me .qhn { color: var(--accent); font-weight: 700; }
+.qh.me .qhb span { background: var(--accent); opacity: 1; }
 #qsharebtn {
-  margin-top: .75rem; cursor: pointer; font: inherit; font-size: .9rem;
-  color: var(--accent); background: transparent;
-  border: 1px solid var(--accent); border-radius: 7px; padding: .25rem .9rem;
+  margin-top: 1.1rem; cursor: pointer; font: inherit; font-size: .95rem; font-weight: 600;
+  color: #fff; background: var(--accent); border: 1px solid var(--accent);
+  border-radius: 8px; padding: .45rem 1.6rem;
 }
-#qsharebtn:hover { background: var(--hit); }
+@media (prefers-color-scheme: dark) { #qsharebtn { color: #08130d; } }
+#qsharebtn:hover { filter: brightness(1.06); }
 #qstages li.qlink { cursor: pointer; }
+#qstages li.qlink:hover, #qstages li.qlink:focus-visible { background: var(--hit); outline: none; }
 #qstages li.qlink:hover .qsname, #qstages li.qlink:focus-visible .qsname { color: var(--accent); }
 #qnewday {
   margin-top: .8rem; padding: .5rem .7rem; font-size: .9rem;
