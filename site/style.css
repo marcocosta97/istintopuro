@@ -48,6 +48,9 @@ h1 .accent { color: var(--accent); }
 .sub {
   color: var(--muted); font-size: .76rem; margin-top: .7rem;
   text-transform: uppercase; letter-spacing: .08em;
+  /* reserve two lines so switching modes (the quiz tagline is longer than the
+     solver one and wraps at a different width) never reflows the content below */
+  min-height: 2.3rem;
 }
 .htools { display: flex; gap: .4rem; flex-shrink: 0; }
 #langsel, #aboutbtn {
