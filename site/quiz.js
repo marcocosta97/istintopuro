@@ -299,6 +299,7 @@ const QSTR = {
     qhSize: "quanti sono?", qhNat: "di dove?", qhIni: "identikit",
     qsSize: (n) => n === 1 ? "c'è una sola risposta valida" : `le risposte valide sono ${n}`,
     qsIni: (ini, dec) => `iniziali ${ini}` + (dec ? `, nato negli anni ${dec >= 2000 ? dec : "'" + String(dec).slice(2)}` : ""),
+    qsAtClub: "gioca ancora in una delle due squadre", qsActive: "ancora in attività",
     qOk: "Giusto!", qNo: "No…", qDup: "già provato",
     qWon: "Schedina completata!", qLost: "Tentativi finiti.",
     qNewDay: "È mezzanotte: c'è una nuova schedina", qPlay: "gioca",
@@ -308,7 +309,7 @@ const QSTR = {
     qHisto: "sfide superate",
     qReveal: (n) => n === 1 ? "la risposta era" : `le ${n} risposte erano`,
     qOthers: (n) => `e altr${n === 1 ? "o" : "i"} ${n}`,
-    qShare: "condividi", qCopied: "copiato!", qOpen: "apri nel solver",
+    qShare: "condividi", qCopied: "copiato negli appunti", qOpen: "apri nel solver",
     qResignBtn: "mi arrendo", qResignWarn: "Abbandonare la schedina di oggi?",
     qLeaveWarn: "Se esci abbandoni la schedina di oggi. Continuare?",
   },
@@ -322,6 +323,7 @@ const QSTR = {
     qhSize: "how many?", qhNat: "from where?", qhIni: "identikit",
     qsSize: (n) => n === 1 ? "there is a single valid answer" : `there are ${n} valid answers`,
     qsIni: (ini, dec) => `initials ${ini}` + (dec ? `, born in the ${dec}s` : ""),
+    qsAtClub: "still plays for one of the two clubs", qsActive: "still an active player",
     qOk: "Correct!", qNo: "No…", qDup: "already tried",
     qWon: "Quiz completed!", qLost: "Out of guesses.",
     qNewDay: "It's past midnight: a new quiz is out", qPlay: "play it",
@@ -331,7 +333,7 @@ const QSTR = {
     qHisto: "stages cleared",
     qReveal: (n) => n === 1 ? "the answer was" : `the ${n} answers were`,
     qOthers: (n) => `and ${n} more`,
-    qShare: "share", qCopied: "copied!", qOpen: "open in solver",
+    qShare: "share", qCopied: "copied to clipboard", qOpen: "open in solver",
     qResignBtn: "give up", qResignWarn: "Give up on today's quiz?",
     qLeaveWarn: "Leaving forfeits today's quiz. Continue?",
   },
@@ -512,6 +514,23 @@ function qRender() {
   }
 }
 
+// identikit career note, loaded lazily from the shard (async is fine at hint
+// time): whether the revealed player is still active / still at one of the clubs
+const qCareerNote = new Map();  // pid -> null (in flight) | {at:bool, active:bool}
+async function qLoadFace(st) {
+  const pid = qFace(st);
+  if (qCareerNote.has(pid)) return;
+  qCareerNote.set(pid, null);  // in-flight guard
+  let career;
+  try { [, career = []] = await careerOf(pid); }
+  catch { qCareerNote.delete(pid); return; }
+  const spells = career.filter(e => e[0]);  // [team, start, end, apps, goals, loan]
+  const names = new Set(st.clubs.map(ci => DB.clubs[ci][0]));  // canonical names match within a build
+  const open = spells.filter(sp => sp[1] && !sp[2]);  // started, no end recorded = ongoing
+  qCareerNote.set(pid, { at: open.some(sp => names.has(sp[0])), active: open.length > 0 });
+  if (document.body.classList.contains("quiz")) qRender();
+}
+
 function qHintText(kind, st) {
   const q = QSTR[lang];
   if (kind === "size") return esc(q.qsSize(st.answers.length));
@@ -522,8 +541,12 @@ function qHintText(kind, st) {
       .map(([cc, n]) => `${n} ${cc ? flag(cc) : "?"}`).join(" · ");
   }
   const p = qFace(st), b = DB.births[p];
-  return esc(q.qsIni(DB.names[p].split(" ").map(w => w[0] + ".").join(" "),
-                     b ? Math.floor(b / 10) * 10 : 0));
+  let s = q.qsIni(DB.names[p].split(" ").map(w => w[0] + ".").join(" "), b ? Math.floor(b / 10) * 10 : 0);
+  const note = qCareerNote.get(p);
+  if (note === undefined) qLoadFace(st);  // not fetched yet: load, re-render appends the note
+  else if (note && note.at) s += " · " + q.qsAtClub;
+  else if (note && note.active) s += " · " + q.qsActive;
+  return esc(s);
 }
 
 function qSummary() {  // shared by the end screen and the share text
@@ -540,7 +563,7 @@ function qShareText() {
   const q = QSTR[lang], { cleared, sq, line } = qSummary(), st = qGetStats();
   return `Istinto Puro — ${q.qNum(qs.num)} · ${cleared}/4\n${sq}\n`
     + line + (qs.won && st ? ` · ${q.qStreakS(st.streak)}` : "")
-    + `\nhttps://istintopuro.mcosta.it/`;
+    + `\nhttps://istintopuro.mcosta.it/#quiz`;  // #quiz opens straight into the game
 }
 
 async function qShareOut(e) {
@@ -567,7 +590,7 @@ function qRenderEnd() {
     const stg = qPz.stages[qs.stage];
     const byDoc = [...stg.answers].sort((a, b) => qDoc(stg, b) - qDoc(stg, a));
     html += `<div class="qreveal"><b>${q.qReveal(stg.answers.length)}</b>`
-      + byDoc.slice(0, 10).map(p => esc(DB.names[p])).join(", ")
+      + byDoc.slice(0, 10).map(p => `<button type="button" class="qrp" data-p="${p}">${esc(DB.names[p])}</button>`).join(", ")
       + (byDoc.length > 10 ? ` ${q.qOthers(byDoc.length - 10)}` : "") + `</div>`;
   }
   if (st) {  // three stat tiles + stages-cleared histogram
@@ -581,6 +604,7 @@ function qRenderEnd() {
   }
   el.innerHTML = html + `<button id="qsharebtn" type="button">${q.qShare}</button>`;
   $("qsharebtn").onclick = qShareOut;
+  el.querySelectorAll(".qrp").forEach(b => b.onclick = () => qOpenPlayer(+b.dataset.p));
 }
 
 // end-screen click-through: load the matchup in club mode, quiz stays finished
@@ -589,6 +613,13 @@ function qOpenSolver(clubs) {
   syncHash();
   qExit();
   if (mode !== "club") setMode("club");  // setMode re-renders for the new selection
+  else { renderChips(); solve(); }
+}
+// reveal click-through: open a revealed player's card in the solver's player mode
+function qOpenPlayer(pid) {
+  playerIds = [pid];
+  qExit();
+  if (mode !== "player") setMode("player");
   else { renderChips(); solve(); }
 }
 
@@ -601,6 +632,7 @@ function qEnter() {
   if (!qBuilt) { qBuild(); qBuilt = true; }
   qLoad();
   document.body.classList.add("quiz");
+  history.replaceState(null, "", "#quiz");  // shareable + survives refresh
   $("mode-quiz").setAttribute("aria-pressed", "true");
   $("mode-club").setAttribute("aria-pressed", "false");
   $("mode-player").setAttribute("aria-pressed", "false");
@@ -613,6 +645,7 @@ function qExit() {
   if (!document.body.classList.contains("quiz")) return;
   document.body.classList.remove("quiz");
   $("tagline").textContent = mode === "club" ? t.tagline : t.taglineP;  // restore solver tagline
+  syncHash();  // drop #quiz, restore the solver's club-QID hash (or a clean URL)
   $("mode-quiz").setAttribute("aria-pressed", "false");
   $("mode-club").setAttribute("aria-pressed", mode === "club");
   $("mode-player").setAttribute("aria-pressed", mode === "player");
@@ -635,6 +668,8 @@ $("mode-club").addEventListener("click", qExit);
 $("mode-player").addEventListener("click", qExit);
 // langsel's own handler has already swapped `lang` when this one runs
 langSel.addEventListener("change", () => { if (qBuilt && qs) qRender(); });
+// a shared https://…/#quiz link opens straight into the game once data is ready
+document.addEventListener("dbready", () => { if (location.hash === "#quiz") qEnter(); }, { once: true });
 
 // debug escape hatch: quizReset() clears today's game (keep stats),
 // quizReset(true) wipes stats too. Re-renders if the quiz is open.

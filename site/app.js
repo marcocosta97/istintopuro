@@ -277,6 +277,7 @@ async function boot() {
   $("randbtn").disabled = false;
   search.focus();
   applyLang();  // refresh status + footer now that DB (and its built date) exist
+  document.dispatchEvent(new Event("dbready"));  // quiz.js waits on this (e.g. a #quiz deep link)
 }
 
 function postings(ci) {
