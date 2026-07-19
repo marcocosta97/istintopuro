@@ -2,7 +2,10 @@
 
 Solver for the game «Istinto Puro»: pick clubs and instantly get every
 player who wore all of those shirts — or switch to player mode and go the
-other way: pick players, get the clubs they shared.
+other way: pick players, get the clubs they shared. A daily quiz mode
+(`site/quiz.js`) turns the same index into a Wordle-style game: four
+intersections of rising difficulty, generated deterministically from the
+date, so everyone on the same dataset build plays the same puzzle.
 
 Live at **[istintopuro.mcosta.it](https://istintopuro.mcosta.it)**.
 
@@ -18,6 +21,12 @@ No server, no tracking.
 The emitted data formats are documented in `pipeline/pipeline.py`'s
 docstring; heuristics and quality passes are commented where they live,
 in the pipeline and in `site/app.js`.
+
+The quiz generator's difficulty bands live in one table at the top of
+`site/quiz.js`; after a dataset refresh, `quizDebug(30)` in the console
+prints the next month of puzzles for a difficulty sanity check. Game
+state and streaks persist in `localStorage` (`quiz`, `quizStats`),
+pinned to club QIDs so a mid-day refresh can't swap a puzzle mid-game.
 
 ## Refreshing the data
 
