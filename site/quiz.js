@@ -28,146 +28,135 @@ const qNum = (date) => {  // parse by hand: new Date(string) is a timezone trap
 };
 
 // ---------------------------------------------------------------- generator
-// candidate pools in index order (stable within a build). Roster size is the
-// fairness guardrail: clubs with under 30 recorded players are too thin to ask about.
-// the continent's genuinely legendary clubs (curated QIDs, all five leagues):
-// roster size alone couldn't tell Real/Bayern/PSG from a mid-table side, so
-// easy anchors on this set — every easy puzzle carries one household name.
-const QICONIC = new Set([
-  "Q1422", "Q631", "Q1543", "Q2641", "Q2739",                       // Juventus Inter Milan Napoli Roma
-  "Q8682", "Q7156", "Q8701",                                        // Real Barça Atlético
-  "Q15789", "Q41420",                                               // Bayern Dortmund
-  "Q483020",                                                        // PSG
-  "Q18656", "Q1130849", "Q9617", "Q9616", "Q50602", "Q18741",       // ManU Liverpool Arsenal Chelsea City Spurs
-]);
+// Difficulty is driven by the ANSWER SET, not club reputation: a pair is easy
+// when its shared players include a household name (a legend with many caps, a
+// prolific scorer, or a current star) — which is why Real Madrid × Milan (Seedorf)
+// or Napoli × Man United (McTominay) play easy despite small intersections, while
+// two mid clubs whose only overlap is journeymen play hard. Each stage buckets by
+// a computed `ease` score; drawing from broad pools keeps clubs varied day to day.
+// Pools in index order (stable within a build). Roster >= 30 is the fairness floor.
 function qPools() {
   if (DB.qPools) return DB.qPools;
   DB.topLeagues ||= new Set(DB.leagues.reduce((a, l, i) =>
     (i === 0 || DB.leagues[i - 1][2] !== l[2]) ? (a.push(i), a) : a, []));
-  const yr = +(DB.built || "").slice(0, 4) || new Date().getFullYear();
-  DB.qRecentCut = yr - 34;  // "recent" floor = <=34; the activity score weights younger higher
-  DB.qActCuts = [yr - 25, yr - 30, yr - 34];  // ~current squad / active / recent → 3/2/1 pts
-  const big = [], star = [], iconic = [], sub = [], mid = [], obs = [], any300 = [], any100 = [];
+  DB.qYear = +(DB.built || "").slice(0, 4) || new Date().getFullYear();
+  if (!DB.gkSet) { DB.gkSet = new Set(); let a = 0; for (const d of DB.gks || []) DB.gkSet.add(a += d); }
+  const star = [], sub = [], obs = [], any300 = [], any100 = [];
   DB.clubs.forEach((c, i) => {
     const n = DB.postings[i].length, topDiv = !c[4] && DB.topLeagues.has(c[5] ?? -1);
     if (n < 30) return;
-    if (topDiv && n >= 700) big.push(i);
-    // STAR (roster >= 400) drops all five leagues' current giants into the
-    // easy pool — the 700 cut kept only IT/GB, so easy skewed English/Italian
-    if (topDiv && n >= 400) star.push(i);
-    if (topDiv && QICONIC.has(c[3])) iconic.push(i);  // the legendary-anchor pool
-    if (!c[4] && (c[5] ?? -1) >= 0 && n >= 120 && n < 400) sub.push(i);  // a lesser covered club
-    if (!c[4] && (c[5] ?? -1) >= 0 && n >= 250 && n < 700) mid.push(i);
+    if (topDiv && n >= 400) star.push(i);                                 // a big top-flight club
+    if (!c[4] && (c[5] ?? -1) >= 0 && n >= 120 && n < 400) sub.push(i);   // a lesser covered club
     if (n < 250) obs.push(i);  // dissolved and out-of-league clubs welcome
     if (n >= 300) any300.push(i);
     if (n >= 100) any100.push(i);
   });
-  return DB.qPools = { big, star, iconic, sub, mid, obs, any300, any100 };
+  return DB.qPools = { star, sub, field: star.concat(sub), obs, any300, any100 };
 }
-const qRecentN = (ids) => {  // answers young enough to be recognisable to a casual fan
-  let n = 0; for (const p of ids) if (DB.births[p] >= DB.qRecentCut) n++; return n;
-};
-// activity score of an answer set: rewards likely-active players and weights the
-// probably-current (youngest) highest, so easy/medium favour guessable squads
-const qActScore = (ids) => {
-  const [c0, c1, c2] = DB.qActCuts;
-  let s = 0;
-  for (const p of ids) { const b = DB.births[p]; if (b >= c0) s += 3; else if (b >= c1) s += 2; else if (b >= c2) s += 1; }
-  return s;
-};
+
+// goals of pid at club ci (0 for goalkeepers — their goal qualifiers are unreliable)
+function qGoals(ci, pid) {
+  if (DB.gkSet.has(pid)) return 0;
+  const arr = postings(ci), g = DB.goals[ci];
+  let lo = 0, hi = arr.length - 1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m] === pid) return g[m]; if (arr[m] < pid) lo = m + 1; else hi = m - 1; }
+  return -1;
+}
+// how recognisable an answer is: apps (a club legend / long-server), goals (a
+// prolific scorer), age (a current or recent player is known to casual fans), and
+// having a Commons photo (a rough notability signal). Weights tuned in probe5.js.
+// Recognisability drives difficulty, and recency is its strongest signal: a
+// current/recent player is known to casual fans, whereas a prolific scorer or
+// long-server from decades ago is not — so recency leads, with appearances and
+// goals as support that can't by themselves make an ancient name "famous".
+const qRecBonus = (age) => age <= 28 ? 200 : age <= 32 ? 150 : age <= 36 ? 90 : age <= 41 ? 45 : 10;
+function qFame(pid, clubs) {
+  let apps = 0, goals = 0;
+  for (const ci of clubs) { const a = qApps(ci, pid); if (a > 0) apps += a; const g = qGoals(ci, pid); if (g > 0) goals += g; }
+  const age = DB.births[pid] ? DB.qYear - DB.births[pid] : 99;
+  return qRecBonus(age) + 0.75 * Math.min(apps, 260) + 3 * Math.min(goals, 70) + (DB.imgs[pid] ? 20 : 0);
+}
+// puzzle ease: dominated by the single most famous answer, plus a little for a
+// second star and for set size (more answers = more chances to know one)
+function qEase(clubs, answers) {
+  let f0 = 0, f1 = 0;
+  for (const p of answers) { const f = qFame(p, clubs); if (f > f0) { f1 = f0; f0 = f; } else if (f > f1) f1 = f; }
+  return f0 + 0.25 * f1 + Math.min(answers.length, 25) * 2;
+}
 
 // per-stage constraint ladders: QT seeded attempts per tier, then relax. This
 // table is the whole difficulty tuning surface — rerun quizDebug() after
-// touching it or after a dataset refresh. Fields per tier:
-//   s        pool per club slot
-//   same     1 = later slots share slot-1's country, 0 = must differ (absent = free)
-//   balance  1 = draw the anchor country-first (uniform over countries), so
-//            easy/medium rotate fairly across leagues instead of following the
-//            English/Italian-heavy pool sizes
-//   recent   minimum answers born >= qRecentCut (recognisable, current-ish)
-//   score    1 = keep the highest activity-score candidate in the tier (prefer
-//            active/current-heavy sets) instead of the first that fits
-//   birth    the lone answer needs a known birth year (identikit hint fuel)
-// Bands measured on the 2026-07-15 build (same-country STAR pairs: |I| med
-// 22-60 by country, >=2 recent in ~60% of pairs).
-const QT = 200;
-const QEASY = [  // anchor is always a legendary club; partner a same-country star
-  { s: ["iconic", "star"], same: 1, balance: 1, score: 1, lo: 18, hi: 1e9, recent: 2 },
-  { s: ["iconic", "star"], same: 1, balance: 1, score: 1, lo: 12, hi: 1e9, recent: 1 },
-  { s: ["iconic", "star"], same: 1, balance: 1, score: 1, lo: 8, hi: 1e9 },
+// touching it or a dataset refresh. Fields per tier:
+//   p      the two clubs' pools ("star" big club, "field" = star ∪ sub, etc.)
+//   size   [min, max] answer-set size
+//   ease   [min, max) qEase band (absent = any); bands measured in probe5.js —
+//          same-country star pairs sit ~470-870, cross-country ones span 80-750
+//   birth  the lone answer needs a known birth year (identikit hint fuel)
+const QT = 240;
+const QEASY = [  // a recognisable name among the shared players (recent star or icon)
+  { p: ["star", "field"], size: [2, 1e9], ease: [540, 1e9] },
+  { p: ["star", "field"], size: [2, 1e9], ease: [480, 1e9] },
+  { p: ["star", "field"], size: [2, 1e9], ease: [420, 1e9] },
 ];
 const QMEDIUM = [
-  { s: ["star", "sub"], same: 1, balance: 1, score: 1, lo: 8, hi: 30, recent: 1 },
-  { s: ["star", "sub"], same: 1, balance: 1, score: 1, lo: 5, hi: 40 },
-  { s: ["star", "sub"], same: 1, balance: 1, lo: 3, hi: 60 },
+  { p: ["star", "field"], size: [3, 1e9], ease: [380, 540] },
+  { p: ["star", "field"], size: [3, 1e9], ease: [320, 540] },
+  { p: ["star", "field"], size: [2, 1e9], ease: [280, 600] },
 ];
-const QHARD = [  // two flavours, a daily coin picks which leads
-  { s: ["big", "big"], same: 0, lo: 2, hi: 6 },
-  { s: ["big", "big", "big"], same: 1, lo: 2, hi: 6 },
+const QHARD = [  // small overlap of unremarkable players — no star to grab onto
+  { p: ["field", "field"], size: [2, 12], ease: [160, 380] },
+  { p: ["field", "field"], size: [2, 15], ease: [100, 430] },
+  { p: ["field", "field"], size: [2, 20], ease: [0, 500] },
 ];
 const QIMPOSSIBLE = [
-  { s: ["obs", "any300"], lo: 1, hi: 1, birth: 1 },
-  { s: ["obs", "any300"], lo: 1, hi: 1 },
-  { s: ["obs", "any100"], lo: 1, hi: 2 },
+  { p: ["obs", "any300"], size: [1, 1], birth: 1 },
+  { p: ["obs", "any300"], size: [1, 1] },
+  { p: ["obs", "any100"], size: [1, 2] },
 ];
+
+// balance across the leagues that produced a candidate, then pick UNIFORMLY within
+// the league — with a wide in-band pool this spreads clubs so none recurs daily
+// group by the club's LEAGUE country, not its nationality, so Monaco (code "MC",
+// plays in Ligue 1) balances with the other French clubs instead of monopolising
+// a slot of its own
+const qLeagueCC = (ci) => { const c = DB.clubs[ci]; return c[5] >= 0 ? DB.leagues[c[5]][2] : c[1]; };
+function qChoose(cands, rng, used) {
+  const byCC = {};
+  for (const c of cands.values()) (byCC[qLeagueCC(c.clubs[0])] ??= []).push(c);
+  const ccs = Object.keys(byCC).sort();
+  const arr = byCC[ccs[rng() * ccs.length | 0]].sort((a, b) => a.clubs[0] - b.clubs[0] || a.clubs[1] - b.clubs[1]);
+  const best = arr[rng() * arr.length | 0];
+  best.clubs.forEach(i => used.add(i));
+  return best;
+}
 
 function qStage(rng, ladder, used) {
   const P = qPools();
   for (let ti = 0; ti < ladder.length; ti++) {
     const tier = ladder[ti];
-    const cands = new Map();  // balanced tiers gather the tier's fits (deduped by pair)
+    const A = P[tier.p[0]].filter(i => !used.has(i));       // pools don't change within a tier
+    const B = P[tier.p[1]].filter(i => !used.has(i));
+    if (!A.length || B.length < 2) continue;
+    const cands = new Map();  // in-band fits this tier, deduped by pair
     for (let a = 0; a < QT; a++) {
-      const picks = [];
-      for (let si = 0; si < tier.s.length; si++) {
-        let pool;
-        if (si === 0 && tier.balance) {  // country-balanced anchor: country first, uniform
-          const base = P[tier.s[0]].filter(i => !used.has(i));
-          const ccs = [...new Set(base.map(i => DB.clubs[i][1]))];
-          if (!ccs.length) break;
-          const cc = ccs[rng() * ccs.length | 0];
-          pool = base.filter(i => DB.clubs[i][1] === cc);
-        } else {  // filter before drawing (never draw-and-reject): one rng call per slot
-          const cc = picks.length && tier.same !== undefined ? DB.clubs[picks[0]][1] : null;
-          pool = P[tier.s[si]].filter(i => !used.has(i) && !picks.includes(i)
-            && (cc === null || (DB.clubs[i][1] === cc) === !!tier.same));
-        }
-        if (!pool.length) break;
-        picks.push(pool[rng() * pool.length | 0]);
-      }
-      if (picks.length !== tier.s.length) continue;
-      const I = intersect(picks.map(postings));
-      if (I.length < tier.lo || I.length > tier.hi
-          || (tier.birth && !DB.births[I[0]])
-          || (tier.recent && qRecentN(I) < tier.recent)) continue;
-      if (!tier.balance) { picks.forEach(i => used.add(i)); return { clubs: picks, answers: I, tier: ti }; }
-      cands.set(picks.slice().sort((x, y) => x - y).join(","),
-                { clubs: picks, answers: I, tier: ti, score: qActScore(I) });
+      const c0 = A[rng() * A.length | 0];
+      const c1 = B[rng() * B.length | 0];
+      if (c0 === c1) continue;
+      const clubs = [c0, c1], I = intersect(clubs.map(postings));
+      if (I.length < tier.size[0] || I.length > tier.size[1]) continue;
+      if (tier.birth && !DB.births[I[0]]) continue;
+      if (tier.ease) { const e = qEase(clubs, I); if (e < tier.ease[0] || e >= tier.ease[1]) continue; }
+      cands.set(c0 < c1 ? c0 + "," + c1 : c1 + "," + c0, { clubs, answers: I, tier: ti });
     }
-    // balance over only the countries that actually produced a valid puzzle (no
-    // trap if a league can't fit this tier), then prefer active-heavy sets while
-    // keeping the top few random so the same country isn't the same pair daily
-    if (cands.size) {
-      const byCC = {};
-      for (const c of cands.values()) (byCC[DB.clubs[c.clubs[0]][1]] ??= []).push(c);
-      const ccs = Object.keys(byCC).sort();
-      const pool = byCC[ccs[rng() * ccs.length | 0]].sort((a, b) =>
-        b.score - a.score || a.clubs[0] - b.clubs[0] || a.clubs[1] - b.clubs[1]);
-      const best = pool[rng() * Math.min(6, pool.length) | 0];
-      best.clubs.forEach(i => used.add(i));
-      return best;
-    }
+    if (cands.size) return qChoose(cands, rng, used);
   }
-  // guaranteed fallback: all unused same-country big pairs in seeded order,
-  // first non-empty wins — the pool is finite and every such pair measured >= 10
+  // guaranteed fallback: first non-empty unused same-country star pair, seeded order
   const pairs = [];
-  for (let x = 0; x < P.big.length; x++) for (let y = x + 1; y < P.big.length; y++) {
-    const [a, b] = [P.big[x], P.big[y]];
+  for (let x = 0; x < P.star.length; x++) for (let y = x + 1; y < P.star.length; y++) {
+    const [a, b] = [P.star[x], P.star[y]];
     if (DB.clubs[a][1] === DB.clubs[b][1] && !used.has(a) && !used.has(b)) pairs.push([a, b]);
   }
-  for (let i = pairs.length - 1; i > 0; i--) {  // Fisher–Yates on the rng stream
-    const j = rng() * (i + 1) | 0;
-    [pairs[i], pairs[j]] = [pairs[j], pairs[i]];
-  }
+  for (let i = pairs.length - 1; i > 0; i--) { const j = rng() * (i + 1) | 0; [pairs[i], pairs[j]] = [pairs[j], pairs[i]]; }
   for (const p of pairs) {
     const I = intersect(p.map(postings));
     if (I.length) { p.forEach(i => used.add(i)); return { clubs: p, answers: I, tier: -1 }; }
@@ -176,8 +165,7 @@ function qStage(rng, ladder, used) {
 
 function qGen(date) {
   const rng = qRng(qHash(date)), used = new Set();
-  const flip = rng() < .5, hard = [QHARD[flip ? 0 : 1], QHARD[flip ? 1 : 0]];
-  const ladders = [QEASY, QMEDIUM, [hard[0], hard[1], { ...hard[0], hi: 10 }], QIMPOSSIBLE];
+  const ladders = [QEASY, QMEDIUM, QHARD, QIMPOSSIBLE];
   return { date, num: qNum(date), stages: ladders.map(l => qStage(rng, l, used)) };
 }
 
@@ -192,18 +180,13 @@ function qApps(ci, pid) {
   }
   return -1;
 }
-// combined known apps of an answer across the stage's clubs
-const qDoc = (st, p) => st.clubs.reduce((a, ci) => {
-  const x = qApps(ci, p);
-  return x > 0 ? a + x : a;
-}, 0);
-// identikit hint target: the stage's best-documented answer — highest combined
-// apps, ties to the lowest pid. No rng at play time: same hint for everyone.
+// identikit hint / reveal representative: the stage's most recognisable answer
+// (highest fame), ties to the lowest pid. No rng at play time: same for everyone.
 function qFace(st) {
-  let best = -1, bestA = -1;
+  let best = -1, bestF = -1;
   for (const p of st.answers) {
-    const a = qDoc(st, p);
-    if (a > bestA) { best = p; bestA = a; }
+    const f = qFame(p, st.clubs);
+    if (f > bestF) { best = p; bestF = f; }
   }
   return best;
 }
@@ -601,12 +584,12 @@ function qRenderEnd() {
   let html = `<div class="qres">${qs.won ? q.qWon : q.qLost}</div>
     <div class="qsq">${sq} <b>${cleared}/4</b></div>
     <div class="qmeta">${esc(line)}</div>`;
-  if (!qs.won) {  // reveal the stage that ended the run, best-documented first
+  if (!qs.won) {  // reveal the stage that ended the run, most recognisable first
     const stg = qPz.stages[qs.stage];
-    const byDoc = [...stg.answers].sort((a, b) => qDoc(stg, b) - qDoc(stg, a));
+    const byFame = [...stg.answers].sort((a, b) => qFame(b, stg.clubs) - qFame(a, stg.clubs));
     html += `<div class="qreveal"><b>${q.qReveal(stg.answers.length)}</b>`
-      + byDoc.slice(0, 10).map(p => `<button type="button" class="qrp" data-p="${p}">${esc(DB.names[p])}</button>`).join(", ")
-      + (byDoc.length > 10 ? ` <button type="button" class="qrmore" data-s="${qs.stage}">${q.qOthers(byDoc.length - 10)}</button>` : "")
+      + byFame.slice(0, 10).map(p => `<button type="button" class="qrp" data-p="${p}">${esc(DB.names[p])}</button>`).join(", ")
+      + (byFame.length > 10 ? ` <button type="button" class="qrmore" data-s="${qs.stage}">${q.qOthers(byFame.length - 10)}</button>` : "")
       + `</div>`;
     if (qs.stage < 3 && !qRevealAll)  // an out for the curious: peek at the stages never reached
       html += `<button id="qrevealrest" type="button">${q.qRevealRest}</button>`;
@@ -712,7 +695,7 @@ function quizGen(date = qToday()) {
   const p = qGen(date);
   return { ...p, stages: p.stages.map(st => ({
     clubs: st.clubs.map(ci => DB.clubs[ci][0]),
-    n: st.answers.length, tier: st.tier,
+    n: st.answers.length, tier: st.tier, ease: Math.round(qEase(st.clubs, st.answers)),
     answers: st.answers.slice(0, 12).map(pid => DB.names[pid]),
     face: DB.names[qFace(st)],
   })) };
@@ -723,7 +706,7 @@ function quizDebug(days = 14) {
     const p = qGen(qFmt(d)), row = { date: p.date };
     p.stages.forEach((st, i) => {
       row[`s${i + 1}`] = st.clubs.map(ci => coreClub(DB.clubs[ci][0])).join(" × ");
-      row[`n${i + 1}`] = st.answers.length + qTierTag(st.tier);
+      row[`n${i + 1}`] = `${st.answers.length}·e${Math.round(qEase(st.clubs, st.answers))}${qTierTag(st.tier)}`;
     });
     rows.push(row);
     d.setDate(d.getDate() + 1);
