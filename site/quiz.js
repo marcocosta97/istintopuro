@@ -120,8 +120,11 @@ function qEase(clubs, answers) {
   let e = f0 + 0.25 * f1 + Math.min(answers.length, 25) * 2;
   const bothMarquee = clubs.every(ci => QMARQUEE.has(DB.clubs[ci][3]));
   if (!bothMarquee && f1 < 430) e -= Math.min((430 - f1) * 1.5, 150);  // lone-star penalty
-  return e;
+  // the Bundesliga and Ligue 1 are less globally followed — their players are
+  // harder to place, so those pairs read a notch harder (compounds when both are)
+  return e * qLeagueEase(clubs[0]) * qLeagueEase(clubs[1]);
 }
+const qLeagueEase = (ci) => { const cc = qLeagueCC(ci); return cc === "DE" || cc === "FR" ? 0.93 : 1; };
 // the "real" answers for difficulty: drop players with a KNOWN 0 appearances at
 // one of the clubs (they were registered but never played — nobody thinks of
 // them). They stay guessable in play, but a puzzle whose only overlap is such
