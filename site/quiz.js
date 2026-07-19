@@ -213,10 +213,13 @@ function qFace(st) {
 // Persisted after every action so a reload lands exactly where the player left.
 let qs = null;   // stored state (localStorage.quiz)
 let qPz = null;  // resolved puzzle: stages of {clubs:[ci], answers:[pid]}
+let qRevealAll = false;  // end screen: user asked to see the stages they didn't reach (runtime only)
 const qSave = () => localStorage.quiz = JSON.stringify(qs);
 const qRolled = () => qs && qs.date !== qToday();  // played past midnight
+const qHinted = (i) => ["size", "nat", "ini"].some(k => qs.hints[k] === i);  // a hint spent on stage i
 
 function qLoad() {
+  qRevealAll = false;
   const today = qToday();
   let s = null;
   try { s = JSON.parse(localStorage.quiz || ""); } catch {}
@@ -304,12 +307,13 @@ const QSTR = {
     qWon: "Schedina completata!", qLost: "Tentativi finiti.",
     qNewDay: "È mezzanotte: c'è una nuova schedina", qPlay: "gioca",
     qErrS: (n) => `Errori ${n}/5`, qHintS: (n) => `Aiuti ${n}/3`,
-    qStreakS: (n) => `Serie ${n}`, qLetters: { size: "D", nat: "N", ini: "I" },
+    qStreakS: (n) => `Serie ${n}`,
     qStatPlayed: "giocate", qStatStreak: "serie", qStatBest: "record",
     qHisto: "sfide superate",
     qReveal: (n) => n === 1 ? "la risposta era" : `le ${n} risposte erano`,
     qOthers: (n) => `e altr${n === 1 ? "o" : "i"} ${n}`,
     qShare: "condividi", qCopied: "copiato negli appunti", qOpen: "apri nel solver",
+    qRevealRest: "svela le sfide non giocate",
     qResignBtn: "mi arrendo", qResignWarn: "Abbandonare la schedina di oggi?",
     qLeaveWarn: "Se esci abbandoni la schedina di oggi. Continuare?",
   },
@@ -328,12 +332,13 @@ const QSTR = {
     qWon: "Quiz completed!", qLost: "Out of guesses.",
     qNewDay: "It's past midnight: a new quiz is out", qPlay: "play it",
     qErrS: (n) => `Misses ${n}/5`, qHintS: (n) => `Hints ${n}/3`,
-    qStreakS: (n) => `Streak ${n}`, qLetters: { size: "S", nat: "N", ini: "I" },
+    qStreakS: (n) => `Streak ${n}`,
     qStatPlayed: "played", qStatStreak: "streak", qStatBest: "best",
     qHisto: "stages cleared",
     qReveal: (n) => n === 1 ? "the answer was" : `the ${n} answers were`,
     qOthers: (n) => `and ${n} more`,
     qShare: "share", qCopied: "copied to clipboard", qOpen: "open in solver",
+    qRevealRest: "reveal the challenges you didn't play",
     qResignBtn: "give up", qResignWarn: "Give up on today's quiz?",
     qLeaveWarn: "Leaving forfeits today's quiz. Continue?",
   },
@@ -456,14 +461,19 @@ function qRender() {
   qPz.stages.forEach((st, i) => {
     const done = i < qs.stage || (qs.won && i === 3);
     const cur = i === qs.stage && !qs.done, fail = qs.done && !qs.won && i === qs.stage;
+    // an unreached stage the user chose to reveal from the end screen
+    const shown = qs.done && qRevealAll && !done && !cur && !fail;
     const li = document.createElement("li");
-    li.className = done ? "done" : cur ? "cur" : fail ? "fail" : "todo";
+    // a stage cleared with a hint reads amber, a clean clear reads green
+    li.className = done ? (qHinted(i) ? "done hinted" : "done")
+                : cur ? "cur" : fail ? "fail" : shown ? "shown" : "todo";
     const hit = done ? qs.guesses.find(g => g.ok && g.stage === i) : null;
     const info = done ? `${esc(qClubNames(st))} <b>✓ ${esc(hit ? hit.name : "")}</b>`
                : fail ? `${esc(qClubNames(st))} <b class="qx">✗</b>`
+               : shown ? `${esc(qClubNames(st))} <b>${esc(DB.names[qFace(st)])}</b>`
                : cur ? "▸" : "?";
     li.innerHTML = `<span class="rank">${i + 1}</span><span class="qsname">${q.qStages[i]}</span><span class="qsinfo">${info}</span>`;
-    if (qs.done && (done || fail)) {  // post-game: a played row opens its matchup in the solver
+    if (qs.done && (done || fail || shown)) {  // post-game: a played/revealed row opens its matchup
       li.className += " qlink";
       li.title = q.qOpen;
       li.tabIndex = 0;
@@ -551,11 +561,10 @@ function qHintText(kind, st) {
 
 function qSummary() {  // shared by the end screen and the share text
   const q = QSTR[lang], cleared = qs.won ? 4 : qs.stage;
-  const sq = [0, 1, 2, 3].map(i =>
-    i < cleared ? "🟩" : qs.done && !qs.won && i === qs.stage ? "🟥" : "⬛").join("");
+  const sq = [0, 1, 2, 3].map(i =>  // green = clean clear, yellow = cleared with a hint
+    i < cleared ? (qHinted(i) ? "🟨" : "🟩") : qs.done && !qs.won && i === qs.stage ? "🟥" : "⬛").join("");
   const used = ["size", "nat", "ini"].filter(k => qs.hints[k] !== null);
-  let line = `${q.qErrS(qs.guesses.filter(g => !g.ok).length)} · ${q.qHintS(used.length)}`;
-  if (used.length) line += ` (💡${used.map(k => q.qLetters[k]).join("")})`;
+  const line = `${q.qErrS(qs.guesses.filter(g => !g.ok).length)} · ${q.qHintS(used.length)}`;
   return { cleared, sq, line };
 }
 
@@ -568,12 +577,18 @@ function qShareText() {
 
 async function qShareOut(e) {
   const btn = e.currentTarget, text = qShareText();
-  if (navigator.share) { try { await navigator.share({ text }); return; } catch {} }
+  // native share sheet only on touch devices — on Safari/Chrome desktop
+  // navigator.share exists but the sheet often no-ops, so desktop always copies
+  const touch = navigator.share && matchMedia("(pointer: coarse)").matches;
+  if (touch) { try { await navigator.share({ text }); return; } catch (err) { if (err && err.name === "AbortError") return; } }
   // feedback goes on the button itself: #qmsg lives in the card, hidden at game end
-  try {
-    await navigator.clipboard.writeText(text);
-    btn.textContent = QSTR[lang].qCopied;
-    setTimeout(() => { btn.textContent = QSTR[lang].qShare; }, 1500);
+  const done = () => { btn.textContent = QSTR[lang].qCopied; setTimeout(() => btn.textContent = QSTR[lang].qShare, 1500); };
+  try { await navigator.clipboard.writeText(text); done(); return; } catch {}
+  try {  // last-ditch for older Safari without the async clipboard API
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    document.execCommand("copy"); ta.remove(); done();
   } catch {}
 }
 
@@ -591,7 +606,10 @@ function qRenderEnd() {
     const byDoc = [...stg.answers].sort((a, b) => qDoc(stg, b) - qDoc(stg, a));
     html += `<div class="qreveal"><b>${q.qReveal(stg.answers.length)}</b>`
       + byDoc.slice(0, 10).map(p => `<button type="button" class="qrp" data-p="${p}">${esc(DB.names[p])}</button>`).join(", ")
-      + (byDoc.length > 10 ? ` ${q.qOthers(byDoc.length - 10)}` : "") + `</div>`;
+      + (byDoc.length > 10 ? ` <button type="button" class="qrmore" data-s="${qs.stage}">${q.qOthers(byDoc.length - 10)}</button>` : "")
+      + `</div>`;
+    if (qs.stage < 3 && !qRevealAll)  // an out for the curious: peek at the stages never reached
+      html += `<button id="qrevealrest" type="button">${q.qRevealRest}</button>`;
   }
   if (st) {  // three stat tiles + stages-cleared histogram
     const tile = (n, k) => `<div class="qtile"><span class="n">${n}</span><span class="k">${k}</span></div>`;
@@ -605,6 +623,10 @@ function qRenderEnd() {
   el.innerHTML = html + `<button id="qsharebtn" type="button">${q.qShare}</button>`;
   $("qsharebtn").onclick = qShareOut;
   el.querySelectorAll(".qrp").forEach(b => b.onclick = () => qOpenPlayer(+b.dataset.p));
+  const more = el.querySelector(".qrmore");  // "and N more" opens the stage's clubs in the solver
+  if (more) more.onclick = () => qOpenSolver(qPz.stages[+more.dataset.s].clubs);
+  const rr = el.querySelector("#qrevealrest");
+  if (rr) rr.onclick = () => { qRevealAll = true; qRender(); };
 }
 
 // end-screen click-through: load the matchup in club mode, quiz stays finished
