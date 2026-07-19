@@ -28,6 +28,17 @@ const qNum = (date) => {  // parse by hand: new Date(string) is a timezone trap
 };
 
 // ---------------------------------------------------------------- generator
+// The continent's marquee clubs — the ones a general fan recognises, so a player
+// there is widely visible. Squad-size coverage in Wikidata can't tell a giant
+// (Napoli, Man Utd) from a well-documented mid club (Deportivo), so club stature
+// leans on this curated set; prestige, unlike league position, rarely changes.
+const QMARQUEE = new Set([
+  "Q1422", "Q631", "Q1543", "Q2641", "Q2739", "Q2609", "Q2052",                          // IT
+  "Q8682", "Q7156", "Q8701", "Q10329", "Q10333", "Q12297", "Q8687", "Q10315",            // ES
+  "Q15789", "Q41420", "Q104761", "Q702455", "Q32494", "Q38245", "Q101959",               // DE
+  "Q483020", "Q132885", "Q704", "Q180305", "Q19516",                                     // FR
+  "Q18656", "Q50602", "Q1130849", "Q9617", "Q9616", "Q18741", "Q18716", "Q18711", "Q5794", "Q18747", "Q1128631", // GB
+]);
 // Difficulty is driven by the ANSWER SET, not club reputation: a pair is easy
 // when its shared players include a household name (a legend with many caps, a
 // prolific scorer, or a current star) — which is why Real Madrid × Milan (Seedorf)
@@ -51,8 +62,22 @@ function qPools() {
     if (n >= 300) any300.push(i);
     if (n >= 100) any100.push(i);
   });
+  // stature (weights a player's fame): marquee clubs top the scale; everyone else
+  // is ranked by squad size WITHIN their own country (so the coverage bias doesn't
+  // matter) and capped below marquee — a big-for-its-league club still scores well.
+  const byC = {};
+  DB.clubs.forEach((c, i) => { if (DB.postings[i].length >= 120) (byC[qLeagueCC(i)] ??= []).push(i); });
+  DB.qStat = new Map();
+  for (const cc in byC) {
+    const arr = byC[cc].sort((a, b) => DB.postings[a].length - DB.postings[b].length);
+    arr.forEach((ci, idx) => {
+      const pct = arr.length > 1 ? idx / (arr.length - 1) : 1;  // 0 smallest … 1 biggest in league
+      DB.qStat.set(ci, QMARQUEE.has(DB.clubs[ci][3]) ? 1.15 : pct >= 0.6 ? 1 : pct >= 0.3 ? 0.82 : 0.66);
+    });
+  }
   return DB.qPools = { star, sub, field: star.concat(sub), obs, any300, any100 };
 }
+const qStature = (ci) => DB.qStat.get(ci) ?? 0.66;
 
 // goals of pid at club ci (0 for goalkeepers — their goal qualifiers are unreliable)
 function qGoals(ci, pid) {
@@ -70,9 +95,17 @@ function qGoals(ci, pid) {
 // long-server from decades ago is not — so recency leads, with appearances and
 // goals as support that can't by themselves make an ancient name "famous".
 const qRecBonus = (age) => age <= 28 ? 200 : age <= 32 ? 150 : age <= 36 ? 90 : age <= 41 ? 45 : 10;
+// appearances at a big, widely-followed club make a player more recognisable
+// than the same tally at a small one — so Lucas Pérez at Deportivo/Cádiz weighs
+// less than McTominay at Man Utd/Napoli. Combines club reputation WITH the answer
+// set, not either alone. Stature (qStature) is league-normalised, set in qPools.
 function qFame(pid, clubs) {
   let apps = 0, goals = 0;
-  for (const ci of clubs) { const a = qApps(ci, pid); if (a > 0) apps += a; const g = qGoals(ci, pid); if (g > 0) goals += g; }
+  for (const ci of clubs) {
+    const w = qStature(ci);
+    const a = qApps(ci, pid); if (a > 0) apps += w * a;
+    const g = qGoals(ci, pid); if (g > 0) goals += w * g;
+  }
   const age = DB.births[pid] ? DB.qYear - DB.births[pid] : 99;
   return qRecBonus(age) + 0.75 * Math.min(apps, 260) + 3 * Math.min(goals, 70) + (DB.imgs[pid] ? 20 : 0);
 }
@@ -98,20 +131,20 @@ const qEffective = (clubs, answers) => answers.filter(p => !clubs.some(ci => qAp
 //          same-country star pairs sit ~470-870, cross-country ones span 80-750
 //   birth  the lone answer needs a known birth year (identikit hint fuel)
 const QT = 240;
-const QEASY = [  // a recognisable name among the shared players (recent star or icon)
-  { p: ["star", "field"], size: [2, 1e9], ease: [540, 1e9] },
-  { p: ["star", "field"], size: [2, 1e9], ease: [480, 1e9] },
-  { p: ["star", "field"], size: [2, 1e9], ease: [420, 1e9] },
+const QEASY = [  // a recognisable name (recent star or icon) at a widely-followed club
+  { p: ["star", "field"], size: [2, 1e9], ease: [570, 1e9] },
+  { p: ["star", "field"], size: [2, 1e9], ease: [510, 1e9] },
+  { p: ["star", "field"], size: [2, 1e9], ease: [450, 1e9] },
 ];
 const QMEDIUM = [
-  { p: ["star", "field"], size: [3, 1e9], ease: [380, 540] },
-  { p: ["star", "field"], size: [3, 1e9], ease: [320, 540] },
-  { p: ["star", "field"], size: [2, 1e9], ease: [280, 600] },
+  { p: ["star", "field"], size: [3, 1e9], ease: [400, 570] },
+  { p: ["star", "field"], size: [3, 1e9], ease: [340, 570] },
+  { p: ["star", "field"], size: [2, 1e9], ease: [290, 620] },
 ];
 const QHARD = [  // small overlap of unremarkable players — no star to grab onto
-  { p: ["field", "field"], size: [2, 12], ease: [160, 380] },
-  { p: ["field", "field"], size: [2, 15], ease: [100, 430] },
-  { p: ["field", "field"], size: [2, 20], ease: [0, 500] },
+  { p: ["field", "field"], size: [2, 12], ease: [180, 400] },
+  { p: ["field", "field"], size: [2, 15], ease: [120, 450] },
+  { p: ["field", "field"], size: [2, 20], ease: [0, 520] },
 ];
 const QIMPOSSIBLE = [
   { p: ["obs", "any300"], size: [1, 1], birth: 1 },
@@ -210,6 +243,7 @@ const qHinted = (i) => ["size", "nat", "ini"].some(k => qs.hints[k] === i);  // 
 
 function qLoad() {
   qRevealAll = false;
+  qPools();  // prime pools + DB.qStat/gkSet even on the restore path (qFame needs them)
   const today = qToday();
   let s = null;
   try { s = JSON.parse(localStorage.quiz || ""); } catch {}
