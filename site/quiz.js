@@ -21,10 +21,15 @@ const qRng = (a) => () => {  // mulberry32
 const qFmt = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const qToday = () => qFmt(new Date());  // local date: the puzzle flips at the player's midnight
-const QEPOCH = Date.UTC(2026, 6, 19);   // quiz #1
+const QEPOCH = Date.UTC(2026, 6, 20);   // quiz #1 = Monday 2026-07-20 (launch day)
 const qNum = (date) => {  // parse by hand: new Date(string) is a timezone trap
   const [y, m, d] = date.split("-").map(Number);
   return (Date.UTC(y, m - 1, d) - QEPOCH) / 864e5 + 1;
+};
+const qStarted = () => qNum(qToday()) >= 1;  // false before launch day → "starts soon" screen
+const qLaunchLabel = () => {  // e.g. "lunedì 20 luglio" for the pre-launch message
+  try { return new Intl.DateTimeFormat(lang, { weekday: "long", day: "numeric", month: "long" }).format(new Date(2026, 6, 20)); }
+  catch { return "2026-07-20"; }
 };
 
 // ---------------------------------------------------------------- generator
@@ -258,6 +263,7 @@ const qHinted = (i) => ["size", "nat", "ini"].some(k => qs.hints[k] === i);  // 
 function qLoad() {
   qRevealAll = false;
   qPools();  // prime pools + DB.qStat/gkSet even on the restore path (qFame needs them)
+  if (!qStarted()) { qs = null; qPz = null; return; }  // before launch day: no game yet
   const today = qToday();
   let s = null;
   try { s = JSON.parse(localStorage.quiz || ""); } catch {}
@@ -345,6 +351,7 @@ const QSTR = {
     qOk: "Giusto!", qNo: "No…", qDup: "già provato",
     qWon: "Schedina completata!", qLost: "Tentativi finiti.",
     qNewDay: "È mezzanotte: c'è una nuova schedina", qPlay: "gioca",
+    qStartsOn: (d) => `La schedina del giorno inizia ${d}. Torna a giocare!`,
     qErrS: (n) => `Errori ${n}/5`, qHintS: (n) => `Aiuti ${n}/3`,
     qStreakS: (n) => `Serie ${n}`,
     qStatPlayed: "giocate", qStatStreak: "serie", qStatBest: "record",
@@ -371,6 +378,7 @@ const QSTR = {
     qOk: "Correct!", qNo: "No…", qDup: "already tried",
     qWon: "Quiz completed!", qLost: "Out of guesses.",
     qNewDay: "It's past midnight: a new quiz is out", qPlay: "play it",
+    qStartsOn: (d) => `The daily quiz starts ${d}. Come back to play!`,
     qErrS: (n) => `Misses ${n}/5`, qHintS: (n) => `Hints ${n}/3`,
     qStreakS: (n) => `Streak ${n}`,
     qStatPlayed: "played", qStatStreak: "streak", qStatBest: "best",
@@ -490,10 +498,22 @@ function qFlash(text, cls) {
 
 const qClubNames = (st) => st.clubs.map(ci => coreClub(DB.clubs[ci][0])).join(" × ");
 
+function qRenderPre() {  // before launch day: a friendly "starts Monday" screen, no puzzle
+  const q = QSTR[lang];
+  $("qnum").textContent = q.qNum(1);
+  $("qstages").innerHTML = "";
+  $("qcard").hidden = true;
+  $("qlog").innerHTML = "";
+  $("qend").hidden = true;
+  const nd = $("qnewday");
+  nd.hidden = false;
+  nd.textContent = q.qStartsOn(qLaunchLabel());
+}
 function qRender() {
   const q = QSTR[lang];
-  $("qnum").textContent = q.qNum(qs.num);
   $("tagline").textContent = q.qTag;  // reuse the masthead tagline slot: content never shifts
+  if (!qStarted()) { qRenderPre(); return; }  // before launch day
+  $("qnum").textContent = q.qNum(qs.num);
   // stage board: cleared rows show clubs + the winning answer, the failed row
   // its clubs, unreached rows stay covered — no spoilers for a lost run
   const ol = $("qstages");
@@ -707,7 +727,7 @@ function qEnter() {
   sugg.hidden = true;
   browseOpen(false);
   qRender();
-  if (!qs.done) $("qsearch").focus();
+  if (qs && !qs.done) $("qsearch").focus();  // qs is null before launch day
 }
 function qExit() {
   if (!document.body.classList.contains("quiz")) return;
@@ -735,7 +755,7 @@ $("mode-quiz").addEventListener("click", qEnter);
 $("mode-club").addEventListener("click", qExit);
 $("mode-player").addEventListener("click", qExit);
 // langsel's own handler has already swapped `lang` when this one runs
-langSel.addEventListener("change", () => { if (qBuilt && qs) qRender(); });
+langSel.addEventListener("change", () => { if (qBuilt && document.body.classList.contains("quiz")) qRender(); });
 // a shared https://…/#quiz link opens straight into the game once data is ready
 document.addEventListener("dbready", () => { if (location.hash === "#quiz") qEnter(); }, { once: true });
 
