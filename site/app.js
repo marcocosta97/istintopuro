@@ -313,12 +313,12 @@ function clubMatches(q) {
   return out.sort((a, b) => a[0] - b[0] || a[4] - b[4] || a[3] - b[3] || b[1] - a[1]).slice(0, 8).map(x => x[2]);
 }
 
-function playerMatches(q) {
+function playerMatches(q, excl = playerIds) {  // quiz mode passes its own exclusions
   const nq = norm(q), word = " " + nq;
   if (!nq) return [];
   const out = [];
   for (let i = 0; i < DB.pNorm.length; i++) {
-    if (playerIds.includes(i)) continue;
+    if (excl.includes(i)) continue;
     const n = DB.pNorm[i];
     let rank = -1;
     if (n.startsWith(nq) || n.includes(word)) rank = 0;  // full-name or surname/word prefix

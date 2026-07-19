@@ -223,6 +223,244 @@ function qGetStats() {
   return null;
 }
 
+// ---------------------------------------------------------------- i18n
+const QSTR = {
+  it: {
+    qTag: "la schedina del giorno — quattro sfide, cinque tentativi",
+    qNum: (n) => `Schedina n. ${n}`,
+    qStages: ["facile", "media", "difficile", "impossibile"],
+    qQ: (n) => n === 2 ? "Chi ha giocato in entrambe?" : "Chi ha giocato in tutte e tre?",
+    qPh: "Il tuo giocatore…",
+    qLives: (n) => `${n} tentativ${n === 1 ? "o" : "i"} rimast${n === 1 ? "o" : "i"}`,
+    qhSize: "quanti sono?", qhNat: "di dove?", qhIni: "identikit",
+    qsSize: (n) => n === 1 ? "c'è una sola risposta valida" : `le risposte valide sono ${n}`,
+    qsIni: (ini, dec) => `iniziali ${ini}` + (dec ? `, nato negli anni ${dec >= 2000 ? dec : "'" + String(dec).slice(2)}` : ""),
+    qOk: "Giusto!", qNo: "No…", qDup: "già provato",
+    qWon: "Schedina completata!", qLost: "Tentativi finiti.",
+    qNewDay: "È mezzanotte: c'è una nuova schedina", qPlay: "gioca",
+  },
+  en: {
+    qTag: "the daily quiz — four challenges, five guesses",
+    qNum: (n) => `Quiz #${n}`,
+    qStages: ["easy", "medium", "hard", "impossible"],
+    qQ: (n) => n === 2 ? "Who played for both?" : "Who played for all three?",
+    qPh: "Your guess…",
+    qLives: (n) => `${n} guess${n === 1 ? "" : "es"} left`,
+    qhSize: "how many?", qhNat: "from where?", qhIni: "identikit",
+    qsSize: (n) => n === 1 ? "there is a single valid answer" : `there are ${n} valid answers`,
+    qsIni: (ini, dec) => `initials ${ini}` + (dec ? `, born in the ${dec}s` : ""),
+    qOk: "Correct!", qNo: "No…", qDup: "already tried",
+    qWon: "Quiz completed!", qLost: "Out of guesses.",
+    qNewDay: "It's past midnight: a new quiz is out", qPlay: "play it",
+  },
+};
+
+// ---------------------------------------------------------------- view
+// entered via the modebar Quiz toggle; a body.quiz class flips the page to the
+// green schedina theme and hides the solver — its state is never touched
+const qEl = $("quiz");
+let qBuilt = false;
+
+function qBuild() {  // static skeleton, rendered once on first entry
+  qEl.innerHTML = `
+    <div id="qhead"><span id="qnum"></span><span id="qtag"></span></div>
+    <ol id="qstages"></ol>
+    <div id="qcard">
+      <div id="qchips"></div>
+      <div id="qq"></div>
+      <div id="qwrap">
+        <input id="qsearch" type="text" autocomplete="off" spellcheck="false">
+        <ul id="qsugg" hidden></ul>
+      </div>
+      <div id="qbar">
+        <span id="qlives"></span>
+        <span id="qhbtns">
+          <button id="qh-size" type="button">💡</button>
+          <button id="qh-nat" type="button">💡</button>
+          <button id="qh-ini" type="button">💡</button>
+        </span>
+      </div>
+      <div id="qhint" hidden></div>
+    </div>
+    <div id="qmsg" aria-live="polite"></div>
+    <ul id="qlog"></ul>
+    <div id="qend" hidden></div>
+    <div id="qnewday" hidden></div>`;
+  const qse = $("qsearch");
+  qse.addEventListener("input", () => qSuggest(playerMatches(qse.value, [])));
+  qse.addEventListener("keydown", (e) => {
+    const items = [...$("qsugg").children];
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!items.length) return;
+      qCur = (qCur + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+      items.forEach((li, i) => li.className = i === qCur ? "active" : "");
+    } else if ((e.key === "Enter" || e.key === "Tab") && qCur >= 0 && !$("qsugg").hidden) {
+      e.preventDefault();
+      qPick(playerMatches(qse.value, [])[qCur]);
+    } else if (e.key === "Escape") $("qsugg").hidden = true;
+  });
+  qse.addEventListener("blur", () => setTimeout(() => {
+    if (document.activeElement !== qse) $("qsugg").hidden = true;
+  }, 100));
+  for (const kind of ["size", "nat", "ini"])  // render either way: a rolled-over
+    $("qh-" + kind).onclick = () => { qHint(kind); qRender(); };  // day shows its bar
+}
+
+let qCur = -1;
+function qSuggest(ids) {  // same look as the solver's player suggestions
+  const ul = $("qsugg");
+  ul.innerHTML = "";
+  ul.hidden = ids.length === 0;
+  qCur = ids.length ? 0 : -1;
+  ids.forEach((pid, i) => {
+    const li = document.createElement("li");
+    li.innerHTML = `<span>${flag(DB.nats[pid])} ${esc(DB.names[pid])}</span><small>${DB.births[pid] || ""}</small>`;
+    li.className = i === qCur ? "active" : "";
+    li.onmousedown = (e) => { e.preventDefault(); qPick(pid); };
+    ul.appendChild(li);
+  });
+}
+
+function qPick(pid) {
+  if (pid === undefined) return;
+  $("qsearch").value = "";
+  $("qsugg").hidden = true;
+  const ev = qGuess(pid);
+  if (ev === null) { qRender(); return; }  // frozen (rolled past midnight)
+  const q = QSTR[lang], good = ev === "stage" || ev === "won";
+  qFlash(ev === "dup" ? q.qDup : good ? q.qOk : q.qNo, good ? "ok" : "no");
+  if (ev === "wrong" || ev === "dup") {
+    $("qcard").classList.remove("shake");
+    void $("qcard").offsetWidth;  // restart the animation
+    $("qcard").classList.add("shake");
+  }
+  qRender();
+  if (!qs.done) $("qsearch").focus();
+}
+
+let qMsgGen = 0;
+function qFlash(text, cls) {
+  const el = $("qmsg"), g = ++qMsgGen;
+  el.textContent = text;
+  el.className = cls;
+  setTimeout(() => { if (g === qMsgGen) { el.textContent = ""; el.className = ""; } }, 1800);
+}
+
+const qClubNames = (st) => st.clubs.map(ci => coreClub(DB.clubs[ci][0])).join(" × ");
+
+function qRender() {
+  const q = QSTR[lang];
+  $("qnum").textContent = q.qNum(qs.num);
+  $("qtag").textContent = q.qTag;
+  // stage board: cleared rows show clubs + the winning answer, the failed row
+  // its clubs, unreached rows stay covered — no spoilers for a lost run
+  const ol = $("qstages");
+  ol.innerHTML = "";
+  qPz.stages.forEach((st, i) => {
+    const done = i < qs.stage || (qs.won && i === 3);
+    const cur = i === qs.stage && !qs.done, fail = qs.done && !qs.won && i === qs.stage;
+    const li = document.createElement("li");
+    li.className = done ? "done" : cur ? "cur" : fail ? "fail" : "todo";
+    const hit = done ? qs.guesses.find(g => g.ok && g.stage === i) : null;
+    const info = done ? `${esc(qClubNames(st))} <b>✓ ${esc(hit ? hit.name : "")}</b>`
+               : fail ? `${esc(qClubNames(st))} <b class="qx">✗</b>`
+               : cur ? "▸" : "?";
+    li.innerHTML = `<span class="rank">${i + 1}</span><span class="qsname">${q.qStages[i]}</span><span class="qsinfo">${info}</span>`;
+    ol.appendChild(li);
+  });
+  // active card
+  $("qcard").hidden = qs.done || qRolled();
+  if (!$("qcard").hidden) {
+    const st = qPz.stages[qs.stage];
+    $("qchips").innerHTML = st.clubs.map(ci => {
+      const c = DB.clubs[ci];
+      return `<span class="chip" title="${esc(c[0])}">${countryFlag(c[1])} ${esc(coreClub(c[0]))}${defunct(c)}</span>`;
+    }).join("");
+    $("qq").textContent = q.qQ(st.clubs.length);
+    $("qsearch").placeholder = q.qPh;
+    $("qlives").innerHTML = "●".repeat(qs.lives) + `<span class="off">${"●".repeat(5 - qs.lives)}</span>`;
+    $("qlives").setAttribute("aria-label", q.qLives(qs.lives));
+    for (const kind of ["size", "nat", "ini"]) {
+      const b = $("qh-" + kind);
+      b.textContent = `💡 ${q["qh" + (kind === "size" ? "Size" : kind === "nat" ? "Nat" : "Ini")]}`;
+      b.disabled = qs.hints[kind] !== null;
+    }
+    // hint payloads live on the stage they were spent on and expire with it
+    const lines = ["size", "nat", "ini"].filter(k => qs.hints[k] === qs.stage)
+      .map(k => qHintText(k, st));
+    $("qhint").hidden = lines.length === 0;
+    $("qhint").innerHTML = lines.map(l => `<div>${l}</div>`).join("");
+  }
+  // guess history, newest first
+  const log = $("qlog");
+  log.innerHTML = "";
+  [...qs.guesses].reverse().forEach(g => {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="${g.ok ? "qv" : "qx"}">${g.ok ? "✓" : "✗"}</span>`
+      + `<span>${esc(g.name)}</span><small>${q.qStages[g.stage]}</small>`;
+    log.appendChild(li);
+  });
+  qRenderEnd();
+  const nd = $("qnewday");
+  nd.hidden = !qRolled();
+  if (!nd.hidden) {
+    nd.innerHTML = `${q.qNewDay} <button type="button">${q.qPlay}</button>`;
+    nd.querySelector("button").onclick = () => { qLoad(); qRender(); };
+  }
+}
+
+function qHintText(kind, st) {
+  const q = QSTR[lang];
+  if (kind === "size") return esc(q.qsSize(st.answers.length));
+  if (kind === "nat") {  // count per nationality, biggest first; unknown = "?"
+    const cnt = new Map();
+    for (const p of st.answers) { const cc = DB.nats[p]; cnt.set(cc, (cnt.get(cc) || 0) + 1); }
+    return [...cnt].sort((a, b) => b[1] - a[1])
+      .map(([cc, n]) => `${n} ${cc ? flag(cc) : "?"}`).join(" · ");
+  }
+  const p = qFace(st), b = DB.births[p];
+  return esc(q.qsIni(DB.names[p].split(" ").map(w => w[0] + ".").join(" "),
+                     b ? Math.floor(b / 10) * 10 : 0));
+}
+
+function qRenderEnd() {
+  const el = $("qend"), q = QSTR[lang];
+  el.hidden = !qs.done;
+  if (el.hidden) return;
+  el.innerHTML = `<div class="qres">${qs.won ? q.qWon : q.qLost}</div>`;
+}
+
+// ---------------------------------------------------------------- mode wiring
+// app.js assigns onclick properties, these listeners run after them: entering
+// club/player mode (even the mode===m no-op click) closes the quiz view
+function qEnter() {
+  if (!DB || document.body.classList.contains("quiz")) return;
+  DB.pNorm ||= DB.names.map(norm);  // guess box searches all players, like player mode
+  if (!qBuilt) { qBuild(); qBuilt = true; }
+  qLoad();
+  document.body.classList.add("quiz");
+  $("mode-quiz").setAttribute("aria-pressed", "true");
+  $("mode-club").setAttribute("aria-pressed", "false");
+  $("mode-player").setAttribute("aria-pressed", "false");
+  sugg.hidden = true;
+  browseOpen(false);
+  qRender();
+  if (!qs.done) $("qsearch").focus();
+}
+function qExit() {
+  if (!document.body.classList.contains("quiz")) return;
+  document.body.classList.remove("quiz");
+  $("mode-quiz").setAttribute("aria-pressed", "false");
+  $("mode-club").setAttribute("aria-pressed", mode === "club");
+  $("mode-player").setAttribute("aria-pressed", mode === "player");
+}
+$("mode-quiz").addEventListener("click", qEnter);
+$("mode-club").addEventListener("click", qExit);
+$("mode-player").addEventListener("click", qExit);
+// langsel's own handler has already swapped `lang` when this one runs
+langSel.addEventListener("change", () => { if (qBuilt && qs) qRender(); });
+
 // ---------------------------------------------------------------- calibration
 // console-only helpers. quizGen("2026-07-25") → one resolved puzzle;
 // quizDebug(30) → a table of the next N days for difficulty eyeballing.
