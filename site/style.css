@@ -510,6 +510,30 @@ body.quiz {
 #qend { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .8rem; margin-top: .2rem; }
 #qend[hidden] { display: none; }
 .qres { font-family: var(--display); font-style: italic; font-weight: 700; font-size: 1.25rem; text-transform: uppercase; }
+.qsq { font-size: 1.05rem; margin-top: .4rem; letter-spacing: .1em; }
+.qsq b { font-family: var(--display); font-style: italic; font-weight: 700; margin-left: .3rem; }
+.qmeta { color: var(--muted); font-size: .85rem; margin-top: .3rem; }
+.qreveal {
+  color: var(--muted); font-size: .85rem; line-height: 1.5;
+  margin-top: .55rem; padding-top: .5rem; border-top: 1px solid var(--line);
+}
+#qhisto {  /* stages-cleared histogram: label | bar | count */
+  display: grid; grid-template-columns: auto 1fr auto; gap: .18rem .5rem;
+  align-items: center; max-width: 17rem; margin-top: .4rem;
+}
+.qh { display: contents; }
+.qhl, .qhn { color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; }
+.qhn { text-align: right; }
+.qhb span { display: block; height: .5rem; background: var(--line); min-width: 2px; }
+.qh.me .qhb span { background: var(--accent); }
+#qsharebtn {
+  margin-top: .75rem; cursor: pointer; font: inherit; font-size: .9rem;
+  color: var(--accent); background: transparent;
+  border: 1px solid var(--accent); border-radius: 7px; padding: .25rem .9rem;
+}
+#qsharebtn:hover { background: var(--hit); }
+#qstages li.qlink { cursor: pointer; }
+#qstages li.qlink:hover .qsname, #qstages li.qlink:focus-visible .qsname { color: var(--accent); }
 #qnewday {
   margin-top: .8rem; padding: .5rem .7rem; font-size: .9rem;
   background: var(--hit); border: 1px solid var(--accent); border-radius: 9px;

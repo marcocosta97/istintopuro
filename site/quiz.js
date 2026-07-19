@@ -132,13 +132,17 @@ function qApps(ci, pid) {
   }
   return -1;
 }
+// combined known apps of an answer across the stage's clubs
+const qDoc = (st, p) => st.clubs.reduce((a, ci) => {
+  const x = qApps(ci, p);
+  return x > 0 ? a + x : a;
+}, 0);
 // identikit hint target: the stage's best-documented answer — highest combined
 // apps, ties to the lowest pid. No rng at play time: same hint for everyone.
 function qFace(st) {
   let best = -1, bestA = -1;
   for (const p of st.answers) {
-    let a = 0;
-    for (const ci of st.clubs) { const x = qApps(ci, p); if (x > 0) a += x; }
+    const a = qDoc(st, p);
     if (a > bestA) { best = p; bestA = a; }
   }
   return best;
@@ -238,6 +242,13 @@ const QSTR = {
     qOk: "Giusto!", qNo: "No…", qDup: "già provato",
     qWon: "Schedina completata!", qLost: "Tentativi finiti.",
     qNewDay: "È mezzanotte: c'è una nuova schedina", qPlay: "gioca",
+    qErrS: (n) => `Errori ${n}/5`, qHintS: (n) => `Aiuti ${n}/3`,
+    qStreakS: (n) => `Serie ${n}`, qLetters: { size: "D", nat: "N", ini: "I" },
+    qStatLine: (p, s, m) => `${p} giocate · serie ${s} · record ${m}`,
+    qHisto: "sfide superate",
+    qReveal: (n) => n === 1 ? "la risposta era" : `le ${n} risposte erano`,
+    qOthers: (n) => `e altr${n === 1 ? "o" : "i"} ${n}`,
+    qShare: "condividi", qCopied: "copiato!", qOpen: "apri nel solver",
   },
   en: {
     qTag: "the daily quiz — four challenges, five guesses",
@@ -252,6 +263,13 @@ const QSTR = {
     qOk: "Correct!", qNo: "No…", qDup: "already tried",
     qWon: "Quiz completed!", qLost: "Out of guesses.",
     qNewDay: "It's past midnight: a new quiz is out", qPlay: "play it",
+    qErrS: (n) => `Misses ${n}/5`, qHintS: (n) => `Hints ${n}/3`,
+    qStreakS: (n) => `Streak ${n}`, qLetters: { size: "S", nat: "N", ini: "I" },
+    qStatLine: (p, s, m) => `${p} played · streak ${s} · best ${m}`,
+    qHisto: "stages cleared",
+    qReveal: (n) => n === 1 ? "the answer was" : `the ${n} answers were`,
+    qOthers: (n) => `and ${n} more`,
+    qShare: "share", qCopied: "copied!", qOpen: "open in solver",
   },
 };
 
@@ -367,6 +385,13 @@ function qRender() {
                : fail ? `${esc(qClubNames(st))} <b class="qx">✗</b>`
                : cur ? "▸" : "?";
     li.innerHTML = `<span class="rank">${i + 1}</span><span class="qsname">${q.qStages[i]}</span><span class="qsinfo">${info}</span>`;
+    if (qs.done && (done || fail)) {  // post-game: a played row opens its matchup in the solver
+      li.className += " qlink";
+      li.title = q.qOpen;
+      li.tabIndex = 0;
+      li.onclick = () => qOpenSolver(st.clubs);
+      li.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); qOpenSolver(st.clubs); } };
+    }
     ol.appendChild(li);
   });
   // active card
@@ -424,11 +449,63 @@ function qHintText(kind, st) {
                      b ? Math.floor(b / 10) * 10 : 0));
 }
 
+function qSummary() {  // shared by the end screen and the share text
+  const q = QSTR[lang], cleared = qs.won ? 4 : qs.stage;
+  const sq = [0, 1, 2, 3].map(i =>
+    i < cleared ? "🟩" : qs.done && !qs.won && i === qs.stage ? "🟥" : "⬛").join("");
+  const used = ["size", "nat", "ini"].filter(k => qs.hints[k] !== null);
+  let line = `${q.qErrS(qs.guesses.filter(g => !g.ok).length)} · ${q.qHintS(used.length)}`;
+  if (used.length) line += ` (💡${used.map(k => q.qLetters[k]).join("")})`;
+  return { cleared, sq, line };
+}
+
+function qShareText() {
+  const q = QSTR[lang], { cleared, sq, line } = qSummary(), st = qGetStats();
+  return `Istinto Puro — ${q.qNum(qs.num)} · ${cleared}/4\n${sq}\n`
+    + line + (qs.won && st ? ` · ${q.qStreakS(st.streak)}` : "")
+    + `\nhttps://istintopuro.mcosta.it/`;
+}
+
+async function qShareOut() {
+  const text = qShareText();
+  if (navigator.share) { try { await navigator.share({ text }); return; } catch {} }
+  try { await navigator.clipboard.writeText(text); qFlash(QSTR[lang].qCopied, "ok"); } catch {}
+}
+
 function qRenderEnd() {
   const el = $("qend"), q = QSTR[lang];
   el.hidden = !qs.done;
   if (el.hidden) return;
-  el.innerHTML = `<div class="qres">${qs.won ? q.qWon : q.qLost}</div>`;
+  const { cleared, sq, line } = qSummary(), st = qGetStats();
+  let html = `<div class="qres">${qs.won ? q.qWon : q.qLost}</div>
+    <div class="qsq">${sq} <b>${cleared}/4</b></div>
+    <div class="qmeta">${esc(line)}</div>`;
+  if (!qs.won) {  // reveal the stage that ended the run, best-documented first
+    const stg = qPz.stages[qs.stage];
+    const byDoc = [...stg.answers].sort((a, b) => qDoc(stg, b) - qDoc(stg, a));
+    html += `<div class="qreveal">${q.qReveal(stg.answers.length)}: `
+      + byDoc.slice(0, 10).map(p => esc(DB.names[p])).join(", ")
+      + (byDoc.length > 10 ? ` ${q.qOthers(byDoc.length - 10)}` : "") + `</div>`;
+  }
+  if (st) {
+    const max = Math.max(...st.byStage, 1);
+    html += `<div class="qmeta">${q.qStatLine(st.played, st.streak, st.maxStreak)}</div>
+      <div id="qhisto" title="${q.qHisto}">` + st.byStage.map((n, i) =>
+        `<div class="qh${i === cleared ? " me" : ""}"><span class="qhl">${i}</span>`
+        + `<span class="qhb"><span style="width:${n / max * 100}%"></span></span>`
+        + `<span class="qhn">${n}</span></div>`).join("") + `</div>`;
+  }
+  el.innerHTML = html + `<button id="qsharebtn" type="button">${q.qShare}</button>`;
+  $("qsharebtn").onclick = qShareOut;
+}
+
+// end-screen click-through: load the matchup in club mode, quiz stays finished
+function qOpenSolver(clubs) {
+  clubIds = clubs.slice();
+  syncHash();
+  qExit();
+  if (mode !== "club") setMode("club");  // setMode re-renders for the new selection
+  else { renderChips(); solve(); }
 }
 
 // ---------------------------------------------------------------- mode wiring
