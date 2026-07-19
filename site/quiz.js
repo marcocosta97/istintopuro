@@ -109,12 +109,18 @@ function qFame(pid, clubs) {
   const age = DB.births[pid] ? DB.qYear - DB.births[pid] : 99;
   return qRecBonus(age) + 0.75 * Math.min(apps, 260) + 3 * Math.min(goals, 70) + (DB.imgs[pid] ? 20 : 0);
 }
-// puzzle ease: dominated by the single most famous answer, plus a little for a
-// second star and for set size (more answers = more chances to know one)
+// puzzle ease: the most famous answer, plus a little for a second star and set
+// size. But an easy puzzle should be two legendary clubs OR more than one
+// recognisable player — a lone star at a non-giant pair (Marseille × Toulouse for
+// Gignac) is knocked down out of the easy band unless a famous SECOND answer backs
+// it up. f0 = top fame, f1 = second.
 function qEase(clubs, answers) {
   let f0 = 0, f1 = 0;
   for (const p of answers) { const f = qFame(p, clubs); if (f > f0) { f1 = f0; f0 = f; } else if (f > f1) f1 = f; }
-  return f0 + 0.25 * f1 + Math.min(answers.length, 25) * 2;
+  let e = f0 + 0.25 * f1 + Math.min(answers.length, 25) * 2;
+  const bothMarquee = clubs.every(ci => QMARQUEE.has(DB.clubs[ci][3]));
+  if (!bothMarquee && f1 < 430) e -= Math.min((430 - f1) * 1.5, 150);  // lone-star penalty
+  return e;
 }
 // the "real" answers for difficulty: drop players with a KNOWN 0 appearances at
 // one of the clubs (they were registered but never played — nobody thinks of
