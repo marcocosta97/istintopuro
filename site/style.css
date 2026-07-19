@@ -89,15 +89,19 @@ h1 .accent { color: var(--accent); }
 }
 #mode-club { border-radius: 7px 0 0 7px; }
 #mode-player { border-radius: 0 7px 7px 0; margin-left: -1px; }
-/* Quiz is the headline call to action: its own accent-outlined pill, pinned left,
-   filled solid when active so it never reads as the smaller sibling of the pair */
+/* Quiz is the headline call to action: an accent-tinted pill that stands out even
+   when unselected (filled --hit), and goes solid accent when active. A small ★
+   marks it as the game entry so it never reads as the smaller sibling of the pair */
 #mode-quiz {
-  border-radius: 7px; margin-right: auto; padding: .12rem .8rem;
-  border-color: var(--accent); color: var(--accent); font-weight: 600;
+  border-radius: 7px; margin-right: auto; padding: .12rem .85rem;
+  border-color: var(--accent); background: var(--hit); color: var(--accent); font-weight: 700;
 }
-#mode-quiz:hover { background: var(--hit); color: var(--accent); }
+#mode-quiz::before { content: "★ "; font-size: .85em; }
+#mode-quiz:hover { background: var(--accent); color: #fff; }
 #modebar #mode-quiz[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
-@media (prefers-color-scheme: dark) { #modebar #mode-quiz[aria-pressed="true"] { color: #08130d; } }
+@media (prefers-color-scheme: dark) {
+  #mode-quiz:hover, #modebar #mode-quiz[aria-pressed="true"] { color: #08130d; }
+}
 #modebar button:hover { color: var(--fg); }
 #modebar button[aria-pressed="true"] {  /* lifted so the accent border wins the -1px overlap */
   background: var(--hit); color: var(--accent); border-color: var(--accent); position: relative;
@@ -436,9 +440,13 @@ body.quiz #quiz { display: block; }
 body.quiz :is(#picker, #controls, #advbody, #status, #results) { display: none; }
 body.quiz {
   --bg: #eef6f0; --card: #f6fbf7; --line: #cfe3d6; --hit: #dcefe3; --bad: #b0392f;
+  --warn: #b3760a; --warn-bg: #fbf1dc;  /* cleared-with-a-hint amber */
 }
 @media (prefers-color-scheme: dark) {
-  body.quiz { --bg: #0a1712; --card: #102019; --line: #1f3a2c; --hit: #173425; --bad: #e0705f; }
+  body.quiz {
+    --bg: #0a1712; --card: #102019; --line: #1f3a2c; --hit: #173425; --bad: #e0705f;
+    --warn: #e0b449; --warn-bg: #2a2412;
+  }
 }
 #qhead { margin-bottom: .6rem; }
 #qnum {
@@ -458,9 +466,13 @@ body.quiz {
 }
 #qstages li.cur { background: var(--hit); }
 #qstages li.cur .qsname { color: var(--accent); }
+#qstages li.done .qsinfo b { color: var(--accent); }         /* clean clear: green tick + name */
+#qstages li.done.hinted { background: var(--warn-bg); }      /* cleared with a hint: amber */
+#qstages li.done.hinted .qsinfo b { color: var(--warn); }
 .qsinfo { flex: 1; text-align: right; color: var(--muted); min-width: 0; }
 .qsinfo b { color: var(--fg); font-weight: 600; white-space: nowrap; }
 #qstages li.todo .qsinfo { opacity: .6; }
+#qstages li.shown .qsinfo b { color: var(--fg); font-weight: 600; }  /* revealed unplayed stage */
 .qv { color: var(--accent); }
 .qx { color: var(--bad); }
 /* active challenge card */
@@ -498,11 +510,13 @@ body.quiz {
 #qhbtns button:not(:disabled):hover { background: var(--accent); color: #fff; }
 @media (prefers-color-scheme: dark) { #qhbtns button:not(:disabled):hover { color: #08130d; } }
 #qhbtns button:disabled { opacity: .45; cursor: default; background: transparent; color: var(--muted); border-color: var(--line); }
-#qhint {  /* the answer to a spent hint should read loud, not as a footnote */
-  color: var(--fg); font-size: .95rem; font-weight: 600; line-height: 1.55;
-  margin-top: .6rem; padding: .45rem .6rem; background: var(--hit);
+#qhint {  /* spent-hint answers: visible but not shouting; one per line, ruled apart */
+  color: var(--fg); font-size: .92rem; font-weight: 500; line-height: 1.5;
+  margin-top: .6rem; padding: .1rem .6rem; background: var(--hit);
   border-left: 3px solid var(--accent); border-radius: 0 7px 7px 0;
 }
+#qhint div { padding: .35rem 0; }
+#qhint div + div { border-top: 1px solid var(--line); }
 #qmsg { min-height: 1.5em; font-size: .9rem; margin: .45rem 0 0; font-weight: 600; }
 #qmsg.ok { color: var(--accent); }
 #qmsg.no { color: var(--bad); }
@@ -550,11 +564,17 @@ body.quiz {
   margin: .9rem auto 0; padding-top: .7rem; border-top: 1px solid var(--line); max-width: 32rem;
 }
 .qreveal b { color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: .74rem; display: block; margin-bottom: .25rem; }
-.qrp {  /* revealed names are links to the player's card in the solver */
+.qrp, .qrmore {  /* revealed names link to the player card; "and N more" to the clubs */
   cursor: pointer; background: transparent; border: none; font: inherit; font-size: inherit;
   color: var(--accent); padding: 0; text-decoration: underline; text-underline-offset: 2px;
 }
-.qrp:hover { color: var(--fg); }
+.qrp:hover, .qrmore:hover { color: var(--fg); }
+#qrevealrest {  /* end-screen: peek at the stages you didn't reach */
+  display: block; margin: .7rem auto 0; cursor: pointer; font: inherit; font-size: .82rem;
+  color: var(--muted); background: transparent; border: 1px solid var(--line);
+  border-radius: 7px; padding: .2rem .8rem;
+}
+#qrevealrest:hover { border-color: var(--accent); color: var(--accent); }
 /* three stat tiles: played / streak / best */
 .qtiles { display: flex; justify-content: center; gap: .5rem; margin: 1rem 0 .2rem; }
 .qtile {
