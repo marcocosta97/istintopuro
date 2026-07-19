@@ -118,11 +118,16 @@ function qEase(clubs, answers) {
   let f0 = 0, f1 = 0;
   for (const p of answers) { const f = qFame(p, clubs); if (f > f0) { f1 = f0; f0 = f; } else if (f > f1) f1 = f; }
   let e = f0 + 0.25 * f1 + Math.min(answers.length, 25) * 2;
-  const bothMarquee = clubs.every(ci => QMARQUEE.has(DB.clubs[ci][3]));
-  if (!bothMarquee && f1 < 430) e -= Math.min((430 - f1) * 1.5, 150);  // lone-star penalty
+  const nMarquee = (QMARQUEE.has(DB.clubs[clubs[0]][3]) ? 1 : 0) + (QMARQUEE.has(DB.clubs[clubs[1]][3]) ? 1 : 0);
+  if (nMarquee < 2 && f1 < 430) e -= Math.min((430 - f1) * 1.5, 150);  // lone-star penalty
   // the Bundesliga and Ligue 1 are less globally followed — their players are
   // harder to place, so those pairs read a notch harder (compounds when both are)
-  return e * qLeagueEase(clubs[0]) * qLeagueEase(clubs[1]);
+  e *= qLeagueEase(clubs[0]) * qLeagueEase(clubs[1]);
+  // easy leans on legend TEAMS more than on a lone legend player from a non-legend
+  // club: only near the easy line, boost two-marquee pairs and demote pairs missing
+  // a giant. Below this zone (all of medium/hard) nothing changes.
+  if (e >= 500) e += nMarquee === 2 ? 35 : -(2 - nMarquee) * 45;
+  return e;
 }
 const qLeagueEase = (ci) => { const cc = qLeagueCC(ci); return cc === "DE" || cc === "FR" ? 0.93 : 1; };
 // the "real" answers for difficulty: drop players with a KNOWN 0 appearances at
