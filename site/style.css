@@ -476,6 +476,7 @@ body.quiz {
 .qsinfo b { color: var(--fg); font-weight: 600; white-space: nowrap; }
 #qstages li.todo .qsinfo { opacity: .6; }
 #qstages li.shown .qsinfo b { color: var(--fg); font-weight: 600; }  /* revealed unplayed stage */
+#qstages li.skip .qsinfo { opacity: .75; }                          /* skipped: counts as unsolved, not a loss */
 .qv { color: var(--accent); }
 .qx { color: var(--bad); }
 /* active challenge card */
@@ -529,6 +530,10 @@ body.quiz {
   font: inherit; font-size: .78rem; text-decoration: underline; text-underline-offset: 2px;
 }
 #qresign:hover { color: var(--bad); }
+@media (max-width: 560px) {  /* phones: hint chips squeeze first, wrap rather than overflow the card */
+  #qhbtns { flex-basis: 100%; flex-wrap: wrap; justify-content: flex-end; row-gap: .35rem; margin-left: 0; }
+  #qhbtns button { padding: .16rem .5rem; font-size: .78rem; }
+}
 @media (prefers-reduced-motion: no-preference) {
   #qcard.shake { animation: qshake .3s; }
   @keyframes qshake {

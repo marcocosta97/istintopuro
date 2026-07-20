@@ -259,6 +259,8 @@ let qRevealAll = false;  // end screen: user asked to see the stages they didn't
 const qSave = () => localStorage.quiz = JSON.stringify(qs);
 const qRolled = () => qs && qs.date !== qToday();  // played past midnight
 const qHinted = (i) => ["size", "nat", "ini"].some(k => qs.hints[k] === i);  // a hint spent on stage i
+// stages actually solved: reached minus the ones skipped along the way
+const qSolved = () => (qs.won ? 4 : qs.stage) - qs.skipped.length;
 
 function qLoad() {
   qRevealAll = false;
@@ -276,7 +278,10 @@ function qLoad() {
       return clubs.every(ci => ci !== undefined)
         ? { clubs, answers: intersect(clubs.map(postings)) } : null;
     });
-    if (stages.every(Boolean)) { qs = s; qPz = { stages }; return; }
+    if (stages.every(Boolean)) {
+      s.skipped ||= [];  // grandfather state saved before the skip feature existed
+      qs = s; qPz = { stages }; return;
+    }
   }
   // no state, a stale day, or a club dropped from the build: fresh puzzle
   const p = qGen(today);
@@ -284,7 +289,7 @@ function qLoad() {
   qs = { v: 1, date: today, num: p.num, built: DB.built,
          stages: p.stages.map(st => st.clubs.map(ci => DB.clubs[ci][3])),
          stage: 0, lives: 5, guesses: [], hints: { size: null, nat: null, ini: null },
-         startedAt: Date.now(), done: false, won: false };
+         skipped: [], startedAt: Date.now(), done: false, won: false };
   qSave();
 }
 
@@ -319,7 +324,7 @@ function qStats() {
   const st = qGetStats() ||
     { v: 1, played: 0, streak: 0, maxStreak: 0, lastWinDate: null, byStage: [0, 0, 0, 0, 0] };
   st.played++;
-  st.byStage[qs.won ? 4 : qs.stage]++;
+  st.byStage[qSolved()]++;
   if (qs.won) {  // UTC day numbers: "yesterday" survives DST shifts
     const dayN = (ds) => { const [y, m, d] = ds.split("-").map(Number); return Date.UTC(y, m - 1, d) / 864e5; };
     st.streak = st.lastWinDate && dayN(qs.date) - dayN(st.lastWinDate) === 1 ? st.streak + 1 : 1;
@@ -361,6 +366,8 @@ const QSTR = {
     qShare: "condividi", qCopied: "copiato negli appunti", qOpen: "apri nel solver",
     qRevealRest: "svela le sfide non giocate",
     qResignBtn: "mi arrendo", qResignWarn: "Abbandonare la schedina di oggi?",
+    qSkipBtn: "salta la sfida", qSkipWarn: "Saltare questa sfida? Conterà come non risolta.",
+    qSkipped: "saltata",
     qLeaveWarn: "Se esci abbandoni la schedina di oggi. Continuare?",
   },
   en: {
@@ -388,6 +395,8 @@ const QSTR = {
     qShare: "share", qCopied: "copied to clipboard", qOpen: "open in solver",
     qRevealRest: "reveal the challenges you didn't play",
     qResignBtn: "give up", qResignWarn: "Give up on today's quiz?",
+    qSkipBtn: "skip this stage", qSkipWarn: "Skip this stage? It will count as unsolved.",
+    qSkipped: "skipped",
     qLeaveWarn: "Leaving forfeits today's quiz. Continue?",
   },
 };
@@ -443,7 +452,25 @@ function qBuild() {  // static skeleton, rendered once on first entry
   }, 100));
   for (const kind of ["size", "nat", "ini"])  // render either way: a rolled-over
     $("qh-" + kind).onclick = () => { qHint(kind); qRender(); };  // day shows its bar
-  $("qresign").onclick = () => { if (confirm(QSTR[lang].qResignWarn)) qResign(); };
+  // easy/medium/hard: skip just that stage and move on. impossible (the last
+  // stage, nothing to move on to): give up ends the whole run
+  $("qresign").onclick = () => {
+    if (!qs || qs.done) return;
+    const last = qs.stage === 3, q = QSTR[lang];
+    if (!confirm(last ? q.qResignWarn : q.qSkipWarn)) return;
+    if (last) qResign(); else qSkipStage();
+  };
+}
+
+// skip the current (non-final) stage: counts as unsolved, run continues
+function qSkipStage() {
+  if (!qs || qs.done || qRolled() || qs.stage >= 3) return;
+  qs.skipped.push(qs.stage);
+  qs.stage++;
+  qSave();
+  $("qsugg").hidden = true;
+  qRender();
+  $("qsearch").focus();
 }
 
 // give up: end the run as a loss (reveal + stats), stay on the quiz page
@@ -519,21 +546,27 @@ function qRender() {
   const ol = $("qstages");
   ol.innerHTML = "";
   qPz.stages.forEach((st, i) => {
-    const done = i < qs.stage || (qs.won && i === 3);
+    const skipped = qs.skipped.includes(i);
+    const done = !skipped && (i < qs.stage || (qs.won && i === 3));
     const cur = i === qs.stage && !qs.done, fail = qs.done && !qs.won && i === qs.stage;
+    // a skipped stage reveals its answer alongside the other never-played ones
+    const revealSkip = skipped && qs.done && qRevealAll;
     // an unreached stage the user chose to reveal from the end screen
-    const shown = qs.done && qRevealAll && !done && !cur && !fail;
+    const shown = qs.done && qRevealAll && !done && !cur && !fail && !skipped;
     const li = document.createElement("li");
     // a stage cleared with a hint reads amber, a clean clear reads green
     li.className = done ? (qHinted(i) ? "done hinted" : "done")
+                : skipped ? (revealSkip ? "shown skip" : "skip")
                 : cur ? "cur" : fail ? "fail" : shown ? "shown" : "todo";
     const hit = done ? qs.guesses.find(g => g.ok && g.stage === i) : null;
     const info = done ? `${esc(qClubNames(st))} <b>✓ ${esc(hit ? hit.name : "")}</b>`
+               : revealSkip ? `${esc(qClubNames(st))} <b>${esc(DB.names[qFace(st)])}</b>`
+               : skipped ? `${esc(qClubNames(st))} <b class="qx">${esc(q.qSkipped)}</b>`
                : fail ? `${esc(qClubNames(st))} <b class="qx">✗</b>`
                : shown ? `${esc(qClubNames(st))} <b>${esc(DB.names[qFace(st)])}</b>`
                : cur ? "▸" : "?";
     li.innerHTML = `<span class="rank">${i + 1}</span><span class="qsname">${q.qStages[i]}</span><span class="qsinfo">${info}</span>`;
-    if (qs.done && (done || fail || shown)) {  // post-game: a played/revealed row opens its matchup
+    if (qs.done && (done || fail || shown || skipped)) {  // post-game: a played/revealed row opens its matchup
       li.className += " qlink";
       li.title = q.qOpen;
       li.tabIndex = 0;
@@ -564,7 +597,7 @@ function qRender() {
       .map(k => qHintText(k, st));
     $("qhint").hidden = lines.length === 0;
     $("qhint").innerHTML = lines.map(l => `<div>${l}</div>`).join("");
-    $("qresign").textContent = q.qResignBtn;
+    $("qresign").textContent = qs.stage === 3 ? q.qResignBtn : q.qSkipBtn;
   }
   // guess history, newest first
   const log = $("qlog");
@@ -626,12 +659,14 @@ function qHintText(kind, st) {
 }
 
 function qSummary() {  // shared by the end screen and the share text
-  const q = QSTR[lang], cleared = qs.won ? 4 : qs.stage;
-  const sq = [0, 1, 2, 3].map(i =>  // green = clean clear, yellow = cleared with a hint
-    i < cleared ? (qHinted(i) ? "🟨" : "🟩") : qs.done && !qs.won && i === qs.stage ? "🟥" : "⬛").join("");
+  const q = QSTR[lang], reached = qs.won ? 4 : qs.stage;
+  // green = solved, yellow = solved with a hint, red = unsolved (skipped or the stage that ended the run), black = unreached
+  const sq = [0, 1, 2, 3].map(i =>
+    qs.skipped.includes(i) ? "🟥"
+    : i < reached ? (qHinted(i) ? "🟨" : "🟩") : qs.done && !qs.won && i === qs.stage ? "🟥" : "⬛").join("");
   const used = ["size", "nat", "ini"].filter(k => qs.hints[k] !== null);
   const line = `${q.qErrS(qs.guesses.filter(g => !g.ok).length)} · ${q.qHintS(used.length)}`;
-  return { cleared, sq, line };
+  return { cleared: qSolved(), sq, line };
 }
 
 function qShareText() {
@@ -674,9 +709,10 @@ function qRenderEnd() {
       + byFame.slice(0, 10).map(p => `<button type="button" class="qrp" data-p="${p}">${esc(DB.names[p])}</button>`).join(", ")
       + (byFame.length > 10 ? ` <button type="button" class="qrmore" data-s="${qs.stage}">${q.qOthers(byFame.length - 10)}</button>` : "")
       + `</div>`;
-    if (qs.stage < 3 && !qRevealAll)  // an out for the curious: peek at the stages never reached
-      html += `<button id="qrevealrest" type="button">${q.qRevealRest}</button>`;
   }
+  // an out for the curious: peek at stages never reached, or skipped along the way
+  if ((qs.stage < 3 || qs.skipped.length) && !qRevealAll)
+    html += `<button id="qrevealrest" type="button">${q.qRevealRest}</button>`;
   if (st) {  // three stat tiles + stages-cleared histogram
     const tile = (n, k) => `<div class="qtile"><span class="n">${n}</span><span class="k">${k}</span></div>`;
     html += `<div class="qtiles">${tile(st.played, q.qStatPlayed)}${tile(st.streak, q.qStatStreak)}${tile(st.maxStreak, q.qStatBest)}</div>`;
@@ -743,7 +779,7 @@ function qExit() {
 // on the bar runs before the buttons' own setMode/qExit handlers, so cancelling
 // can stopImmediatePropagation before the solver mode flips underneath.
 const qInProgress = () => qs && !qs.done && !qRolled()
-  && (qs.guesses.length || Object.values(qs.hints).some(h => h !== null));
+  && (qs.guesses.length || qs.skipped.length || Object.values(qs.hints).some(h => h !== null));
 $("modebar").addEventListener("click", (e) => {
   const btn = e.target.closest("button");
   if (!btn || btn.id === "mode-quiz" || !document.body.classList.contains("quiz")) return;
