@@ -788,6 +788,18 @@ $("mode-player").addEventListener("click", qExit);
 langSel.addEventListener("change", () => { if (qBuilt && document.body.classList.contains("quiz")) qRender(); });
 // a shared https://…/#quiz link opens straight into the game once data is ready
 document.addEventListener("dbready", () => { if (location.hash === "#quiz") qEnter(); }, { once: true });
+// dbready fires once at boot; this covers every later hash change — a #quiz link
+// opened in an already-loaded tab, the back button, or a hand-edited URL. (Our own
+// replaceState calls don't fire hashchange, so entering/leaving can't loop here.)
+addEventListener("hashchange", () => {
+  if (location.hash === "#quiz") { qEnter(); return; }        // qEnter no-ops before DB is ready
+  if (!document.body.classList.contains("quiz")) return;      // a hash change unrelated to the quiz
+  // left #quiz for a club-QID hash (or none): adopt that selection, then qExit's
+  // syncHash writes it straight back instead of clobbering it with the old clubs
+  clubIds = location.hash.slice(1).split(",").map(q => DB.byQid.get(q)).filter(i => i !== undefined);
+  qExit();
+  if (mode === "club") { renderChips(); solve(); }
+});
 
 // debug escape hatch: quizReset() clears today's game (keep stats),
 // quizReset(true) wipes stats too. Re-renders if the quiz is open.
