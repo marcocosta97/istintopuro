@@ -1,4 +1,4 @@
-# Istinto Puro — solver
+# Istinto Puro — quiz & solver
 
 Solver for the game «Istinto Puro»: pick clubs and instantly get every
 player who wore all of those shirts — or switch to player mode and go the
