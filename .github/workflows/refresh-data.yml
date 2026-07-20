@@ -2,7 +2,8 @@ name: Weekly data refresh
 
 on:
   schedule:
-    - cron: "0 4 * * 1"   # Mondays 04:00 UTC
+    - cron: "0 2 * * 1"   # Mondays 02:00 UTC (deploys ~02:40 UTC, off-peak) — the quiz
+                          # regenerates from the live dataset, so refresh in the quiet hours
   workflow_dispatch:        # manual "Run workflow" button
 
 permissions:
