@@ -212,7 +212,12 @@ const ALIASES = {
 
 // Wikidata labels (club/player/team names) are publicly editable — never trust them in innerHTML
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "")
+// letters with no canonical NFD decomposition (Đ, Ø, Ł, Æ...) would otherwise
+// just get dropped by the a-z filter below instead of matching their ASCII spelling
+const TRANSLIT = { đ: "d", Đ: "D", ø: "o", Ø: "O", ł: "l", Ł: "L", æ: "ae", Æ: "AE",
+                    œ: "oe", Œ: "OE", þ: "th", Þ: "TH", ð: "d", Ð: "D", ß: "ss" };
+const norm = (s) => s.replace(/[đĐøØłŁæÆœŒþÞðÐß]/g, (c) => TRANSLIT[c])
+                     .normalize("NFD").replace(/[̀-ͯ]/g, "")
                      .toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 const initialsOf = (s) => norm(s).split(" ").filter(w => w.length > 2).map(w => w[0]).join("");
 // leading legal-form tokens (kin to the pipeline's STOP_TOKENS) don't count for
