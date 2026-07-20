@@ -413,7 +413,7 @@ function qBuild() {  // static skeleton, rendered once on first entry
       <div id="qchips"></div>
       <div id="qq"></div>
       <div id="qwrap">
-        <input id="qsearch" type="text" autocomplete="off" spellcheck="false">
+        <input id="qsearch" type="text" autocomplete="off" autocorrect="off" spellcheck="false">
         <ul id="qsugg" hidden></ul>
       </div>
       <div id="qbar">
