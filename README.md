@@ -1,11 +1,11 @@
 # Istinto Puro — quiz & solver
 
-Solver for the game «Istinto Puro»: pick clubs and instantly get every
-player who wore all of those shirts — or switch to player mode and go the
-other way: pick players, get the clubs they shared. A daily quiz mode
-(`site/quiz.js`) turns the same index into a Wordle-style game: four
-intersections of rising difficulty, generated deterministically from the
-date, so everyone on the same dataset build plays the same puzzle.
+Two ways to play the game «Istinto Puro». The solver: pick clubs and
+instantly get every player who wore all of those shirts — or switch to
+player mode and go the other way: pick players, get the clubs they shared.
+The daily quiz mode (`site/quiz.js`) turns the same index into a Wordle-style
+game: four intersections of rising difficulty, generated deterministically
+from the date, so everyone on the same dataset build plays the same puzzle.
 
 Live at **[istintopuro.mcosta.it](https://istintopuro.mcosta.it)**.
 
