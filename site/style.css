@@ -609,6 +609,10 @@ body.quiz {
 }
 @media (prefers-color-scheme: dark) { #qsharebtn { color: #08130d; } }
 #qsharebtn:hover { filter: brightness(1.06); }
+/* copy confirmation: drop to the pale green so the label change is visible at a glance */
+#qsharebtn.qcopied, #qsharebtn.qcopied:hover {
+  background: var(--hit); color: var(--accent); filter: none;
+}
 #qstages li.qlink { cursor: pointer; }
 #qstages li.qlink:hover, #qstages li.qlink:focus-visible { background: var(--hit); outline: none; }
 #qstages li.qlink:hover .qsname, #qstages li.qlink:focus-visible .qsname { color: var(--accent); }

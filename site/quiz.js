@@ -679,7 +679,10 @@ async function qShareOut(e) {
   const touch = navigator.share && matchMedia("(pointer: coarse)").matches;
   if (touch) { try { await navigator.share({ text }); return; } catch (err) { if (err && err.name === "AbortError") return; } }
   // feedback goes on the button itself: #qmsg lives in the card, hidden at game end
-  const done = () => { btn.textContent = QSTR[lang].qCopied; setTimeout(() => btn.textContent = QSTR[lang].qShare, 1500); };
+  const done = () => {
+    btn.textContent = QSTR[lang].qCopied; btn.classList.add("qcopied");
+    setTimeout(() => { btn.textContent = QSTR[lang].qShare; btn.classList.remove("qcopied"); }, 1500);
+  };
   try { await navigator.clipboard.writeText(text); done(); return; } catch {}
   try {  // last-ditch for older Safari without the async clipboard API
     const ta = document.createElement("textarea");
