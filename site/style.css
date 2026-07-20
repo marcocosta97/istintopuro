@@ -474,11 +474,12 @@ body.quiz {
 #qstages li.done.hinted .qsinfo b { color: var(--warn); }
 .qsinfo { flex: 1; text-align: right; color: var(--muted); min-width: 0; }
 .qsinfo b { color: var(--fg); font-weight: 600; white-space: nowrap; }
+.qplus { font-size: .74em; font-weight: 400; color: var(--muted); margin-left: .25em; }  /* total-solutions footnote, de-emphasized */
 #qstages li.todo .qsinfo { opacity: .6; }
 #qstages li.shown .qsinfo b { color: var(--fg); font-weight: 600; }  /* revealed unplayed stage */
-#qstages li.skip .qsinfo { opacity: .75; }                          /* skipped: counts as unsolved, not a loss */
 .qv { color: var(--accent); }
 .qx { color: var(--bad); }
+#qstages li .qsinfo b.qx { color: var(--bad); }  /* a miss stays red even in a revealed/failed row that would otherwise recolor it fg */
 /* active challenge card */
 #qcard { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .7rem; }
 #qcard[hidden] { display: none; }
@@ -574,15 +575,12 @@ body.quiz {
 .qreveal b { color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: .74rem; display: block; margin-bottom: .25rem; }
 .qrp, .qrmore {  /* revealed names link to the player card; "and N more" to the clubs */
   cursor: pointer; background: transparent; border: none; font: inherit; font-size: inherit;
-  color: var(--accent); padding: 0; text-decoration: underline; text-underline-offset: 2px;
+  padding: 0; text-decoration: underline; text-underline-offset: 2px;
 }
-.qrp:hover, .qrmore:hover { color: var(--fg); }
-#qrevealrest {  /* end-screen: peek at the stages you didn't reach */
-  display: block; margin: .7rem auto 0; cursor: pointer; font: inherit; font-size: .82rem;
-  color: var(--muted); background: transparent; border: 1px solid var(--line);
-  border-radius: 7px; padding: .2rem .8rem;
-}
-#qrevealrest:hover { border-color: var(--accent); color: var(--accent); }
+.qrp { color: var(--fg); }        /* a missed answer, not the "you got it" green of a clean clear */
+.qrp:hover { color: var(--accent); }
+.qrmore { color: var(--accent); }
+.qrmore:hover { color: var(--fg); }
 /* three stat tiles: played / streak / best */
 .qtiles { display: flex; justify-content: center; gap: .5rem; margin: 1rem 0 .2rem; }
 .qtile {
