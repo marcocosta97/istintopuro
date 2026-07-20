@@ -11,7 +11,7 @@ Live at **[istintopuro.mcosta.it](https://istintopuro.mcosta.it)**.
 
 ## How it works
 
-Everything runs in the browser. The dataset — ~62k players and 477 clubs
+Everything runs in the browser. The dataset — ~62k players and 474 clubs
 covering the top-5 European leagues and their second divisions, all-time —
 is extracted from Wikidata and precomputed into a static index that the
 client intersects in under a millisecond. Careers, photos (Wikimedia
@@ -23,10 +23,12 @@ docstring; heuristics and quality passes are commented where they live,
 in the pipeline and in `site/app.js`.
 
 The quiz generator's difficulty bands live in one table at the top of
-`site/quiz.js`; after a dataset refresh, `quizDebug(30)` in the console
-prints the next month of puzzles for a difficulty sanity check. Game
-state and streaks persist in `localStorage` (`quiz`, `quizStats`),
-pinned to club QIDs so a mid-day refresh can't swap a puzzle mid-game.
+`site/quiz.js` — rated by how famous the answer set is, not the clubs —
+and after a dataset refresh `quizDebug(30)` in the console prints the
+next month of puzzles for a sanity check. Puzzles are numbered from a
+fixed launch Monday. Game state and streaks persist in `localStorage`
+(`quiz`, `quizStats`), pinned to club QIDs so a mid-day refresh can't
+swap a puzzle mid-game.
 
 ## Refreshing the data
 
