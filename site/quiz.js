@@ -249,10 +249,10 @@ function qFace(st) {
   }
   return best;
 }
-// a revealed name stands in for the whole answer set: flag how many there are
-// (never for a single-solution stage, where the name already says it all) —
-// small and muted so it reads as a footnote, not part of the name itself
-const qFaceTag = (st) => st.answers.length > 1 ? `<small class="qplus">+${st.answers.length}</small>` : "";
+// a revealed name stands in for the whole answer set: flag how many OTHERS
+// there are (never for a single-solution stage, where the name already says
+// it all) — small and muted so it reads as a footnote, not part of the name
+const qFaceTag = (st) => st.answers.length > 1 ? `<small class="qplus">+${st.answers.length - 1}</small>` : "";
 
 // ---------------------------------------------------------------- game state
 // fresh → playing(stage 0-3, lives 5-1) → won | lost; terminal for the day.
