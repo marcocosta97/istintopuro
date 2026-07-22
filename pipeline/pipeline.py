@@ -431,19 +431,28 @@ def stage_attrs():
         rows = sparql(f"""
           SELECT ?p (SAMPLE(?len) AS ?en) (SAMPLE(?lmul) AS ?mul) (MIN(?b) AS ?birth)
                  (SAMPLE(?img) AS ?image) (GROUP_CONCAT(DISTINCT ?cc; separator=",") AS ?ccs)
-                 (SAMPLE(?ctry) AS ?natq) (SAMPLE(?gk1) AS ?gk) WHERE {{
+                 (SAMPLE(?ctry) AS ?natq) (SAMPLE(?gk1) AS ?gk)
+                 (GROUP_CONCAT(DISTINCT ?spcc; separator=",") AS ?spccs) WHERE {{
             VALUES ?p {{ {vals} }}
             OPTIONAL {{ ?p rdfs:label ?len FILTER(LANG(?len)="en") }}
             OPTIONAL {{ ?p rdfs:label ?lmul FILTER(LANG(?lmul) IN ("mul","it","es","de","fr")) }}
             OPTIONAL {{ ?p wdt:P569 ?b }}
             OPTIONAL {{ ?p wdt:P18 ?img }}
             OPTIONAL {{ ?p wdt:P27 ?ctry . OPTIONAL {{ ?ctry wdt:P297 ?cc }} }}
+            OPTIONAL {{ ?p wdt:P1532 ?sport . OPTIONAL {{ ?sport wdt:P297 ?spcc }} }}
             OPTIONAL {{ ?p wdt:P413 wd:Q201330 . BIND(1 AS ?gk1) }}
           }} GROUP BY ?p""")
         out = []
         for r in rows:
             img = v(r, "image")
-            nat = pick_nat((v(r, "ccs") or "").split(","))
+            # P1532 (country represented in sport) beats citizenship when it names
+            # one unambiguous country: it's the actual football nationality (e.g.
+            # Balotelli GH+IT citizenship but plays for Italy; picking the
+            # alphabetically-first citizenship code was giving him a Ghana flag)
+            spccs = [c for c in (v(r, "spccs") or "").split(",") if c]
+            nat = spccs[0] if len(spccs) == 1 else None
+            if not nat:
+                nat = pick_nat((v(r, "ccs") or "").split(","))
             if not nat and "natq" in r:  # citizenship without ISO code: curated map
                 nat = NAT_FIX.get(qid(v(r, "natq")))
             out.append([qid(v(r, "p")), v(r, "en") or v(r, "mul"),
