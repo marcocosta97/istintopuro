@@ -869,6 +869,25 @@ $("mode-player").addEventListener("click", qExit);
 langSel.addEventListener("change", () => { if (qBuilt && document.body.classList.contains("quiz")) qRender(); });
 // a shared https://…/#quiz link opens straight into the game once data is ready
 document.addEventListener("dbready", () => { if (location.hash === "#quiz") qEnter(); }, { once: true });
+// warm the quiz while the solver idles after boot: the chain replay, the pair
+// cache and the guess-box name index are all memoized, so paying them here
+// makes the Quiz toggle instant even late in a 90-day window. One idle slice
+// per step — replay in 15-day bites — so no single block stalls a fresh page
+// (a whole-window replay measures ~0.4s, noticeable on phones). Idempotent:
+// a #quiz deep link above has already done this work by the time it fires.
+document.addEventListener("dbready", () => {
+  const today = qToday(), num = qNum(today);
+  const steps = [qPools];
+  if (num >= 1) {
+    const a0 = Math.floor((num - 1) / QWIN) * QWIN + 1;
+    for (let n = a0; n < num; n += 15) { const d = qShift(today, n - num); steps.push(() => qStagesFor(d)); }
+    steps.push(() => qStagesFor(today));
+  }
+  steps.push(() => DB.pNorm ||= DB.names.map(norm));
+  const idle = (fn) => window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 5000 }) : setTimeout(fn, 1200);
+  const next = () => { const s = steps.shift(); if (s) { s(); idle(next); } };
+  idle(next);
+}, { once: true });
 // dbready fires once at boot; this covers every later hash change — a #quiz link
 // opened in an already-loaded tab, the back button, or a hand-edited URL. (Our own
 // replaceState calls don't fire hashchange, so entering/leaving can't loop here.)
