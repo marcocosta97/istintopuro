@@ -220,7 +220,8 @@ function qChoose(cands, rng, used) {
   return best;
 }
 
-function qStage(rng, ladder, used) {
+const qPairKey = (a, b) => a < b ? a + "," + b : b + "," + a;
+function qStage(rng, ladder, used, banned) {
   const P = qPools();
   for (let ti = 0; ti < ladder.length; ti++) {
     const tier = ladder[ti];
@@ -231,22 +232,24 @@ function qStage(rng, ladder, used) {
     for (let a = 0; a < QT; a++) {
       const c0 = A[rng() * A.length | 0];
       const c1 = B[rng() * B.length | 0];
-      if (c0 === c1) continue;
-      // I = every shared player (all guessable); eff = those who actually played,
-      // which is what sizing and difficulty judge
-      const clubs = [c0, c1], I = intersect(clubs.map(postings)), eff = qEffective(clubs, I);
-      if (eff.length < tier.size[0] || eff.length > tier.size[1]) continue;
-      if (tier.birth && !DB.births[eff[0]]) continue;
-      if (tier.ease) { const e = qEase(clubs, eff); if (e < tier.ease[0] || e >= tier.ease[1]) continue; }
-      cands.set(c0 < c1 ? c0 + "," + c1 : c1 + "," + c0, { clubs, answers: I, tier: ti });
+      if (c0 === c1 || banned.has(qPairKey(c0, c1))) continue;
+      const v = qPairInfo(c0, c1);
+      if (v.n < tier.size[0] || v.n > tier.size[1]) continue;
+      if (tier.birth && !v.b) continue;
+      if (tier.ease && (v.ease < tier.ease[0] || v.ease >= tier.ease[1])) continue;
+      cands.set(qPairKey(c0, c1), { clubs: [c0, c1], tier: ti });
     }
-    if (cands.size) return qChoose(cands, rng, used);
+    if (cands.size) {
+      const best = qChoose(cands, rng, used);
+      best.answers = intersect(best.clubs.map(postings));  // only the winner needs the full list
+      return best;
+    }
   }
   // guaranteed fallback: first non-empty unused same-country star pair, seeded order
   const pairs = [];
   for (let x = 0; x < P.star.length; x++) for (let y = x + 1; y < P.star.length; y++) {
     const [a, b] = [P.star[x], P.star[y]];
-    if (DB.clubs[a][1] === DB.clubs[b][1] && !used.has(a) && !used.has(b)) pairs.push([a, b]);
+    if (DB.clubs[a][1] === DB.clubs[b][1] && !used.has(a) && !used.has(b) && !banned.has(qPairKey(a, b))) pairs.push([a, b]);
   }
   for (let i = pairs.length - 1; i > 0; i--) { const j = rng() * (i + 1) | 0; [pairs[i], pairs[j]] = [pairs[j], pairs[i]]; }
   for (const p of pairs) {
@@ -255,10 +258,55 @@ function qStage(rng, ladder, used) {
   }
 }
 
+const QLADDERS = [QEASY, QMEDIUM, QHARD, QIMPOSSIBLE];
+const qShift = (date, k) => {  // date string ± k days, UTC arithmetic like qNum
+  const [y, m, d] = date.split("-").map(Number), t = new Date(Date.UTC(y, m - 1, d + k));
+  return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`;
+};
+// pair facts qStage filters on, memoized: the chain replay below resamples the
+// same pairs thousands of times, and numbers are all the ladder checks need
+const qPairCache = new Map();
+function qPairInfo(c0, c1) {
+  const key = qPairKey(c0, c1);
+  let v = qPairCache.get(key);
+  if (!v) {
+    const clubs = [c0, c1], eff = qEffective(clubs, intersect(clubs.map(postings)));
+    qPairCache.set(key, v = { n: eff.length, ease: qEase(clubs, eff), b: !!(eff.length && DB.births[eff[0]]) });
+  }
+  return v;
+}
+// repetition guard: no pair from the previous 10 days, no club from the previous
+// 2. Each day is seeded from the ACTUAL previous schedules — an approximate
+// lookback proved leaky, because one day's deviation cascades. The chain is
+// replayed from a FIXED 90-day grid anchor (not from launch, and not a sliding
+// window: everyone serving a day in the same window replays the same chain, so
+// the guard stays exact within it and the replay stays ≤90 days ≈ 0.25s). The
+// first 10 days after an anchor can't see the previous window, so a pair can in
+// principle repeat across a quarter boundary — accepted, ~once a year at worst.
+const QWIN = 90;
+const qChain = [];
+function qStagesFor(date) {
+  const num = qNum(date);
+  if (num < 1) {  // pre-launch dates (debug only): no history to guard against
+    const rng = qRng(qHash(date)), used = new Set(), banned = new Set();
+    return QLADDERS.map(l => qStage(rng, l, used, banned));
+  }
+  const a0 = Math.floor((num - 1) / QWIN) * QWIN + 1;  // this window's first day
+  for (let i = a0; i <= num; i++) {
+    if (qChain[i]) continue;
+    const rng = qRng(qHash(i === num ? date : qShift(date, i - num))), used = new Set(), banned = new Set();
+    for (let k = Math.max(a0, i - 10); k < i; k++)
+      for (const st of qChain[k]) {
+        if (!st) continue;
+        banned.add(qPairKey(st.clubs[0], st.clubs[1]));
+        if (i - k <= 2) st.clubs.forEach(ci => used.add(ci));
+      }
+    qChain[i] = QLADDERS.map(l => qStage(rng, l, used, banned));
+  }
+  return qChain[num];
+}
 function qGen(date) {
-  const rng = qRng(qHash(date)), used = new Set();
-  const ladders = [QEASY, QMEDIUM, QHARD, QIMPOSSIBLE];
-  return { date, num: qNum(date), stages: ladders.map(l => qStage(rng, l, used)) };
+  return { date, num: qNum(date), stages: qStagesFor(date) };
 }
 
 // apps of player pid at club ci (the parallel stat arrays align with postings order)

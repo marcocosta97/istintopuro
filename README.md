@@ -26,7 +26,9 @@ The quiz generator's difficulty bands live in one table at the top of
 `site/quiz.js` — rated by how famous the answer set is, not the clubs.
 Fame discounts pre-1970s tallies, requires actual appearances before the
 recency bonus counts, and credits careers at marquee clubs outside the
-puzzle pair. After a dataset refresh `quizDebug(30)` in the console prints the
+puzzle pair. Each day's draw replays the schedule chain within its 90-day
+window and avoids the previous 10 days' pairings (previous 2 days' clubs). After a
+dataset refresh `quizDebug(30)` in the console prints the
 next month of puzzles for a sanity check. Puzzles are numbered from a
 fixed launch Monday. Game state and streaks persist in `localStorage`
 (`quiz`, `quizStats`), pinned to club QIDs so a mid-day refresh can't
