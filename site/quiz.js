@@ -80,6 +80,20 @@ function qPools() {
       DB.qStat.set(ci, QMARQUEE.has(DB.clubs[ci][3]) ? 1.15 : pct >= 0.6 ? 1 : pct >= 0.3 ? 0.82 : 0.66);
     });
   }
+  // career tallies at MARQUEE clubs, per player: lets qFame see stardom earned
+  // outside the puzzle pair (Thuram at Parma × Barcelona scored like a journeyman
+  // when only pair-local tallies counted). Marquee-only on purpose — a long
+  // career at mid clubs is exactly what should NOT read as fame (Urzaiz-type).
+  DB.qMApps = new Float32Array(DB.names.length);
+  DB.qMGoals = new Float32Array(DB.names.length);
+  DB.clubs.forEach((c, ci) => {
+    if (!QMARQUEE.has(c[3])) return;
+    const w = qStature(ci), arr = postings(ci), ap = DB.apps[ci], gl = DB.goals[ci];
+    for (let i = 0; i < arr.length; i++) {
+      if (ap[i] > 0) DB.qMApps[arr[i]] += w * ap[i];
+      if (gl[i] > 0 && !DB.gkSet.has(arr[i])) DB.qMGoals[arr[i]] += w * gl[i];
+    }
+  });
   return DB.qPools = { star, sub, field: star.concat(sub), obs, any300, any100 };
 }
 const qStature = (ci) => DB.qStat.get(ci) ?? 0.66;
@@ -104,25 +118,43 @@ const qRecBonus = (age) => age <= 28 ? 200 : age <= 32 ? 150 : age <= 36 ? 90 : 
 // than the same tally at a small one — so Lucas Pérez at Deportivo/Cádiz weighs
 // less than McTominay at Man Utd/Napoli. Combines club reputation WITH the answer
 // set, not either alone. Stature (qStature) is league-normalised, set in qPools.
+// Three corrections tuned against the 2026-07 ground-truth audit:
+//   era    tallies from before living memory can't make a name famous — a 1950s
+//          long-server maxed the old formula and headlined "medium" stages
+//   rec×   the recency bonus only counts if the player actually featured at the
+//          pair (a 0-app academy body was outscoring real answers)
+//   career fame earned at marquee clubs OUTSIDE the pair travels with the
+//          player, at a discount (Thuram at Parma × Barcelona read as a
+//          journeyman when only pair-local tallies counted)
+const qEra = (b) => b >= 1970 ? 1 : b >= 1955 ? 0.85 : b >= 1940 ? 0.65 : 0.45;
 function qFame(pid, clubs) {
-  let apps = 0, goals = 0;
+  let apps = 0, goals = 0, mApps = DB.qMApps[pid], mGoals = DB.qMGoals[pid];
   for (const ci of clubs) {
-    const w = qStature(ci);
-    const a = qApps(ci, pid); if (a > 0) apps += w * a;
-    const g = qGoals(ci, pid); if (g > 0) goals += w * g;
+    const w = qStature(ci), mq = QMARQUEE.has(DB.clubs[ci][3]);
+    const a = qApps(ci, pid); if (a > 0) { apps += w * a; if (mq) mApps -= w * a; }
+    const g = qGoals(ci, pid); if (g > 0) { goals += w * g; if (mq) mGoals -= w * g; }
   }
-  const age = DB.births[pid] ? DB.qYear - DB.births[pid] : 99;
-  return qRecBonus(age) + 0.75 * Math.min(apps, 260) + 3 * Math.min(goals, 70) + (DB.imgs[pid] ? 20 : 0);
+  const b = DB.births[pid], age = b ? DB.qYear - b : 99;
+  const rec = qRecBonus(age) * Math.min(1, (apps || 12) / 25);  // unknown apps: keep a sliver
+  const car = 0.75 * Math.min(Math.max(mApps, 0), 260) + 3 * Math.min(Math.max(mGoals, 0), 70);
+  return rec + qEra(b) * (0.75 * Math.min(apps, 260) + 3 * Math.min(goals, 70) + 0.4 * car)
+    + (DB.imgs[pid] ? 20 : 0);
 }
-// puzzle ease: the most famous answer, plus a little for a second star and set
-// size. But an easy puzzle should be two legendary clubs OR more than one
-// recognisable player — a lone star at a non-giant pair (Marseille × Toulouse for
-// Gignac) is knocked down out of the easy band unless a famous SECOND answer backs
-// it up. f0 = top fame, f1 = second.
+// puzzle ease: the most famous answer plus the DEPTH of famous support — an easy
+// puzzle should survive not knowing its single best answer (Valencia × Celta had
+// only David Silva; miss him and you're stranded). The 2nd-4th fames count, but
+// only above a notability floor: ten forgettable co-answers must not add up to
+// one recognisable name. A lone star at a non-giant pair is still knocked out of
+// the easy band unless a famous SECOND answer backs it up.
 function qEase(clubs, answers) {
-  let f0 = 0, f1 = 0;
-  for (const p of answers) { const f = qFame(p, clubs); if (f > f0) { f1 = f0; f0 = f; } else if (f > f1) f1 = f; }
-  let e = f0 + 0.25 * f1 + Math.min(answers.length, 25) * 2;
+  const top = [0, 0, 0, 0];
+  for (const p of answers) {
+    let f = qFame(p, clubs);
+    for (let k = 0; k < 4 && f; k++) if (f > top[k]) { const t = top[k]; top[k] = f; f = t; }
+  }
+  const sup = (f) => Math.max(f - 250, 0);
+  const f0 = top[0], f1 = top[1];
+  let e = f0 + 0.3 * sup(f1) + 0.18 * sup(top[2]) + 0.1 * sup(top[3]) + Math.min(answers.length, 25) * 2;
   const nMarquee = (QMARQUEE.has(DB.clubs[clubs[0]][3]) ? 1 : 0) + (QMARQUEE.has(DB.clubs[clubs[1]][3]) ? 1 : 0);
   if (nMarquee < 2 && f1 < 430) e -= Math.min((430 - f1) * 1.5, 150);  // lone-star penalty
   // the Bundesliga and Ligue 1 are less globally followed — their players are
@@ -146,29 +178,30 @@ const qEffective = (clubs, answers) => answers.filter(p => !clubs.some(ci => qAp
 // touching it or a dataset refresh. Fields per tier:
 //   p      the two clubs' pools ("star" big club, "field" = star ∪ sub, etc.)
 //   size   [min, max] answer-set size
-//   ease   [min, max) qEase band (absent = any); bands measured in probe5.js —
-//          same-country star pairs sit ~470-870, cross-country ones span 80-750
+//   ease   [min, max) qEase band (absent = any); bands re-cut 2026-07 against
+//          the ground-truth anchors (Juve×Parma 546 easy … Athletic×Celta 413
+//          hard) after the qFame era/career rework shifted the whole scale
 //   birth  the lone answer needs a known birth year (identikit hint fuel)
 const QT = 240;
-const QEASY = [  // a recognisable name (recent star or icon) at a widely-followed club
-  { p: ["star", "field"], size: [2, 1e9], ease: [570, 1e9] },
-  { p: ["star", "field"], size: [2, 1e9], ease: [510, 1e9] },
-  { p: ["star", "field"], size: [2, 1e9], ease: [450, 1e9] },
+const QEASY = [  // several recognisable names — easy must survive a missed star
+  { p: ["star", "field"], size: [2, 1e9], ease: [545, 1e9] },
+  { p: ["star", "field"], size: [2, 1e9], ease: [505, 1e9] },
+  { p: ["star", "field"], size: [2, 1e9], ease: [470, 1e9] },
 ];
 const QMEDIUM = [
-  { p: ["star", "field"], size: [3, 1e9], ease: [400, 570] },
-  { p: ["star", "field"], size: [3, 1e9], ease: [340, 570] },
-  { p: ["star", "field"], size: [2, 1e9], ease: [290, 620] },
+  { p: ["star", "field"], size: [3, 1e9], ease: [425, 545] },
+  { p: ["star", "field"], size: [3, 1e9], ease: [390, 545] },
+  { p: ["star", "field"], size: [2, 1e9], ease: [350, 570] },
 ];
 const QHARD = [  // small overlap of unremarkable players — no star to grab onto
-  { p: ["field", "field"], size: [2, 12], ease: [180, 400] },
-  { p: ["field", "field"], size: [2, 15], ease: [120, 450] },
-  { p: ["field", "field"], size: [2, 20], ease: [0, 520] },
+  { p: ["field", "field"], size: [2, 12], ease: [140, 370] },
+  { p: ["field", "field"], size: [2, 15], ease: [90, 400] },
+  { p: ["field", "field"], size: [2, 20], ease: [0, 425] },
 ];
-const QIMPOSSIBLE = [
-  { p: ["obs", "any300"], size: [1, 1], birth: 1 },
-  { p: ["obs", "any300"], size: [1, 1] },
-  { p: ["obs", "any100"], size: [1, 2] },
+const QIMPOSSIBLE = [  // obscure pool; more than one answer is fine as long as
+  { p: ["obs", "any300"], size: [1, 2], ease: [-1e9, 360], birth: 1 },  // the ease
+  { p: ["obs", "any300"], size: [1, 2], ease: [-1e9, 400] },  // cap keeps the set
+  { p: ["obs", "any100"], size: [1, 3], ease: [-1e9, 440] },  // from turning known
 ];
 
 // balance across the leagues that produced a candidate, then pick UNIFORMLY within
