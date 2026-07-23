@@ -568,9 +568,11 @@ body.quiz {
   font: inherit; font-size: .78rem; text-decoration: underline; text-underline-offset: 2px;
 }
 #qresign:hover { color: var(--bad); }
-@media (max-width: 560px) {  /* phones: hint chips squeeze first, wrap rather than overflow the card */
-  #qhbtns { flex-basis: 100%; flex-wrap: wrap; justify-content: flex-end; row-gap: .35rem; margin-left: 0; }
-  #qhbtns button { padding: .16rem .5rem; font-size: .78rem; }
+@media (max-width: 560px) {  /* phones: hint chips get their own full-width row */
+  /* left-aligned and tight so all three fit one line down to ~360px; flex-end
+     used to strand the third chip on a second line with a gap beside it */
+  #qhbtns { flex-basis: 100%; flex-wrap: wrap; justify-content: flex-start; gap: .28rem; row-gap: .35rem; margin-left: 0; }
+  #qhbtns button { padding: .16rem .38rem; font-size: .75rem; }
 }
 @media (prefers-reduced-motion: no-preference) {
   #qcard.shake { animation: qshake .3s; }
