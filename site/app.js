@@ -954,6 +954,17 @@ function fetchShard(shard) {
 const careerOf = async (pid) =>  // [qidNumber, spells] — shard count stamped in the index by the pipeline
   (await fetchShard(pid % (DB.nshards || 128)))[pid] || [];
 
+const sitelinksCache = new Map();
+async function wikiSitelinks(qid) {
+  if (sitelinksCache.has(qid)) return sitelinksCache.get(qid);
+  const p = fetch(`https://www.wikidata.org/wiki/Special:EntityData/Q${qid}.json`)
+    .then(r => r.json())
+    .then(j => j.entities[`Q${qid}`].sitelinks)
+    .catch(() => null);
+  sitelinksCache.set(qid, p);
+  return p;
+}
+
 async function toggleCareer(li, pid) {
   const open = li.querySelector(".career");
   if (open) { open.remove(); li.querySelector(".expand").textContent = "▸"; return; }
@@ -977,10 +988,20 @@ async function toggleCareer(li, pid) {
        <span class="cyears">${yspan(s, e)}</span><span class="cteam">${loan[i] ? `<span class="loan" title="${t.loan}">↳</span> ` : ""}${esc(team)}</span>
        <span class="cstats">${apps != null ? apps + " " + t.apps : ""}${!gk && goals != null ? " · " + goals + " " + t.goals : ""}</span>
      </div>`).join("") || `<div class='crow'>${t.noData}</div>`)
-    + (qid ? `<a class="wiki" href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${lang}wiki/Q${qid}" target="_blank" rel="noopener">Wikipedia ↗</a>
+    + (qid ? `<a class="wiki wiki-pedia" href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${lang}wiki/Q${qid}" target="_blank" rel="noopener">Wikipedia ↗</a>
               <a class="wiki" href="https://www.wikidata.org/wiki/Q${qid}" target="_blank" rel="noopener">Wikidata ↗</a>` : "");
   div.onclick = (e) => e.stopPropagation();
   li.appendChild(div);
+  if (qid) {
+    const a = div.querySelector(".wiki-pedia");
+    wikiSitelinks(qid).then(sitelinks => {
+      if (!sitelinks || !div.isConnected || sitelinks[`${lang}wiki`]) return;
+      const other = lang === "it" ? "en" : "it";
+      const site = `${other}wiki`;
+      if (!sitelinks[site]) { a.remove(); return; }
+      a.href = `https://${other}.wikipedia.org/wiki/${encodeURIComponent(sitelinks[site].title)}`;
+    });
+  }
 }
 
 applyLang();
