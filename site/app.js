@@ -7,6 +7,10 @@ const search = $("search"), sugg = $("suggestions"), chips = $("chips"),
       sortSel = $("sortsel"), dirBtn = $("dirbtn"),
       byFrom = $("byfrom"), byTo = $("byto"), noZero = $("nozero"), langSel = $("langsel");
 
+// autofocus is a desktop convenience; on touch, focusing the field the user
+// hasn't tapped (mode switch, first load, clear-all) pops the keyboard
+const focusSearch = () => { if (!matchMedia("(pointer: coarse)").matches) search.focus(); };
+
 let DB = null;               // raw index.json
 let mode = "club";           // "club" (players in common) | "player" (clubs in common)
 let clubIds = [];            // selected club indices
@@ -219,7 +223,7 @@ function setMode(m) {
     DB.pNorm ||= DB.names.map(norm);  // one-time (~62k names), on the toggle click, not per keystroke
   } else $("advbody").hidden = $("advtoggle").getAttribute("aria-expanded") !== "true";
   applyLang();  // mode-aware: swaps tagline/placeholder, re-renders chips + results
-  search.focus();
+  focusSearch();
 }
 $("mode-club").onclick = () => setMode("club");
 $("mode-player").onclick = () => setMode("player");
@@ -307,7 +311,7 @@ async function boot() {
   search.disabled = false;
   browseBtn.disabled = false;
   $("randbtn").disabled = false;
-  search.focus();
+  focusSearch();
   applyLang();  // refresh status + footer now that DB (and its built date) exist
   document.dispatchEvent(new Event("dbready"));  // quiz.js waits on this (e.g. a #quiz deep link)
 }
@@ -552,7 +556,7 @@ function renderChips() {
     b.onclick = () => {
       if (mode === "club") { clubIds = []; syncHash(); } else playerIds = [];
       renderChips(); solve();
-      search.focus();
+      focusSearch();
     };
     chips.appendChild(b);
   }
