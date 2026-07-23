@@ -18,6 +18,7 @@
     --card: #131b16; --accent: #3fc287; --hit: #17281f;
   }
 }
+html { scrollbar-gutter: stable; }
 * { box-sizing: border-box; margin: 0; }
 button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible,
 li[tabindex]:focus-visible, .chip button:focus-visible {
