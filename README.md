@@ -32,7 +32,13 @@ dataset refresh `quizDebug(30)` in the console prints the
 next month of puzzles for a sanity check. Puzzles are numbered from a
 fixed launch Monday. Game state and streaks persist in `localStorage`
 (`quiz`, `quizStats`), pinned to club QIDs so a mid-day refresh can't
-swap a puzzle mid-game.
+swap a puzzle mid-game. A third key, `quizHistory`, records each finished
+day's four stage outcomes plus its club QIDs — the archive calendar shows
+every past Schedina as a 2×2 block of those outcomes and replays any day
+from its stored QIDs (an unplayed day is regenerated from the date).
+Replays are practice: they fill the calendar but never touch the streak,
+and their in-progress state is kept per day (`quizReplays`) so you can move
+between today and a past day without losing either.
 
 ## Refreshing the data
 

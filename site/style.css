@@ -445,18 +445,34 @@ body.quiz :is(#picker, #controls, #advbody, #status, #results) { display: none; 
 body.quiz {
   --bg: #eef6f0; --card: #f6fbf7; --line: #cfe3d6; --hit: #dcefe3; --bad: #b0392f;
   --warn: #b3760a; --warn-bg: #fbf1dc;  /* cleared-with-a-hint amber */
+  /* result squares (end screen + archive): a vivid, self-contained palette,
+     kept apart from the semantic --accent/--warn/--bad so they can pop */
+  --r0: #17a44e; --r1: #f6c517; --r2: #e23c2c; --r3: #c3d0c8;
 }
 @media (prefers-color-scheme: dark) {
   body.quiz {
     --bg: #0a1712; --card: #102019; --line: #1f3a2c; --hit: #173425; --bad: #e0705f;
     --warn: #e0b449; --warn-bg: #2a2412;
+    --r0: #35d17f; --r1: #f7cf3f; --r2: #f0604e; --r3: #37503f;
   }
 }
-#qhead { margin-bottom: .6rem; }
+#qhead { margin-bottom: .6rem; display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; }
 #qnum {
   font-family: var(--display); font-style: italic; font-weight: 700;
   text-transform: uppercase; letter-spacing: .01em; font-size: 1.05rem; white-space: nowrap;
 }
+/* archive affordance: a small pill to the right of the Schedina number */
+#qcal-open {
+  cursor: pointer; white-space: nowrap; font: inherit;
+  font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; font-weight: 600;
+  color: var(--muted); background: var(--card);
+  border: 1px solid var(--line); border-radius: 999px; padding: .22rem .7rem;
+  display: inline-flex; align-items: center; gap: .32rem; transition: color .15s, border-color .15s;
+}
+#qcal-open::before { content: ""; width: .62rem; height: .62rem; border-radius: 2px;
+  background: linear-gradient(135deg, var(--accent) 0 50%, var(--warn) 50% 100%); }
+#qcal-open:hover, #qcal-open:focus-visible { color: var(--fg); border-color: var(--accent); outline: none; }
+#qcal-open[hidden] { display: none; }
 /* stage board: hairline rows, not cards — the almanacco's results table */
 #qstages { list-style: none; padding: 0; margin: 0 0 .9rem; }
 #qstages li {
@@ -564,10 +580,18 @@ body.quiz {
   font-size: 1.7rem; text-transform: uppercase; line-height: 1.05;
 }
 .qend-win .qres { color: var(--accent); }
+/* the on-screen result squares: one component for the end screen and the calendar,
+   so both read identically (emoji live only in the copyable share text) */
+.rsq { display: inline-block; border-radius: 4px; background: var(--r3); }
+.rsq.r0 { background: var(--r0); }  /* clean clear */
+.rsq.r1 { background: var(--r1); }  /* cleared with a hint */
+.rsq.r2 { background: var(--r2); }  /* missed */
+.rsq.r3 { background: var(--r3); }  /* unreached */
 .qsq {
-  font-size: 1.75rem; margin-top: .55rem; letter-spacing: .12em;
-  display: flex; align-items: center; justify-content: center; gap: .5rem;
+  margin-top: .7rem; display: flex; align-items: center; justify-content: center; gap: .6rem;
 }
+.qsq .rsqrow { display: inline-flex; gap: 6px; }
+.qsq .rsq { width: 1.4rem; height: 1.4rem; border-radius: 6px; }
 .qsq b {
   font-family: var(--display); font-style: italic; font-weight: 700;
   font-size: 1.15rem; letter-spacing: 0; color: var(--muted);
@@ -630,4 +654,75 @@ body.quiz {
 #qnewday button {
   cursor: pointer; font: inherit; font-size: .85rem; color: var(--accent);
   background: transparent; border: 1px solid var(--accent); border-radius: 7px; padding: .12rem .6rem;
+}
+
+/* ------------- archive ("archivio"): a modern results calendar of past schedine.
+   A full sheet inside #quiz — the board, card and end screen give way to it. */
+#qcal { display: none; }
+body.qcal #qcal { display: block; animation: qcalin .22s ease both; }
+body.qcal :is(#qhead, #qstages, #qcard, #qend, #qnewday, #qlog) { display: none; }
+@keyframes qcalin { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.qchead {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .6rem; margin-bottom: .15rem;
+}
+#qcaltitle {
+  font-family: var(--display); font-style: italic; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .01em; font-size: 1.35rem;
+}
+.qcal-back {
+  cursor: pointer; font: inherit; white-space: nowrap;
+  font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; font-weight: 600;
+  color: var(--muted); background: var(--card);
+  border: 1px solid var(--line); border-radius: 999px; padding: .22rem .8rem;
+  transition: color .15s, border-color .15s;
+}
+.qcal-back::before { content: "‹  "; }
+.qcal-back:hover, .qcal-back:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
+.qchint { color: var(--muted); font-size: .78rem; margin: 0 0 1.3rem; }
+.qcmon { margin-bottom: 1.6rem; }
+.qcmon h3 {
+  font-family: var(--display); font-style: italic; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .02em; font-size: .95rem; color: var(--fg);
+  margin: 0 0 .55rem;
+}
+/* seven columns, Monday first — the weekday initials sit above the day grid */
+.qcwd, .qcgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 7px; }
+.qcwd {
+  margin-bottom: 7px; font-size: .6rem; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); text-align: center; opacity: .8;
+}
+/* each day = a square box (the result, or an empty frame) with the date as a
+   caption OUTSIDE it, below — so the box reads as a clean square, not a rectangle */
+.qcell {
+  display: flex; flex-direction: column; align-items: stretch; gap: 5px;
+  background: none; border: 0; padding: 0; font: inherit; text-align: center;
+}
+.qcbox {
+  width: 100%; aspect-ratio: 1; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--card);
+  transition: transform .13s ease, box-shadow .13s ease, border-color .13s ease;
+}
+.qcd { font-size: .72rem; font-weight: 600; line-height: 1; color: var(--muted); }  /* day-of-month, below the box */
+.qcell.out .qcbox { border-color: transparent; background: transparent; }
+.qcell.out .qcd { opacity: .32; }
+/* a played day: the framed box is kept, the 2×2 of result squares sits INSIDE it
+   with a margin all round so the outer square still reads */
+.qcell.done .qcbox {
+  padding: 15%;
+  display: grid; grid-template: 1fr 1fr / 1fr 1fr; gap: 3px;
+}
+.qcell.done .qcbox .rsq { width: 100%; height: 100%; border-radius: 2px; }
+.qcell.play { cursor: pointer; }
+.qcell.play:hover .qcbox { transform: translateY(-2px); box-shadow: 0 5px 14px rgba(0,0,0,.13); }
+.qcell.play:focus-visible { outline: none; }
+.qcell.play:focus-visible .qcbox { box-shadow: 0 0 0 2px var(--accent); }
+/* today gets a quiet accent date so it stays findable; the strong ring follows
+   whichever day is currently open (.current) — a replay, or today itself */
+.qcell.today .qcd { color: var(--accent); }
+.qcell.current .qcbox { box-shadow: 0 0 0 2px var(--accent); }
+.qcell.current .qcd { color: var(--accent); font-weight: 700; }
+@media (prefers-reduced-motion: reduce) {
+  .qcbox, body.qcal #qcal { transition: none; animation: none; }
+  .qcell.play:hover .qcbox { transform: none; }
 }
