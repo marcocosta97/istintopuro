@@ -320,20 +320,24 @@ function qApps(ci, pid) {
   }
   return -1;
 }
-// identikit hint / reveal representative: the stage's most recognisable answer
-// (highest fame), ties to the lowest pid. No rng at play time: same for everyone.
-function qFace(st) {
-  let best = -1, bestF = -1;
-  for (const p of st.answers) {
-    const f = qFame(p, st.clubs);
-    if (f > bestF) { best = p; bestF = f; }
-  }
-  return best;
+// the stage's answers by recognisability, most famous first, ties to the lowest
+// pid (answers arrive pid-ascending from intersect). No rng at play time: same
+// for everyone. Memoized per stage object — qRender ranks the same stage several
+// times per frame, and the stage objects live as long as the puzzle does.
+const qRankCache = new WeakMap();
+function qRanked(st) {
+  let r = qRankCache.get(st);
+  if (!r) qRankCache.set(st, r = [...st.answers]
+    .sort((a, b) => qFame(b, st.clubs) - qFame(a, st.clubs) || a - b));
+  return r;
 }
-// a revealed name stands in for the whole answer set: flag how many OTHERS
-// there are (never for a single-solution stage, where the name already says
-// it all) — small and muted so it reads as a footnote, not part of the name
-const qFaceTag = (st) => st.answers.length > 1 ? `<small class="qplus">+${st.answers.length - 1}</small>` : "";
+// identikit hint / reveal representative: the most recognisable answer
+const qFace = (st) => qRanked(st)[0] ?? -1;
+// small and muted so it reads as a footnote, not as part of the label it trails
+const qTag = (s) => `<small class="qplus">${s}</small>`;
+// a revealed name stands in for the whole answer set: flag how many OTHERS there
+// are (never for a single-solution stage, where the name already says it all)
+const qFaceTag = (st) => st.answers.length > 1 ? qTag(`+${st.answers.length - 1}`) : "";
 
 // ---------------------------------------------------------------- game state
 // fresh → playing(stage 0-3, lives 5-1) → won | lost; terminal for the day.
@@ -342,7 +346,11 @@ let qs = null;   // stored state (localStorage.quiz)
 let qPz = null;  // resolved puzzle: stages of {clubs:[ci], answers:[pid]}
 const qSave = () => localStorage.quiz = JSON.stringify(qs);
 const qRolled = () => qs && qs.date !== qToday();  // played past midnight
-const qHinted = (i) => ["size", "nat", "ini"].some(k => qs.hints[k] === i);  // a hint spent on stage i
+// one shot each, spent on whatever stage you're on. "ini2" is adaptive: the
+// second-most-famous answer's identikit, or — on a single-answer stage, which
+// the impossible tier often is — the lone answer's other clubs ("car")
+const QHINTS = ["nat", "ini", "ini2"];
+const qHinted = (i) => QHINTS.some(k => qs.hints[k] === i);  // a hint spent on stage i
 // stages actually solved: reached minus the ones skipped along the way
 const qSolved = () => (qs.won ? 4 : qs.stage) - qs.skipped.length;
 
@@ -363,6 +371,9 @@ function qLoad() {
     });
     if (stages.every(Boolean)) {
       s.skipped ||= [];  // grandfather state saved before the skip feature existed
+      // drop retired hint keys and default new ones: an undefined slot would read
+      // as already spent (the checks test !== null) and skew the "n/3" tally
+      s.hints = Object.fromEntries(QHINTS.map(k => [k, s.hints?.[k] ?? null]));
       qs = s; qPz = { stages }; return;
     }
   }
@@ -371,7 +382,7 @@ function qLoad() {
   qPz = { stages: p.stages };
   qs = { v: 1, date: today, num: p.num, built: DB.built,
          stages: p.stages.map(st => st.clubs.map(ci => DB.clubs[ci][3])),
-         stage: 0, lives: 5, guesses: [], hints: { size: null, nat: null, ini: null },
+         stage: 0, lives: 5, guesses: [], hints: Object.fromEntries(QHINTS.map(k => [k, null])),
          skipped: [], startedAt: Date.now(), done: false, won: false };
   qSave();
 }
@@ -395,7 +406,7 @@ function qGuess(pid) {
   return ev;
 }
 
-function qHint(kind) {  // "size" | "nat" | "ini" — each usable once per run
+function qHint(kind) {  // a QHINTS key — each usable once per run
   if (!qs || qs.done || qs.hints[kind] !== null || qRolled()) return false;
   qs.hints[kind] = qs.stage;  // remember where it was spent, for the share text
   qSave();
@@ -431,9 +442,10 @@ const QSTR = {
     qQ: (n) => n === 2 ? "Chi ha giocato in entrambe?" : "Chi ha giocato in tutte e tre?",
     qPh: "Il tuo giocatore…",
     qLives: (n) => `${n} tentativ${n === 1 ? "o" : "i"} rimast${n === 1 ? "o" : "i"}`,
-    qhSize: "quanti sono?", qhNat: "di dove?", qhIni: "identikit",
-    qsSize: (n) => n === 1 ? "c'è una sola risposta valida" : `le risposte valide sono ${n}`,
+    qh: { nat: "di dove?", ini: "identikit", ini2: "identikit", car: "carriera" },
     qsIni: (ini, dec) => `iniziali ${ini}` + (dec ? `, nato negli anni ${dec >= 2000 ? dec : "'" + String(dec).slice(2)}` : ""),
+    qsCar: (l) => `è passato anche da ${l.join(" · ")}`,
+    qsBorn: (y) => `nato nel ${y}`,
     qsAtClub: "gioca ancora in una delle due squadre", qsActive: "ancora in attività",
     qsApps: (n) => `${n} pres`, qsGoals: (n) => `${n} gol`,
     qOk: "Giusto!", qNo: "No…", qDup: "già provato",
@@ -458,9 +470,10 @@ const QSTR = {
     qQ: (n) => n === 2 ? "Who played for both?" : "Who played for all three?",
     qPh: "Your guess…",
     qLives: (n) => `${n} guess${n === 1 ? "" : "es"} left`,
-    qhSize: "how many?", qhNat: "from where?", qhIni: "identikit",
-    qsSize: (n) => n === 1 ? "there is a single valid answer" : `there are ${n} valid answers`,
+    qh: { nat: "from where?", ini: "identikit", ini2: "identikit", car: "career" },
     qsIni: (ini, dec) => `initials ${ini}` + (dec ? `, born in the ${dec}s` : ""),
+    qsCar: (l) => `also played for ${l.join(" · ")}`,
+    qsBorn: (y) => `born in ${y}`,
     qsAtClub: "still plays for one of the two clubs", qsActive: "still an active player",
     qsApps: (n) => `${n} apps`, qsGoals: (n) => `${n} goals`,
     qOk: "Correct!", qNo: "No…", qDup: "already tried",
@@ -500,9 +513,9 @@ function qBuild() {  // static skeleton, rendered once on first entry
       <div id="qbar">
         <span id="qlives"></span>
         <span id="qhbtns">
-          <button id="qh-size" type="button">💡</button>
           <button id="qh-nat" type="button">💡</button>
           <button id="qh-ini" type="button">💡</button>
+          <button id="qh-ini2" type="button">💡</button>
         </span>
       </div>
       <div id="qhint" hidden></div>
@@ -529,7 +542,7 @@ function qBuild() {  // static skeleton, rendered once on first entry
   qse.addEventListener("blur", () => setTimeout(() => {
     if (document.activeElement !== qse) $("qsugg").hidden = true;
   }, 100));
-  for (const kind of ["size", "nat", "ini"])  // render either way: a rolled-over
+  for (const kind of QHINTS)  // render either way: a rolled-over
     $("qh-" + kind).onclick = () => { qHint(kind); qRender(); };  // day shows its bar
   // easy/medium/hard: skip just that stage and move on. impossible (the last
   // stage, nothing to move on to): give up ends the whole run
@@ -664,13 +677,17 @@ function qRender() {
     $("qsearch").placeholder = q.qPh;
     $("qlives").innerHTML = "●".repeat(qs.lives) + `<span class="off">${"●".repeat(5 - qs.lives)}</span>`;
     $("qlives").setAttribute("aria-label", q.qLives(qs.lives));
-    for (const kind of ["size", "nat", "ini"]) {
+    for (const kind of QHINTS) {
       const b = $("qh-" + kind);
-      b.textContent = `💡 ${q["qh" + (kind === "size" ? "Size" : kind === "nat" ? "Nat" : "Ini")]}`;
+      // the label announces what THIS stage would give (ini2 is adaptive); once
+      // spent the button is disabled, so a label tracking the current stage
+      // rather than the one it was spent on reads as greyed-out furniture
+      const key = qHintKey(kind, st);
+      b.innerHTML = `💡 ${esc(q.qh[key])}${QHNUM[key] ? qTag("#" + QHNUM[key]) : ""}`;
       b.disabled = qs.hints[kind] !== null;
     }
     // hint payloads live on the stage they were spent on and expire with it
-    const lines = ["size", "nat", "ini"].filter(k => qs.hints[k] === qs.stage)
+    const lines = QHINTS.filter(k => qs.hints[k] === qs.stage)
       .map(k => qHintText(k, st));
     $("qhint").hidden = lines.length === 0;
     $("qhint").innerHTML = lines.map(l => `<div>${l}</div>`).join("");
@@ -694,45 +711,83 @@ function qRender() {
   }
 }
 
-// identikit career note, loaded lazily from the shard (async is fine at hint
-// time): whether the revealed player is still active / still at one of the clubs
-const qCareerNote = new Map();  // pid -> null (in flight) | {at:bool, active:bool}
-async function qLoadFace(st) {
-  const pid = qFace(st);
+// career facts for a hinted player, loaded lazily from the shard (async is fine
+// at hint time): still active / still at one of the puzzle clubs, the OTHER
+// clubs of the career, and the years of the spells at the pair.
+const qCareerNote = new Map();  // pid -> null (in flight) | {at, active, others, spans}
+async function qLoadCareer(pid, st) {
   if (qCareerNote.has(pid)) return;
   qCareerNote.set(pid, null);  // in-flight guard
   let career;
-  try { [, career = []] = await careerOf(pid); }
-  catch { qCareerNote.delete(pid); return; }
+  // a failed shard caches an empty note rather than clearing the entry: retrying
+  // on every render would hammer a shard that is down, and the hint text falls
+  // back to index-local facts anyway
+  try { [, career = []] = await careerOf(pid); } catch { career = []; }
   const spells = career.filter(e => e[0]);  // [team, start, end, apps, goals, loan]
   const names = new Set(st.clubs.map(ci => DB.clubs[ci][0]));  // canonical names match within a build
   const open = spells.filter(sp => sp[1] && !sp[2]);  // started, no end recorded = ongoing
-  qCareerNote.set(pid, { at: open.some(sp => names.has(sp[0])), active: open.length > 0 });
+  // the two clubs the player is best known for OUTSIDE the pair: a permanent
+  // spell beats a loan, then the bigger tally, then the more recent one. Deduped
+  // by name, since a return spell shows up twice.
+  const seen = new Set();
+  const others = spells.filter(sp => !names.has(sp[0]) && !seen.has(sp[0]) && seen.add(sp[0]))
+    .sort((a, b) => (a[5] ? 1 : 0) - (b[5] ? 1 : 0)
+      || Math.max(b[3], 0) - Math.max(a[3], 0) || (b[1] || 0) - (a[1] || 0))
+    .slice(0, 2).map(sp => coreClub(sp[0]));  // raw: qHintText escapes the whole line
+  // years at the pair, one entry per club with both ends recorded. A return
+  // spell is listed as a second range rather than merged: "1935–1936, 1944–1945"
+  // is the truth, "1935–1945" would invent a decade at the club.
+  const yrs = new Map();
+  for (const sp of spells) if (names.has(sp[0]) && sp[1] && sp[2])
+    (yrs.get(sp[0]) || yrs.set(sp[0], []).get(sp[0]))
+      .push(sp[1] === sp[2] ? `${sp[1]}` : `${sp[1]}–${sp[2]}`);
+  const spans = [...yrs].map(([n, r]) => `${coreClub(n)} ${r.join(", ")}`);
+  qCareerNote.set(pid, { at: open.some(sp => names.has(sp[0])), active: open.length > 0, others, spans });
   if (document.body.classList.contains("quiz")) qRender();
+}
+
+// "ini2" has nothing to profile on a single-answer stage — the impossible tier
+// is sized [1,2]/[1,3], so that is the common case there. It becomes "car", the
+// lone answer's other clubs, which is a fresh axis rather than a repeat.
+const qHintKey = (kind, st) => kind === "ini2" && st.answers.length < 2 ? "car" : kind;
+// the two identikits are a numbered pair, tagged like the "+N" on a revealed row
+const QHNUM = { ini: 1, ini2: 2 };
+
+// initials + birth decade, then nationality, the tallies at the two clubs, and
+// (once the shard lands) whether the player is still around
+function qIdentikit(p, st) {
+  const q = QSTR[lang], b = DB.births[p];
+  let apps = 0, goals = 0;  // combined at the two clubs
+  for (const ci of st.clubs) { const a = qApps(ci, p); if (a > 0) apps += a; const g = qGoals(ci, p); if (g > 0) goals += g; }
+  let s = esc(q.qsIni(DB.names[p].split(" ").map(w => w[0] + ".").join(" "), b ? Math.floor(b / 10) * 10 : 0));
+  const extra = [DB.nats[p] ? flag(DB.nats[p]) : "", apps ? q.qsApps(apps) : "",
+                 goals && !DB.gkSet.has(p) ? q.qsGoals(goals) : ""].filter(Boolean);
+  if (extra.length) s += " · " + extra.join(" · ");
+  const note = qCareerNote.get(p);
+  if (note === undefined) qLoadCareer(p, st);  // not fetched yet: load, re-render appends the note
+  else if (note && note.at) s += " · " + esc(q.qsAtClub);
+  else if (note && note.active) s += " · " + esc(q.qsActive);
+  return s;
 }
 
 function qHintText(kind, st) {
   const q = QSTR[lang];
-  if (kind === "size") return esc(q.qsSize(st.answers.length));
+  kind = qHintKey(kind, st);
   if (kind === "nat") {  // count per nationality, biggest first; unknown = "?"
     const cnt = new Map();
     for (const p of st.answers) { const cc = DB.nats[p]; cnt.set(cc, (cnt.get(cc) || 0) + 1); }
     return [...cnt].sort((a, b) => b[1] - a[1])
       .map(([cc, n]) => `${n} ${cc ? flag(cc) : "?"}`).join(" · ");
   }
-  const p = qFace(st), b = DB.births[p];
-  let apps = 0, goals = 0;  // combined at the two clubs
-  for (const ci of st.clubs) { const a = qApps(ci, p); if (a > 0) apps += a; const g = qGoals(ci, p); if (g > 0) goals += g; }
-  // initials + decade, then nationality flag and the combined apps/goals
-  let s = esc(q.qsIni(DB.names[p].split(" ").map(w => w[0] + ".").join(" "), b ? Math.floor(b / 10) * 10 : 0));
-  const extra = [DB.nats[p] ? flag(DB.nats[p]) : "", apps ? q.qsApps(apps) : "",
-                 goals && !DB.gkSet.has(p) ? q.qsGoals(goals) : ""].filter(Boolean);
-  if (extra.length) s += " · " + extra.join(" · ");
-  const note = qCareerNote.get(p);
-  if (note === undefined) qLoadFace(st);  // not fetched yet: load, re-render appends the note
-  else if (note && note.at) s += " · " + esc(q.qsAtClub);
-  else if (note && note.active) s += " · " + esc(q.qsActive);
-  return s;
+  if (kind === "ini") return qIdentikit(qFace(st), st);
+  if (kind === "ini2") return qIdentikit(qRanked(st)[1], st);
+  // "car": other clubs, else the years spent at the pair, else — when the shard
+  // is unavailable and only index-local facts remain — the exact birth year
+  const p = qFace(st), note = qCareerNote.get(p);
+  if (!note) { if (note === undefined) qLoadCareer(p, st); return "…"; }  // the load re-renders
+  if (note.others.length) return esc(q.qsCar(note.others));
+  if (note.spans.length) return esc(note.spans.join(" · "));
+  return DB.births[p] ? esc(q.qsBorn(DB.births[p])) : "…";
 }
 
 function qSummary() {  // shared by the end screen and the share text
@@ -741,7 +796,7 @@ function qSummary() {  // shared by the end screen and the share text
   const sq = [0, 1, 2, 3].map(i =>
     qs.skipped.includes(i) ? "🟥"
     : i < reached ? (qHinted(i) ? "🟨" : "🟩") : qs.done && !qs.won && i === qs.stage ? "🟥" : "⬛").join("");
-  const used = ["size", "nat", "ini"].filter(k => qs.hints[k] !== null);
+  const used = QHINTS.filter(k => qs.hints[k] !== null);
   const line = `${q.qErrS(qs.guesses.filter(g => !g.ok).length)} · ${q.qHintS(used.length)}`;
   return { cleared: qSolved(), sq, line };
 }
