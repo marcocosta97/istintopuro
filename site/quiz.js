@@ -830,6 +830,13 @@ async function qLoadCareer(pid, st) {
 const qHintKey = (kind, st) => kind === "ini2" && st.answers.length < 2 ? "car" : kind;
 // the two identikits are a numbered pair, tagged like the "+N" on a revealed row
 const QHNUM = { ini: 1, ini2: 2 };
+// the identikit slots in reveal-priority order. The fame rank a slot reveals is
+// how many higher-priority identikits are ALREADY spent on the current stage —
+// so whichever identikit you spend FIRST on a stage gets its top answer, even
+// when the other slot was burned on an earlier stage (both are once-per-run).
+const QIDENT = ["ini", "ini2"];
+const qIdentRank = (kind) => QIDENT.slice(0, QIDENT.indexOf(kind))
+  .filter(k => qs.hints[k] === qs.stage).length;
 
 // initials + birth decade, then nationality, the tallies at the two clubs, and
 // (once the shard lands) whether the player is still around
@@ -857,8 +864,7 @@ function qHintText(kind, st) {
     return [...cnt].sort((a, b) => b[1] - a[1])
       .map(([cc, n]) => `${n} ${cc ? flag(cc) : "?"}`).join(" · ");
   }
-  if (kind === "ini") return qIdentikit(qFace(st), st);
-  if (kind === "ini2") return qIdentikit(qRanked(st)[1], st);
+  if (kind === "ini" || kind === "ini2") return qIdentikit(qRanked(st)[qIdentRank(kind)], st);
   // "car": other clubs, else the years spent at the pair, else — when the shard
   // is unavailable and only index-local facts remain — the exact birth year
   const p = qFace(st), note = qCareerNote.get(p);
