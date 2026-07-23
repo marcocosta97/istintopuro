@@ -12,11 +12,18 @@
   --card: #ffffff; --accent: #0a7d4f; --hit: #e8f5ee;
   --display: "Barlow Semi Condensed", system-ui, sans-serif;
 }
-@media (prefers-color-scheme: dark) {  /* floodlit night: green-tinted near-black */
-  :root {
+/* floodlit night: green-tinted near-black. Applied when the system asks for dark
+   and the user hasn't forced light (#themebtn), or when the user explicitly picks
+   dark. The two blocks share one value set — keep them in sync. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
     --bg: #0c1210; --fg: #e9ede9; --muted: #93a099; --line: #243029;
     --card: #131b16; --accent: #3fc287; --hit: #17281f;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #0c1210; --fg: #e9ede9; --muted: #93a099; --line: #243029;
+  --card: #131b16; --accent: #3fc287; --hit: #17281f;
 }
 html { scrollbar-gutter: stable; }
 * { box-sizing: border-box; margin: 0; }
@@ -53,13 +60,15 @@ h1 .accent { color: var(--accent); }
      solver one and wraps at a different width) never reflows the content below */
   min-height: 2.3rem;
 }
-.htools { display: flex; gap: .4rem; flex-shrink: 0; }
-#langsel, #aboutbtn {
+.htools { display: flex; align-items: stretch; gap: .4rem; flex-shrink: 0; }
+#langsel, #aboutbtn, #themebtn {
   cursor: pointer; background: transparent; color: var(--muted);
   border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: .8rem; padding: .1rem .15rem;
 }
 #aboutbtn { width: 1.6rem; }
-#langsel:hover, #aboutbtn:hover { border-color: var(--accent); color: var(--fg); }
+#themebtn { width: 1.9rem; display: inline-flex; align-items: center; justify-content: center; }
+#themebtn svg { display: block; }
+#langsel:hover, #aboutbtn:hover, #themebtn:hover { border-color: var(--accent); color: var(--fg); }
 
 #about {
   margin: auto;  /* the global reset kills the UA rule that centers <dialog> */
@@ -449,12 +458,19 @@ body.quiz {
      kept apart from the semantic --accent/--warn/--bad so they can pop */
   --r0: #17a44e; --r1: #f6c517; --r2: #e23c2c; --r3: #c3d0c8;
 }
+/* quiz dark palette — mirrors the root override (auto-dark unless forced light,
+   or explicit dark); keep both blocks' values in sync */
 @media (prefers-color-scheme: dark) {
-  body.quiz {
+  :root:not([data-theme="light"]) body.quiz {
     --bg: #0a1712; --card: #102019; --line: #1f3a2c; --hit: #173425; --bad: #e0705f;
     --warn: #e0b449; --warn-bg: #2a2412;
     --r0: #35d17f; --r1: #f7cf3f; --r2: #f0604e; --r3: #37503f;
   }
+}
+:root[data-theme="dark"] body.quiz {
+  --bg: #0a1712; --card: #102019; --line: #1f3a2c; --hit: #173425; --bad: #e0705f;
+  --warn: #e0b449; --warn-bg: #2a2412;
+  --r0: #35d17f; --r1: #f7cf3f; --r2: #f0604e; --r3: #37503f;
 }
 #qhead { margin-bottom: .6rem; display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; }
 #qnum {

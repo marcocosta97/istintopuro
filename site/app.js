@@ -63,6 +63,7 @@ const STR = {
     browse: "Sfoglia per campionato",
     others: "Altre",
     back: "indietro",
+    themeDark: "Passa al tema scuro", themeLight: "Passa al tema chiaro",
   },
   en: {
     tagline: "Pick one or more clubs — who played for them all?",
@@ -106,6 +107,7 @@ const STR = {
     browse: "Browse by league",
     others: "Others",
     back: "back",
+    themeDark: "Switch to dark theme", themeLight: "Switch to light theme",
   },
 };
 let lang = STR[localStorage.lang] ? localStorage.lang
@@ -116,6 +118,7 @@ function applyLang() {
   t = STR[lang];
   document.documentElement.lang = lang;
   langSel.value = lang;
+  paintTheme();  // the toggle's aria-label/title is localized
   $("tagline").textContent = mode === "club" ? t.tagline : t.taglineP;
   $("foot").innerHTML = t.footer + (DB && DB.built ? `<div id="built">${t.built(DB.built)}</div>` : "");
   search.placeholder = mode === "club" ? t.placeholder : t.placeholderP;
@@ -161,6 +164,30 @@ function applyLang() {
   }
   else status.textContent = t.loading;
 }
+// theme toggle: default follows the system; a click forces light or dark and
+// remembers it (localStorage.theme). The head applies a stored choice before
+// paint; here we wire the button and keep its sun/moon icon in sync.
+const themeBtn = $("themebtn");
+const THEME_ICON = {  // show the mode a click switches TO
+  dark: `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>`,
+  light: `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor"><path d="M20 14.5A8 8 0 0 1 9.5 4a.6.6 0 0 0-.82-.7A9 9 0 1 0 20.7 15.3a.6.6 0 0 0-.7-.8z"/></svg>`,
+};
+const effectiveTheme = () => document.documentElement.getAttribute("data-theme")
+  || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+function paintTheme() {
+  const dark = effectiveTheme() === "dark";
+  themeBtn.innerHTML = dark ? THEME_ICON.dark : THEME_ICON.light;  // dark now → offer sun
+  themeBtn.setAttribute("aria-label", dark ? t.themeLight : t.themeDark);
+  themeBtn.title = themeBtn.getAttribute("aria-label");
+}
+themeBtn.onclick = () => {
+  const next = effectiveTheme() === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", localStorage.theme = next);
+  paintTheme();
+};
+// while on auto (no stored choice), follow later system changes
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!localStorage.theme) paintTheme(); });
+paintTheme();
 langSel.onchange = () => { lang = localStorage.lang = langSel.value; applyLang(); };
 $("aboutbtn").onclick = () => $("about").showModal();
 $("about").onclick = (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); };
