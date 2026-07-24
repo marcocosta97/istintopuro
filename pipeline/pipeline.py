@@ -611,7 +611,7 @@ def stage_wp():
         data = wp_get(action="query", prop="revisions", rvprop="content",
                       rvslots="main", titles="|".join(t for _, t in batch))
         out = []
-        for pg in data["query"]["pages"]:
+        for pg in (data or {}).get("query", {}).get("pages", []):
             revs = pg.get("revisions")
             if not revs or pg["title"] not in by_title: continue
             spells = parse_infobox(revs[0]["slots"]["main"]["content"])
@@ -619,16 +619,20 @@ def stage_wp():
         return out
     raw = resumable("wp", have, 50, fetch)   # -> [[pid, [[clubTitle,...], ...]], ...]
 
-    # phase 3 — resolve the distinct club TITLES -> QIDs (50/req, redirects folded), cached
-    titles = sorted({sp[0] for _, spells in raw for sp in spells})
+    # phase 3 — resolve the distinct club TITLES -> QIDs (50/req, redirects folded), cached.
+    # Skip interwiki wikilinks (":de:…" etc.): MediaWiki returns them under query.interwiki
+    # with no page, and an all-interwiki batch omits query.pages entirely — .get() guards
+    # that anyway, but there's nothing to resolve, so they stay unresolved (=None).
+    titles = sorted({sp[0] for _, spells in raw for sp in spells if not sp[0].startswith(":")})
     t2q = load("wp_titles") or {}
     todo = [t for t in titles if t not in t2q]
     for _, batch in batched(todo, 50):
         data = wp_get(action="query", prop="pageprops", ppprop="wikibase_item",
                       redirects=1, titles="|".join(batch))
-        redir = {r["from"]: r["to"] for r in data["query"].get("redirects", [])}
+        q = (data or {}).get("query", {})
+        redir = {r["from"]: r["to"] for r in q.get("redirects", [])}
         page_q = {pg["title"]: pg.get("pageprops", {}).get("wikibase_item")
-                  for pg in data["query"]["pages"]}
+                  for pg in q.get("pages", [])}
         for t in batch:
             t2q[t] = page_q.get(redir.get(t, t))   # None if unresolved / no wikidata item
     save("wp_titles", t2q)
