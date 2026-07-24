@@ -11,11 +11,12 @@ Live at **[istintopuro.mcosta.it](https://istintopuro.mcosta.it)**.
 
 ## How it works
 
-Everything runs in the browser. The dataset — ~62k players and 474 clubs
+Everything runs in the browser. The dataset — ~69k players and 474 clubs
 covering the top-5 European leagues and their second divisions, all-time —
 is extracted from Wikidata and precomputed into a static index that the
-client intersects in under a millisecond. Careers, photos (Wikimedia
-Commons), nationalities and loan spells all come from the same extraction.
+client intersects in under a millisecond. Photos (Wikimedia Commons),
+nationalities and loan spells come from the same extraction; careers that
+Wikidata leaves incomplete are filled from the English Wikipedia infobox.
 No server, no tracking.
 
 The emitted data formats are documented in `pipeline/pipeline.py`'s
@@ -31,7 +32,7 @@ days for practice; game state persists in `localStorage`.
 ## Refreshing the data
 
 ```
-python3 pipeline/pipeline.py            # full fetch from Wikidata (~40 min)
+python3 pipeline/pipeline.py            # full fetch, Wikidata + Wikipedia (~80 min)
 python3 pipeline/pipeline.py build      # rebuild site/data from checkpoints
 ```
 

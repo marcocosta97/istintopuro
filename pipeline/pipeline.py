@@ -6,6 +6,7 @@ Stages (each checkpoints to data/, reruns skip completed stages):
   members  - player QIDs per club (P54)
   attrs    - player attributes (label, birth year, nationality, image)
   careers  - full P54 career statements per player (any team, with years/apps/goals)
+  wp       - Wikipedia-infobox career overlay (every player; richness-guarded replace)
   teams    - labels for career teams outside the club universe
   build    - emit site/data/index.json + career shards, print stats
   validate - sanity-check the emitted index; fail instead of shipping junk
@@ -501,9 +502,160 @@ def stage_careers():
     save("careers", careers)
     print(f"careers: {len(sts)} spells, {len(careers)} players")
 
+# -------------------------------------------------------------------- stage: wp
+# Wikipedia-infobox overlay. Wikidata careers are often incomplete in ways no field
+# flags — a whole club spell missing, apps/goals absent — and "every spell is dated"
+# does not mean "correct" (see Biraghi: 12 dated spells, yet no Torino and half the
+# stats blank). Only comparing against Wikipedia reveals it, so stage_wp fetches the
+# enwiki {{Infobox football biography}} for EVERY player and lays the parsed result
+# over careers. The overlay REPLACES a candidate's whole spell list (re-resolving each
+# club to a QID keeps identifier precision) rather than merging row-by-row, avoiding
+# duplicate/conflict handling; a richness guard in stage_wp only replaces when the
+# infobox is at least as complete as Wikidata (spell count AND populated stats), so a
+# correct career is never degraded. Everything downstream reads load_careers().
+WP_API = "https://en.wikipedia.org/w/api.php"
+
+def load_careers():
+    """Wikidata careers with the Wikipedia-infobox overlay laid on top. The overlay
+    holds a parsed career only where it beats Wikidata (the stage_wp richness guard),
+    so .update replaces those players wholesale and leaves the rest on raw Wikidata."""
+    careers = load("careers")
+    careers.update(load("wp") or {})   # same {pid: [[team,s,e,apps,goals,loan],...]} shape
+    return careers
+
+def wp_get(**params):
+    params.setdefault("format", "json"); params.setdefault("formatversion", 2)
+    for i in range(5):
+        try:
+            r = _session.get(WP_API, params=params, timeout=90)
+            if r.status_code == 429:
+                time.sleep(int(r.headers.get("Retry-After", 10))); continue
+            r.raise_for_status(); time.sleep(0.2)
+            return r.json()
+        except (requests.RequestException, ValueError):
+            if i == 4: raise
+            time.sleep(5 * (i + 1))
+
+# senior career only. Not line-anchored: many infoboxes pack several params on
+# one line (| years1 = … | clubs1 = … | caps1 = …), so match each "|field=" where
+# it sits and read the value up to the next pipe or newline. The (\d+)= shape keeps
+# youth*/manager*/national*/total* out (their keyword never follows a pipe directly),
+# and stopping at "|" harmlessly clips a wikilink at its display pipe — wp_club wants
+# only the target before it.
+FIELD = re.compile(r"\|\s*(years|clubs|caps|goals)(\d+)\s*=\s*([^|\n]*)")
+
+def wp_years(s):
+    m = re.search(r"(\d{4})(?:\s*[–\-]\s*(\d{4}))?", s)
+    if not m: return None, None
+    return int(m.group(1)), (int(m.group(2)) if m.group(2) else None)  # open-ended -> None
+
+def wp_club(s):
+    loan = 1 if ("→" in s or "(loan)" in s.lower()) else 0   # infobox loan convention
+    m = re.search(r"\[\[([^\]|#]+)", s)                      # wikilink target = enwiki page title
+    return (m.group(1).strip() if m else None), loan
+
+def wp_int(s):
+    s = re.sub(r"\{\{[^}]*\}\}", "", s).split("<")[0]   # drop {{0}} alignment padding & <ref>…
+    m = re.search(r"\d+", s)
+    return int(m.group()) if m else None
+
+def parse_infobox(wikitext):
+    """-> [[clubTitle, start, end, apps, goals, loan], ...]  (club still a page TITLE)."""
+    f = {}
+    for kind, idx, val in FIELD.findall(wikitext):
+        f[(kind, int(idx))] = val
+    spells = []
+    for _, idx in sorted(k for k in f if k[0] == "clubs"):
+        title, loan = wp_club(f[("clubs", idx)])
+        if not title: continue
+        s, e = wp_years(f.get(("years", idx), ""))
+        spells.append([title, s, e, wp_int(f.get(("caps", idx), "")),
+                       wp_int(f.get(("goals", idx), "")), loan])
+    return spells
+
+def bare(sp): return all(x is None for x in sp[1:5])   # P54 with no date/apps/goals = a gap
+
+def wd_metrics(spells):
+    """(qualified spell count, populated apps/goals field count) for a Wikidata career —
+    the two axes the replace guard protects."""
+    nq = sum(1 for sp in spells if not bare(sp))
+    ns = sum((sp[3] is not None) + (sp[4] is not None) for sp in spells)
+    return nq, ns
+
+def stage_wp():
+    careers, members = load("careers"), load("members")
+    players = {p for ps in members.values() for p in ps}
+    # trigger = every player. A Wikidata career that "looks complete" (all spells
+    # dated) is an unreliable signal: it can still miss a whole club and its stats
+    # (e.g. Biraghi's Torino), which no bare-P54 marker flags. The richness guard
+    # below keeps a genuinely-complete career untouched, so fetching is the only cost.
+    cand = sorted(p for p in players if careers.get(p))
+    wd = {p: wd_metrics(careers[p]) for p in cand}   # pid -> (qualified spells, stat fields)
+    limit = int(os.environ.get("WP_LIMIT", 0))   # dry-run slice; 0 = all
+    if limit: cand = cand[:limit]
+    print(f"wp: {len(cand)} candidates (all players)", flush=True)
+
+    # phase 1 — QID -> enwiki page title, straight off WDQS (no new API surface)
+    title = {}
+    for _, batch in batched(cand, 200):
+        vals = " ".join(f"wd:{q}" for q in batch)
+        for r in sparql(f"""SELECT ?p ?t WHERE {{ VALUES ?p {{ {vals} }}
+            ?a schema:about ?p ; schema:isPartOf <https://en.wikipedia.org/> ; schema:name ?t . }}"""):
+            title[qid(v(r, "p"))] = v(r, "t")
+    have = [[p, title[p]] for p in cand if p in title]   # no enwiki page -> no infobox to mine
+    print(f"wp: {len(have)} have an enwiki page", flush=True)
+
+    # phase 2 — fetch wikitext (50 titles/req) & parse; checkpointed, club still a TITLE
+    def fetch(batch):
+        by_title = {t: p for p, t in batch}
+        data = wp_get(action="query", prop="revisions", rvprop="content",
+                      rvslots="main", titles="|".join(t for _, t in batch))
+        out = []
+        for pg in data["query"]["pages"]:
+            revs = pg.get("revisions")
+            if not revs or pg["title"] not in by_title: continue
+            spells = parse_infobox(revs[0]["slots"]["main"]["content"])
+            if spells: out.append([by_title[pg["title"]], spells])
+        return out
+    raw = resumable("wp", have, 50, fetch)   # -> [[pid, [[clubTitle,...], ...]], ...]
+
+    # phase 3 — resolve the distinct club TITLES -> QIDs (50/req, redirects folded), cached
+    titles = sorted({sp[0] for _, spells in raw for sp in spells})
+    t2q = load("wp_titles") or {}
+    todo = [t for t in titles if t not in t2q]
+    for _, batch in batched(todo, 50):
+        data = wp_get(action="query", prop="pageprops", ppprop="wikibase_item",
+                      redirects=1, titles="|".join(batch))
+        redir = {r["from"]: r["to"] for r in data["query"].get("redirects", [])}
+        page_q = {pg["title"]: pg.get("pageprops", {}).get("wikibase_item")
+                  for pg in data["query"]["pages"]}
+        for t in batch:
+            t2q[t] = page_q.get(redir.get(t, t))   # None if unresolved / no wikidata item
+    save("wp_titles", t2q)
+
+    # emit in the exact careers shape, dropping spells whose club title wouldn't
+    # resolve. Richness guard: replace only if the infobox is at least as complete as
+    # Wikidata on BOTH axes — spell count and populated apps/goals — so a wholesale
+    # replace can never drop a club or a stat Wikidata already had. Trivially passes
+    # for thin players (Wikidata metrics 0); protects genuinely-complete careers now
+    # that the trigger is every player.
+    wp, guarded = {}, 0
+    for pid_, spells in raw:
+        rows = [[t2q[t], s, e, a, g, ln] for t, s, e, a, g, ln in spells if t2q.get(t)]
+        if not rows: continue
+        nq, ns = wd.get(pid_, (0, 0))
+        wp_stat = sum((r[3] is not None) + (r[4] is not None) for r in rows)
+        if len(rows) >= nq and wp_stat >= ns: wp[pid_] = rows
+        else: guarded += 1
+    save("wp", wp)
+    n_sp = sum(map(len, wp.values()))
+    unresolved = sum(1 for t in titles if not t2q.get(t))
+    print(f"wp: enriched {len(wp)} players, {n_sp} spells; guard kept Wikidata for "
+          f"{guarded}; {unresolved}/{len(titles)} club titles unresolved")
+
 # ----------------------------------------------------------------- stage: teams
 def stage_teams():
-    careers, clubs = load("careers"), load("clubs")
+    careers, clubs = load_careers(), load("clubs")
     teams = sorted({sp[0] for c in careers.values() for sp in c} - set(clubs))
     def fetch(batch):
         vals = " ".join(f"wd:{q}" for q in batch)
@@ -570,7 +722,7 @@ def img_key(tail):
 
 def stage_build():
     clubs, members, attrs = load("clubs"), load("members"), load("attrs")
-    careers, teams = load("careers"), load("teams")
+    careers, teams = load_careers(), load("teams")
 
     merged = merge_map(clubs, members)
     groups = {}  # canonical qid -> all qids folded into it
@@ -591,9 +743,17 @@ def stage_build():
             if g2 is not None: g = (g or 0) + g2
         return s, e, a, g
 
+    # membership must include overlay spells: a player belongs to a club if
+    # load_careers() places a spell there, not only if Wikidata P54 (members) listed
+    # them — else a Wikipedia-added club (e.g. Asllani's Torino) gets no posting and
+    # the player is missing from that club's intersections.
+    at_club = {}
+    for p, spells in careers.items():
+        for sp in spells: at_club.setdefault(sp[0], set()).add(p)
+
     kept_members, n_dropped = {}, 0
     for canon, qs in groups.items():
-        pool = {p for q in qs for p in members[q]}
+        pool = {p for q in qs for p in members.get(q, ())} | {p for q in qs for p in at_club.get(q, ())}
         kept = {p for p in pool if any(x is not None for x in spell(p, qs))}
         n_dropped += len(pool) - len(kept)
         kept_members[canon] = kept
@@ -733,8 +893,8 @@ def stage_validate():
     print(f"validate: OK ({nc} clubs, {np} players)")
 
 STAGES = {"clubs": stage_clubs, "members": stage_members, "attrs": stage_attrs,
-          "careers": stage_careers, "teams": stage_teams, "build": stage_build,
-          "validate": stage_validate}
+          "careers": stage_careers, "wp": stage_wp, "teams": stage_teams,
+          "build": stage_build, "validate": stage_validate}
 
 if __name__ == "__main__":
     DATA.mkdir(exist_ok=True)
