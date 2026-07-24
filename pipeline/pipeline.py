@@ -633,11 +633,15 @@ def stage_wp():
         data = wp_get(action="query", prop="pageprops", ppprop="wikibase_item",
                       redirects=1, titles="|".join(batch))
         q = (data or {}).get("query", {})
+        # a title is keyed in the response by its NORMALISED form ("Bury__F.C." ->
+        # "Bury F.C."), and normalisation happens before redirects are followed, so
+        # both hops have to be walked in that order or the lookup silently misses
+        norm = {n["from"]: n["to"] for n in q.get("normalized", [])}
         redir = {r["from"]: r["to"] for r in q.get("redirects", [])}
         page_q = {pg["title"]: pg.get("pageprops", {}).get("wikibase_item")
                   for pg in q.get("pages", [])}
         for t in batch:
-            t2q[t] = page_q.get(redir.get(t, t))   # None if unresolved / no wikidata item
+            t2q[t] = page_q.get(redir.get(norm.get(t, t), norm.get(t, t)))  # None if unresolved
     save("wp_titles", t2q)
 
     # emit in the exact careers shape, dropping spells whose club title wouldn't
