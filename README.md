@@ -37,7 +37,9 @@ python3 pipeline/pipeline.py build      # rebuild site/data from checkpoints
 ```
 
 A weekly GitHub Action re-runs the pipeline and deploys; the `validate`
-stage blocks a malformed or shrunken dataset. One list needs a human:
+stage blocks a malformed or shrunken dataset, and one whose apps coverage
+dropped — half the careers come from the Wikipedia overlay, so a broken
+parse degrades the data badly without changing any count. One list needs a human:
 `CURRENT` in `pipeline.py` (each league's clubs this season) — refresh it
 every August.
 

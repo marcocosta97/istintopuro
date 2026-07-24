@@ -853,10 +853,24 @@ def stage_build():
         print(f"    {c:4.0%} of {n:4d}  {name}")
 
 # -------------------------------------------------------------- stage: validate
+# Half the careers in the index come from the stage_wp overlay, and nothing about a
+# broken overlay changes a club or player count: if enwiki renames an infobox param or
+# FIELD stops matching, load_careers() falls back to raw Wikidata everywhere, the shrink
+# guards below stay green, and a much worse dataset ships looking healthy. Measured cost
+# of that failure is ~12 points of apps coverage, so a 2-point tolerance catches it with
+# room to spare. FLOOR is the backstop the baseline check can't be: it stops a slow slide
+# from ratcheting into the new normal one accepted refresh at a time.
+APPS_FLOOR = 0.85
+
+def apps_coverage(idx):
+    tot = sum(len(c) for c in idx["apps"])
+    return sum(1 for c in idx["apps"] for a in c if a >= 0) / tot if tot else 0
+
 def stage_validate():
     """Exit non-zero rather than ship a malformed index. VALIDATE_BASELINE=
     <previous index.json> additionally guards against a silently degraded
-    extraction (>3% fewer clubs or players), as the weekly refresh does."""
+    extraction (>3% fewer clubs or players, or thinner apps coverage), as the
+    weekly refresh does."""
     idx = json.loads((SITE_DATA / "index.json").read_bytes())
     errs = []
     def chk(ok, msg):
@@ -885,13 +899,17 @@ def stage_validate():
         and sum(gk) < np)), "bad gks list")
     missing = [i for i in range(NSHARDS) if not (SITE_DATA / "career" / f"{i}.json").exists()]
     chk(not missing, f"missing career shards: {missing[:5]}")
+    cov = apps_coverage(idx)
+    chk(cov >= APPS_FLOOR, f"apps coverage {cov:.1%} below floor {APPS_FLOOR:.0%}")
     base = os.environ.get("VALIDATE_BASELINE")
     if base:
         old = json.loads(Path(base).read_bytes())
-        oc, op = len(old["clubs"]), len(old["names"])
+        oc, op, ov = len(old["clubs"]), len(old["names"]), apps_coverage(old)
         chk(nc >= 0.97 * oc, f"clubs shrank {oc} -> {nc}")
         chk(np >= 0.97 * op, f"players shrank {op} -> {np}")
-        print(f"  vs baseline: clubs {oc} -> {nc}, players {op} -> {np}")
+        chk(cov >= ov - 0.02, f"apps coverage shrank {ov:.1%} -> {cov:.1%}")
+        print(f"  vs baseline: clubs {oc} -> {nc}, players {op} -> {np}, "
+              f"apps {ov:.1%} -> {cov:.1%}")
     if errs:
         sys.exit("validate FAILED:\n  " + "\n  ".join(errs[:20]))
     print(f"validate: OK ({nc} clubs, {np} players)")
