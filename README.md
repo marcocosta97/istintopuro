@@ -32,7 +32,7 @@ days for practice; game state persists in `localStorage`.
 ## Refreshing the data
 
 ```
-python3 pipeline/pipeline.py            # full fetch, Wikidata + Wikipedia (~80 min)
+python3 pipeline/pipeline.py            # full fetch, Wikidata + Wikipedia (~25 min)
 python3 pipeline/pipeline.py build      # rebuild site/data from checkpoints
 ```
 

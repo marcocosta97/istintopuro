@@ -39,7 +39,7 @@ jobs:
 
       # the validate stage aborts the job (no commit, no deploy) if the new
       # index is malformed or shrank >3% vs the currently deployed one
-      - name: Refresh dataset from Wikidata + Wikipedia (~80 min, throttled queries)
+      - name: Refresh dataset from Wikidata + Wikipedia (~25 min, throttled queries)
         run: |
           git show HEAD:site/data/index.json > /tmp/index-baseline.json
           VALIDATE_BASELINE=/tmp/index-baseline.json python3 pipeline/pipeline.py
