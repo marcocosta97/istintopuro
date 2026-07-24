@@ -606,10 +606,13 @@ def stage_wp():
     print(f"wp: {len(have)} have an enwiki page", flush=True)
 
     # phase 2 — fetch wikitext (50 titles/req) & parse; checkpointed, club still a TITLE
+    # rvsection=0 = lead section only, where the infobox always sits: a quarter of the
+    # bytes of the full articles (much less on long ones) for byte-identical parses, and
+    # it does work with 50 titles per request despite what the API docs imply.
     def fetch(batch):
         by_title = {t: p for p, t in batch}
         data = wp_get(action="query", prop="revisions", rvprop="content",
-                      rvslots="main", titles="|".join(t for _, t in batch))
+                      rvslots="main", rvsection=0, titles="|".join(t for _, t in batch))
         out = []
         for pg in (data or {}).get("query", {}).get("pages", []):
             revs = pg.get("revisions")
