@@ -824,10 +824,6 @@ async function qLoadCareer(pid, st) {
   if (document.body.classList.contains("quiz")) qRender();
 }
 
-// "ini2" has nothing to profile on a single-answer stage — the impossible tier
-// is sized [1,2]/[1,3], so that is the common case there. It becomes "car", the
-// lone answer's other clubs, which is a fresh axis rather than a repeat.
-const qHintKey = (kind, st) => kind === "ini2" && st.answers.length < 2 ? "car" : kind;
 // the two identikits are a numbered pair, tagged like the "+N" on a revealed row
 const QHNUM = { ini: 1, ini2: 2 };
 // the identikit slots in reveal-priority order. The fame rank a slot reveals is
@@ -837,6 +833,13 @@ const QHNUM = { ini: 1, ini2: 2 };
 const QIDENT = ["ini", "ini2"];
 const qIdentRank = (kind) => QIDENT.slice(0, QIDENT.indexOf(kind))
   .filter(k => qs.hints[k] === qs.stage).length;
+// "ini2" falls back to "car" — the top answer's clubs outside the pair — only
+// once the stage has no unrevealed answer left for it to profile. That is the
+// impossible tier's usual [1,2]/[1,3] single answer ALREADY taken by identikit
+// #1 on this stage; if #1 went on an earlier stage the lone answer is still
+// unseen here, and profiling it beats a fresh axis nobody asked for.
+const qHintKey = (kind, st) =>
+  kind === "ini2" && qIdentRank(kind) >= st.answers.length ? "car" : kind;
 
 // initials + birth decade, then nationality, the tallies at the two clubs, and
 // (once the shard lands) whether the player is still around
