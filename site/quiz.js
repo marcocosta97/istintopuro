@@ -982,33 +982,44 @@ function qRenderCal() {
   const wdRow = `<div class="qcwd">${[0, 1, 2, 3, 4, 5, 6].map(n => `<span>${wd(n)}</span>`).join("")}</div>`;
   const monLabel = (y, m) => new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(lang, { month: "long", year: "numeric" });
   // #1 is 2026-07-20 (QEPOCH): walk months from that month to the current one
-  const e = new Date(QEPOCH), sy = e.getUTCFullYear(), sm = e.getUTCMonth() + 1;
-  let html = "";
+  const ep = new Date(QEPOCH), sy = ep.getUTCFullYear(), sm = ep.getUTCMonth() + 1;
+  const months = [];
   for (let y = sy, m = sm; y < ty || (y === ty && m <= tm); m === 12 ? (m = 1, y++) : m++) {
     const first = new Date(Date.UTC(y, m - 1, 1));
     const lead = (first.getUTCDay() + 6) % 7;  // Mon-first offset of the 1st
     const nDays = new Date(Date.UTC(y, m, 0)).getUTCDate();
-    let cells = "";
-    for (let i = 0; i < lead; i++) cells += `<span class="qcell out"></span>`;
+    const cells = [];  // one entry per grid slot, Monday-first: {html, play}
+    for (let i = 0; i < lead; i++) cells.push({ html: `<span class="qcell out"></span>`, play: false });
     for (let d = 1; d <= nDays; d++) {
       const ds = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
       const num = qNum(ds), rec = days[ds];
       const future = ds > today, prelaunch = num < 1;
       // the box is the square (played 2×2 or an empty frame); the date is a caption below it, outside the box
       const cell = (extra, inner) => `<span class="qcell ${extra}"><span class="qcbox">${inner || ""}</span><span class="qcd">${d}</span></span>`;
-      if (future || prelaunch) { cells += cell("out"); continue; }
+      if (future || prelaunch) { cells.push({ html: cell("out"), play: false }); continue; }
       const cls = ["play", rec ? "done" : "todo", ds === today ? "today" : "", ds === active ? "current" : ""].filter(Boolean).join(" ");
       const label = `${q.qNum(num)}${rec ? " · " + rec.res.filter(c => c < 2).length + "/4" : ""}`;
-      cells += `<button type="button" class="qcell ${cls}" data-d="${ds}" title="${esc(label)}" aria-label="${esc(label)}">`
-        + `<span class="qcbox">${rec ? qSqCells(rec.res) : ""}</span><span class="qcd">${d}</span></button>`;
+      cells.push({ play: true, html:
+        `<button type="button" class="qcell ${cls}" data-d="${ds}" title="${esc(label)}" aria-label="${esc(label)}">`
+        + `<span class="qcbox">${rec ? qSqCells(rec.res) : ""}</span><span class="qcd">${d}</span></button>` });
     }
-    html += `<section class="qcmon"><h3>${esc(monLabel(y, m))}</h3>${wdRow}<div class="qcgrid">${cells}</div></section>`;
+    // drop whole weeks holding nothing playable: the pre-launch run-up in the
+    // first month, the days still to come in the current one. Three dead rows
+    // of July 2026 alone, and it keeps today on the last row of its month.
+    const weeks = [];
+    for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+    while (weeks.length && !weeks[0].some(c => c.play)) weeks.shift();
+    while (weeks.length && !weeks.at(-1).some(c => c.play)) weeks.pop();
+    months.push(`<section class="qcmon"><h3>${esc(monLabel(y, m))}</h3>${wdRow}`
+      + `<div class="qcgrid">${weeks.flat().map(c => c.html).join("")}</div></section>`);
   }
   $("qcal").innerHTML =
     `<div class="qchead"><span id="qcaltitle">${q.qCalTitle}</span>`
     + `<button type="button" class="qcal-back">${q.qCalBack}</button></div>`
     + `<p class="qchint">${q.qCalHint}</p>`
-    + `<div class="qcmons">${html}</div>`;
+    // newest month first, so today is always the top-left cell block — with a
+    // year of archive behind it, chronological order buries it below the fold
+    + `<div class="qcmons">${months.reverse().join("")}</div>`;
   $("qcal").querySelector(".qcal-back").onclick = () => qCalPick(today);  // straight to today's game
   $("qcal").querySelectorAll(".qcell.play").forEach(b => b.onclick = () => qCalPick(b.dataset.d));
 }

@@ -697,38 +697,41 @@ body.qcal :is(#qhead, #qstages, #qcard, #qend, #qnewday, #qlog) { display: none;
 }
 .qcal-back::before { content: "‹  "; }
 .qcal-back:hover, .qcal-back:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
-.qchint { color: var(--muted); font-size: .78rem; margin: 0 0 1.3rem; }
-.qcmon { margin-bottom: 1.6rem; }
+.qchint { color: var(--muted); font-size: .78rem; margin: 0 0 1.1rem; }
+/* months tile side by side wherever there's room (two in the 640px column, one
+   on a phone) — stacked, a year of archive is metres of scrolling */
+.qcmons { display: grid; grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr)); gap: 1.4rem 1.5rem; }
 .qcmon h3 {
   font-family: var(--display); font-style: italic; font-weight: 700;
   text-transform: uppercase; letter-spacing: .02em; font-size: .95rem; color: var(--fg);
-  margin: 0 0 .55rem;
+  margin: 0 0 .45rem;
 }
-/* seven columns, Monday first — the weekday initials sit above the day grid */
-.qcwd, .qcgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 7px; }
+/* seven columns, Monday first — the weekday initials sit above the day grid.
+   Capped: a full-width 7-column grid on desktop gives 80px day squares */
+.qcwd, .qcgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; max-width: 22rem; }
 .qcwd {
-  margin-bottom: 7px; font-size: .6rem; letter-spacing: .06em; text-transform: uppercase;
+  margin-bottom: 5px; font-size: .6rem; letter-spacing: .06em; text-transform: uppercase;
   color: var(--muted); text-align: center; opacity: .8;
 }
 /* each day = a square box (the result, or an empty frame) with the date as a
    caption OUTSIDE it, below — so the box reads as a clean square, not a rectangle */
 .qcell {
-  display: flex; flex-direction: column; align-items: stretch; gap: 5px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px;
   background: none; border: 0; padding: 0; font: inherit; text-align: center;
 }
 .qcbox {
-  width: 100%; aspect-ratio: 1; border-radius: 9px;
+  width: 100%; aspect-ratio: 1; border-radius: 8px;
   border: 1px solid var(--line); background: var(--card);
   transition: transform .13s ease, box-shadow .13s ease, border-color .13s ease;
 }
-.qcd { font-size: .72rem; font-weight: 600; line-height: 1; color: var(--muted); }  /* day-of-month, below the box */
+.qcd { font-size: .68rem; font-weight: 600; line-height: 1; color: var(--muted); }  /* day-of-month, below the box */
 .qcell.out .qcbox { border-color: transparent; background: transparent; }
 .qcell.out .qcd { opacity: .32; }
 /* a played day: the framed box is kept, the 2×2 of result squares sits INSIDE it
    with a margin all round so the outer square still reads */
 .qcell.done .qcbox {
   padding: 15%;
-  display: grid; grid-template: 1fr 1fr / 1fr 1fr; gap: 3px;
+  display: grid; grid-template: 1fr 1fr / 1fr 1fr; gap: 7%;  /* %-gap so the 2×2 holds its proportions at any cell size */
 }
 .qcell.done .qcbox .rsq { width: 100%; height: 100%; border-radius: 2px; }
 .qcell.play { cursor: pointer; }
