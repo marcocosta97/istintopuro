@@ -685,7 +685,7 @@ body.qcal :is(#qhead, #qstages, #qcard, #qend, #qnewday, #qlog) { display: none;
   gap: .6rem; margin-bottom: .15rem;
 }
 #qcaltitle {
-  font-family: var(--display); font-style: italic; font-weight: 700;
+  margin: 0; font-family: var(--display); font-style: italic; font-weight: 700;
   text-transform: uppercase; letter-spacing: .01em; font-size: 1.35rem;
 }
 .qcal-back {
@@ -737,7 +737,9 @@ body.qcal :is(#qhead, #qstages, #qcard, #qend, #qnewday, #qlog) { display: none;
 .qcell.play { cursor: pointer; }
 .qcell.play:hover .qcbox { transform: translateY(-2px); box-shadow: 0 5px 14px rgba(0,0,0,.13); }
 .qcell.play:focus-visible { outline: none; }
-.qcell.play:focus-visible .qcbox { box-shadow: 0 0 0 2px var(--accent); }
+/* an offset halo, not the tight ring .current already wears — arrowing onto the
+   open day has to look different from the open day itself */
+.qcell.play:focus-visible .qcbox { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
 /* today gets a quiet accent date so it stays findable; the strong ring follows
    whichever day is currently open (.current) — a replay, or today itself */
 .qcell.today .qcd { color: var(--accent); }

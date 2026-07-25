@@ -971,6 +971,10 @@ function qCalOpen(open) {
   // never auto-focus the guess input — that pops the on-screen keyboard uninvited
   if (open) { qRenderCal(); $("qcal").querySelector(".qcal-back")?.focus(); }
 }
+// Escape leaves the archive the same way the back button does — to today's game
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && document.body.classList.contains("qcal")) qCalPick(qToday());
+});
 
 function qRenderCal() {
   const q = QSTR[lang], today = qToday(), days = qHistory().days;
@@ -1014,14 +1018,30 @@ function qRenderCal() {
       + `<div class="qcgrid">${weeks.flat().map(c => c.html).join("")}</div></section>`);
   }
   $("qcal").innerHTML =
-    `<div class="qchead"><span id="qcaltitle">${q.qCalTitle}</span>`
+    `<div class="qchead"><h2 id="qcaltitle">${q.qCalTitle}</h2>`
     + `<button type="button" class="qcal-back">${q.qCalBack}</button></div>`
     + `<p class="qchint">${q.qCalHint}</p>`
     // newest month first, so today is always the top-left cell block — with a
     // year of archive behind it, chronological order buries it below the fold
     + `<div class="qcmons">${months.reverse().join("")}</div>`;
   $("qcal").querySelector(".qcal-back").onclick = () => qCalPick(today);  // straight to today's game
-  $("qcal").querySelectorAll(".qcell.play").forEach(b => b.onclick = () => qCalPick(b.dataset.d));
+  // a year of archive is ~365 day buttons: each month grid is ONE tab stop (the
+  // open day, else its first), the arrows move within it — the date-picker idiom.
+  // ±7 lands on the same weekday because the trimming above leaves every grid's
+  // playable days contiguous.
+  const QSTEP = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
+  $("qcal").querySelectorAll(".qcgrid").forEach(g => {
+    const cells = [...g.querySelectorAll(".qcell.play")];
+    if (!cells.length) return;
+    const entry = g.querySelector(".qcell.current") || cells[0];
+    cells.forEach(b => { b.tabIndex = b === entry ? 0 : -1; b.onclick = () => qCalPick(b.dataset.d); });
+    g.onkeydown = (e) => {
+      const i = QSTEP[e.key] ? cells.indexOf(e.target) : -1;
+      if (i < 0 || !cells[i + QSTEP[e.key]]) return;
+      e.preventDefault();
+      cells[i + QSTEP[e.key]].focus();
+    };
+  });
 }
 
 // open a day from the archive. Today is the live persistent game; any past day
