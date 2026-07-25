@@ -516,7 +516,7 @@ const QSTR = {
     qsCar: (l) => `è passato anche da ${l.join(" · ")}`,
     qsBorn: (y) => `nato nel ${y}`,
     qsAtClub: "gioca ancora in una delle due squadre", qsActive: "ancora in attività",
-    qsApps: (n) => `${n} pres`, qsGoals: (n) => `${n} gol`,
+    qsApps: (n) => `${n} pres`, qsGoals: (n) => `${n} gol`, qsGk: "portiere",
     qOk: "Giusto!", qNo: "No…", qDup: "già provato",
     qWon: "Schedina completata!", qLost: "Tentativi finiti.",
     qNewDay: "È mezzanotte: c'è una nuova schedina", qPlay: "gioca",
@@ -546,7 +546,8 @@ const QSTR = {
     qsCar: (l) => `also played for ${l.join(" · ")}`,
     qsBorn: (y) => `born in ${y}`,
     qsAtClub: "still plays for one of the two clubs", qsActive: "still an active player",
-    qsApps: (n) => `${n} apps`, qsGoals: (n) => `${n} goals`,
+    qsApps: (n) => `${n} app${n === 1 ? "" : "s"}`,
+    qsGoals: (n) => `${n} goal${n === 1 ? "" : "s"}`, qsGk: "goalkeeper",
     qOk: "Correct!", qNo: "No…", qDup: "already tried",
     qWon: "Quiz completed!", qLost: "Out of guesses.",
     qNewDay: "It's past midnight: a new quiz is out", qPlay: "play it",
@@ -842,14 +843,16 @@ const qHintKey = (kind, st) =>
   kind === "ini2" && qIdentRank(kind) >= st.answers.length ? "car" : kind;
 
 // initials + birth decade, then nationality, the tallies at the two clubs, and
-// (once the shard lands) whether the player is still around
+// (once the shard lands) whether the player is still around. Goalkeepers say so
+// in the goals slot: their goal counts are unreliable and always suppressed, so
+// without the tag a keeper reads as an outfielder who never scored.
 function qIdentikit(p, st) {
-  const q = QSTR[lang], b = DB.births[p];
+  const q = QSTR[lang], b = DB.births[p], gk = DB.gkSet.has(p);
   let apps = 0, goals = 0;  // combined at the two clubs
   for (const ci of st.clubs) { const a = qApps(ci, p); if (a > 0) apps += a; const g = qGoals(ci, p); if (g > 0) goals += g; }
   let s = esc(q.qsIni(DB.names[p].split(" ").map(w => w[0] + ".").join(" "), b ? Math.floor(b / 10) * 10 : 0));
   const extra = [DB.nats[p] ? flag(DB.nats[p]) : "", apps ? q.qsApps(apps) : "",
-                 goals && !DB.gkSet.has(p) ? q.qsGoals(goals) : ""].filter(Boolean);
+                 gk ? q.qsGk : goals ? q.qsGoals(goals) : ""].filter(Boolean);
   if (extra.length) s += " · " + extra.join(" · ");
   const note = qCareerNote.get(p);
   if (note === undefined) qLoadCareer(p, st);  // not fetched yet: load, re-render appends the note
