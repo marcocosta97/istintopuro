@@ -61,7 +61,8 @@ const STR = {
     combApps: (n) => `${n.toLocaleString("it")} presenze`,
     combGoals: (n) => `${n.toLocaleString("it")} gol`,
     comb: (apps) => apps ? "combinate" : "combinati",
-    apps: "pres", goals: "gol", noData: "nessun dato", loan: "prestito",
+    apps: () => "pres", goals: () => "gol",  // abbreviazioni invariabili
+    noData: "nessun dato", loan: "prestito",
     dissolved: (y) => `squadra sciolta nel ${y}`,
     more: (n) => `… mostra altri ${n}`,
     browse: "Sfoglia per campionato",
@@ -102,10 +103,11 @@ const STR = {
     noneFilter: "No players match the filters.",
     combNote: "combined apps and goals",
     found: (n, ms) => `${n} player${n === 1 ? "" : "s"} · ${ms} ms`,
-    combApps: (n) => `${n.toLocaleString("en")} apps`,
-    combGoals: (n) => `${n.toLocaleString("en")} goals`,
+    combApps: (n) => `${n.toLocaleString("en")} app${n === 1 ? "" : "s"}`,
+    combGoals: (n) => `${n.toLocaleString("en")} goal${n === 1 ? "" : "s"}`,
     comb: () => "combined",
-    apps: "apps", goals: "goals", noData: "no data", loan: "loan",
+    apps: (n) => `app${n === 1 ? "" : "s"}`, goals: (n) => `goal${n === 1 ? "" : "s"}`,
+    noData: "no data", loan: "loan",
     dissolved: (y) => `club dissolved in ${y}`,
     more: (n) => `… show ${n} more`,
     browse: "Browse by league",
@@ -778,8 +780,8 @@ async function solvePlayers() {
     li.innerHTML = `<div class="pinfo"><span class="pname"><span class="cname${c ? " link" : ""}">${c ? countryFlag(c[1]) + " " : ""}${esc(name)}</span>${c ? defunct(c) : ""} <small class="clg">· ${lg}</small>${badge}</span></div>`
       + playerIds.map((pid, k) => {  // name left, spells right: multi-range strings vary too much to column-align
         const [a, gl] = sums(k, name);
-        const st = showStats ? [a != null ? a + " " + t.apps : "",
-                                gl != null && !DB.gkSet.has(pid) ? gl + " " + t.goals : ""].filter(Boolean).join(" · ") : "";
+        const st = showStats ? [a != null ? a + " " + t.apps(a) : "",
+                                gl != null && !DB.gkSet.has(pid) ? gl + " " + t.goals(gl) : ""].filter(Boolean).join(" · ") : "";
         return `<div class="crow"><span class="cteam">${esc(DB.names[pid])}${st ? ` <small class="cst">${st}</small>` : ""}</span><span class="cstats">${maps[k].get(name).map(([s, e]) => yspan(s, e)).join(", ")}</span></div>`;
       }).join("");
     if (showStats) {  // team total: everyone's known figures at this club together
@@ -789,7 +791,7 @@ async function solvePlayers() {
         if (sa != null) a = (a || 0) + sa;
         if (sg != null && !DB.gkSet.has(pid)) gl = (gl || 0) + sg;
       });
-      const st = [a != null ? a + " " + t.apps : "", gl != null ? gl + " " + t.goals : ""].filter(Boolean).join(" · ");
+      const st = [a != null ? a + " " + t.apps(a) : "", gl != null ? gl + " " + t.goals(gl) : ""].filter(Boolean).join(" · ");
       if (st) li.innerHTML += `<div class="crow tcrow"><span class="cteam"><small class="cst">(${t.comb(a != null)}) ${st}</small></span></div>`;
     }
     if (c)  // covered club: click through to club mode, showing its full roster
@@ -823,8 +825,8 @@ async function solvePlayers() {
     let a = 0, gl = 0;
     for (const x of appsOf.values()) a += x;
     for (const x of goalsOf.values()) gl += x;
-    const st = [appsOf.size ? a.toLocaleString(lang) + " " + t.apps : "",
-                goalsOf.size ? gl.toLocaleString(lang) + " " + t.goals : ""].filter(Boolean).join(" · ");
+    const st = [appsOf.size ? a.toLocaleString(lang) + " " + t.apps(a) : "",
+                goalsOf.size ? gl.toLocaleString(lang) + " " + t.goals(gl) : ""].filter(Boolean).join(" · ");
     sep.innerHTML = `<span>${t.selPlayers}</span><span class="tot">${st} <span class="comb">(${t.comb(!!appsOf.size)})</span></span>`;
   }
   results.appendChild(sep);
@@ -1017,7 +1019,7 @@ async function toggleCareer(li, pid) {
   div.innerHTML = (spells.map(([team, s, e, apps, goals], i) =>
     `<div class="crow${selNames.has(team) ? " hit" : ""}">
        <span class="cyears">${yspan(s, e)}</span><span class="cteam">${loan[i] ? `<span class="loan" title="${t.loan}">↳</span> ` : ""}${esc(team)}</span>
-       <span class="cstats">${apps != null ? apps + " " + t.apps : ""}${!gk && goals != null ? " · " + goals + " " + t.goals : ""}</span>
+       <span class="cstats">${apps != null ? apps + " " + t.apps(apps) : ""}${!gk && goals != null ? " · " + goals + " " + t.goals(goals) : ""}</span>
      </div>`).join("") || `<div class='crow'>${t.noData}</div>`)
     + (qid ? `<a class="wiki wiki-pedia" href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${lang}wiki/Q${qid}" target="_blank" rel="noopener">Wikipedia ↗</a>
               <a class="wiki" href="https://www.wikidata.org/wiki/Q${qid}" target="_blank" rel="noopener">Wikidata ↗</a>` : "");
