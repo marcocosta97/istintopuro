@@ -287,6 +287,41 @@ const defunct = (c) => c[4] ? ` <span class="defunct" title="${t.dissolved(c[4])
 // year span of a career spell: single-year ranges collapse, unknown bounds show "?"
 const yspan = (s, e) => s && s === e ? String(s) : `${s || "?"}–${e || (s ? "" : "?")}`;
 
+// ---------------------------------------------------------------- club stature
+// The continent's marquee clubs — the ones a general fan recognises, so a player
+// there is widely visible. Squad-size coverage in Wikidata can't tell a giant
+// (Napoli, Man Utd) from a well-documented mid club (Deportivo), so club stature
+// leans on this curated set; prestige, unlike league position, rarely changes.
+// Shared: search ranking uses it here, quiz difficulty uses it in quiz.js.
+const MARQUEE = new Set([
+  "Q1422", "Q631", "Q1543", "Q2641", "Q2739", "Q2609", "Q2052",                          // IT
+  "Q8682", "Q7156", "Q8701", "Q10329", "Q10333", "Q12297", "Q8687", "Q10315",            // ES
+  "Q15789", "Q41420", "Q104761", "Q702455", "Q32494", "Q38245", "Q101959",               // DE
+  "Q483020", "Q132885", "Q704", "Q180305", "Q19516",                                     // FR
+  "Q18656", "Q50602", "Q1130849", "Q9617", "Q9616", "Q18741", "Q18716", "Q18711", "Q5794", "Q18747", "Q1128631", // GB
+]);
+// group by the club's LEAGUE country, not its nationality, so Monaco (code "MC",
+// plays in Ligue 1) counts as French rather than a country of its own
+const leagueCC = (ci) => { const c = DB.clubs[ci]; return c[5] >= 0 ? DB.leagues[c[5]][2] : c[1]; };
+// how visible a club is: marquee tops the scale; everyone else is ranked by squad
+// size WITHIN their own country (so the coverage bias doesn't matter) and capped
+// below marquee — a big-for-its-league club still scores well.
+const stature = (ci) => {
+  if (!DB.stat) {
+    const byC = {};
+    DB.clubs.forEach((c, i) => { if (DB.postings[i].length >= 120) (byC[leagueCC(i)] ??= []).push(i); });
+    DB.stat = new Map();
+    for (const cc in byC) {
+      const arr = byC[cc].sort((a, b) => DB.postings[a].length - DB.postings[b].length);
+      arr.forEach((ci, idx) => {
+        const pct = arr.length > 1 ? idx / (arr.length - 1) : 1;  // 0 smallest … 1 biggest in league
+        DB.stat.set(ci, MARQUEE.has(DB.clubs[ci][3]) ? 1.15 : pct >= 0.6 ? 1 : pct >= 0.3 ? 0.82 : 0.66);
+      });
+    }
+  }
+  return DB.stat.get(ci) ?? 0.66;
+};
+
 // ---------------------------------------------------------------- data loading
 async function boot() {
   status.textContent = t.loading;

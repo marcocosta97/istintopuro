@@ -33,17 +33,6 @@ const qLaunchLabel = () => {  // e.g. "lunedì 20 luglio" for the pre-launch mes
 };
 
 // ---------------------------------------------------------------- generator
-// The continent's marquee clubs — the ones a general fan recognises, so a player
-// there is widely visible. Squad-size coverage in Wikidata can't tell a giant
-// (Napoli, Man Utd) from a well-documented mid club (Deportivo), so club stature
-// leans on this curated set; prestige, unlike league position, rarely changes.
-const QMARQUEE = new Set([
-  "Q1422", "Q631", "Q1543", "Q2641", "Q2739", "Q2609", "Q2052",                          // IT
-  "Q8682", "Q7156", "Q8701", "Q10329", "Q10333", "Q12297", "Q8687", "Q10315",            // ES
-  "Q15789", "Q41420", "Q104761", "Q702455", "Q32494", "Q38245", "Q101959",               // DE
-  "Q483020", "Q132885", "Q704", "Q180305", "Q19516",                                     // FR
-  "Q18656", "Q50602", "Q1130849", "Q9617", "Q9616", "Q18741", "Q18716", "Q18711", "Q5794", "Q18747", "Q1128631", // GB
-]);
 // Difficulty is driven by the ANSWER SET, not club reputation: a pair is easy
 // when its shared players include a household name (a legend with many caps, a
 // prolific scorer, or a current star) — which is why Real Madrid × Milan (Seedorf)
@@ -67,19 +56,6 @@ function qPools() {
     if (n >= 300) any300.push(i);
     if (n >= 100) any100.push(i);
   });
-  // stature (weights a player's fame): marquee clubs top the scale; everyone else
-  // is ranked by squad size WITHIN their own country (so the coverage bias doesn't
-  // matter) and capped below marquee — a big-for-its-league club still scores well.
-  const byC = {};
-  DB.clubs.forEach((c, i) => { if (DB.postings[i].length >= 120) (byC[qLeagueCC(i)] ??= []).push(i); });
-  DB.qStat = new Map();
-  for (const cc in byC) {
-    const arr = byC[cc].sort((a, b) => DB.postings[a].length - DB.postings[b].length);
-    arr.forEach((ci, idx) => {
-      const pct = arr.length > 1 ? idx / (arr.length - 1) : 1;  // 0 smallest … 1 biggest in league
-      DB.qStat.set(ci, QMARQUEE.has(DB.clubs[ci][3]) ? 1.15 : pct >= 0.6 ? 1 : pct >= 0.3 ? 0.82 : 0.66);
-    });
-  }
   // career tallies at MARQUEE clubs, per player: lets qFame see stardom earned
   // outside the puzzle pair (Thuram at Parma × Barcelona scored like a journeyman
   // when only pair-local tallies counted). Marquee-only on purpose — a long
@@ -87,8 +63,8 @@ function qPools() {
   DB.qMApps = new Float32Array(DB.names.length);
   DB.qMGoals = new Float32Array(DB.names.length);
   DB.clubs.forEach((c, ci) => {
-    if (!QMARQUEE.has(c[3])) return;
-    const w = qStature(ci), arr = postings(ci), ap = DB.apps[ci], gl = DB.goals[ci];
+    if (!MARQUEE.has(c[3])) return;
+    const w = stature(ci), arr = postings(ci), ap = DB.apps[ci], gl = DB.goals[ci];
     for (let i = 0; i < arr.length; i++) {
       if (ap[i] > 0) DB.qMApps[arr[i]] += w * ap[i];
       if (gl[i] > 0 && !DB.gkSet.has(arr[i])) DB.qMGoals[arr[i]] += w * gl[i];
@@ -96,7 +72,6 @@ function qPools() {
   });
   return DB.qPools = { star, sub, field: star.concat(sub), obs, any300, any100 };
 }
-const qStature = (ci) => DB.qStat.get(ci) ?? 0.66;
 
 // goals of pid at club ci (0 for goalkeepers — their goal qualifiers are unreliable)
 function qGoals(ci, pid) {
@@ -117,7 +92,7 @@ const qRecBonus = (age) => age <= 28 ? 200 : age <= 32 ? 150 : age <= 36 ? 90 : 
 // appearances at a big, widely-followed club make a player more recognisable
 // than the same tally at a small one — so Lucas Pérez at Deportivo/Cádiz weighs
 // less than McTominay at Man Utd/Napoli. Combines club reputation WITH the answer
-// set, not either alone. Stature (qStature) is league-normalised, set in qPools.
+// set, not either alone. Stature is league-normalised (app.js), marquee-topped.
 // Three corrections tuned against the 2026-07 ground-truth audit:
 //   era    tallies from before living memory can't make a name famous — a 1950s
 //          long-server maxed the old formula and headlined "medium" stages
@@ -130,7 +105,7 @@ const qEra = (b) => b >= 1970 ? 1 : b >= 1955 ? 0.85 : b >= 1940 ? 0.65 : 0.45;
 function qFame(pid, clubs) {
   let apps = 0, goals = 0, mApps = DB.qMApps[pid], mGoals = DB.qMGoals[pid];
   for (const ci of clubs) {
-    const w = qStature(ci), mq = QMARQUEE.has(DB.clubs[ci][3]);
+    const w = stature(ci), mq = MARQUEE.has(DB.clubs[ci][3]);
     const a = qApps(ci, pid); if (a > 0) { apps += w * a; if (mq) mApps -= w * a; }
     const g = qGoals(ci, pid); if (g > 0) { goals += w * g; if (mq) mGoals -= w * g; }
   }
@@ -155,7 +130,7 @@ function qEase(clubs, answers) {
   const sup = (f) => Math.max(f - 250, 0);
   const f0 = top[0], f1 = top[1];
   let e = f0 + 0.3 * sup(f1) + 0.18 * sup(top[2]) + 0.1 * sup(top[3]) + Math.min(answers.length, 25) * 2;
-  const nMarquee = (QMARQUEE.has(DB.clubs[clubs[0]][3]) ? 1 : 0) + (QMARQUEE.has(DB.clubs[clubs[1]][3]) ? 1 : 0);
+  const nMarquee = (MARQUEE.has(DB.clubs[clubs[0]][3]) ? 1 : 0) + (MARQUEE.has(DB.clubs[clubs[1]][3]) ? 1 : 0);
   if (nMarquee < 2 && f1 < 430) e -= Math.min((430 - f1) * 1.5, 150);  // lone-star penalty
   // the Bundesliga and Ligue 1 are less globally followed — their players are
   // harder to place, so those pairs read a notch harder (compounds when both are)
@@ -166,7 +141,7 @@ function qEase(clubs, answers) {
   if (e >= 500) e += nMarquee === 2 ? 35 : -(2 - nMarquee) * 45;
   return e;
 }
-const qLeagueEase = (ci) => { const cc = qLeagueCC(ci); return cc === "DE" || cc === "FR" ? 0.93 : 1; };
+const qLeagueEase = (ci) => { const cc = leagueCC(ci); return cc === "DE" || cc === "FR" ? 0.93 : 1; };
 // the "real" answers for difficulty: drop players with a KNOWN 0 appearances at
 // one of the clubs (they were registered but never played — nobody thinks of
 // them). They stay guessable in play, but a puzzle whose only overlap is such
@@ -204,15 +179,12 @@ const QIMPOSSIBLE = [  // obscure pool; more than one answer is fine as long as
   { p: ["obs", "any100"], size: [1, 3], ease: [-1e9, 440] },  // from turning known
 ];
 
-// balance across the leagues that produced a candidate, then pick UNIFORMLY within
-// the league — with a wide in-band pool this spreads clubs so none recurs daily
-// group by the club's LEAGUE country, not its nationality, so Monaco (code "MC",
-// plays in Ligue 1) balances with the other French clubs instead of monopolising
-// a slot of its own
-const qLeagueCC = (ci) => { const c = DB.clubs[ci]; return c[5] >= 0 ? DB.leagues[c[5]][2] : c[1]; };
+// balance across the leagues that produced a candidate (leagueCC, not nationality,
+// so Monaco counts as French), then pick UNIFORMLY within the league — with a wide
+// in-band pool this spreads clubs so none recurs daily
 function qChoose(cands, rng, used) {
   const byCC = {};
-  for (const c of cands.values()) (byCC[qLeagueCC(c.clubs[0])] ??= []).push(c);
+  for (const c of cands.values()) (byCC[leagueCC(c.clubs[0])] ??= []).push(c);
   const ccs = Object.keys(byCC).sort();
   const arr = byCC[ccs[rng() * ccs.length | 0]].sort((a, b) => a.clubs[0] - b.clubs[0] || a.clubs[1] - b.clubs[1]);
   const best = arr[rng() * arr.length | 0];
@@ -381,7 +353,7 @@ function qStagesFromQids(rows) {
 }
 
 function qLoad() {
-  qPools();  // prime pools + DB.qStat/gkSet even on the restore path (qFame needs them)
+  qPools();  // prime pools + gkSet even on the restore path (qFame needs them)
   qReplaying = false;  // qLoad always means the live daily game
   if (!qStarted()) { qs = null; qPz = null; return; }  // before launch day: no game yet
   const today = qToday();
