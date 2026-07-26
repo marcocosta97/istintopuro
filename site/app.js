@@ -541,7 +541,7 @@ function pHasWord(i, tk) {
 }
 
 let pGen = 0;
-function playerMatches(q, excl = playerIds) {  // quiz mode passes its own exclusions
+function playerMatches(q, excl = playerIds, rescue = true) {  // quiz mode passes its own exclusions
   pIndex();
   const nq = norm(q);
   if (!nq) return [];
@@ -599,7 +599,63 @@ function playerMatches(q, excl = playerIds) {  // quiz mode passes its own exclu
     mark[i] = gen;
     push(T_INFIX, i);
   });
+  // A query that only ever landed *inside* words has almost certainly been
+  // misspelt — "haland" hits nothing but Achalandabaso. Trigger the rescue on
+  // that too, not just on nothing at all, and let fame order the union.
+  if (rescue && (!ids.length || ranks[0] >= T_INFIX)) {
+    const seen = new Set(ids);
+    for (const id of pRescue(nq, excl)) if (!seen.has(id)) ids.push(id);
+    ids.sort((a, b) => DB.fame[b] - DB.fame[a]);
+    if (ids.length > SUGG) ids.length = SUGG;
+  }
   return ids;
+}
+
+// ------------------------------------------------------------- typo tolerance
+// Every distinct word across all names (~43k), for the rescue below.
+function pWords() {
+  if (DB.pWordList) return DB.pWordList;
+  const set = new Set();
+  for (const w of DB.pBlob.split(" ")) if (w.length > 2) set.add(w);
+  return DB.pWordList = [...set];
+}
+// one edit apart, counting a transposition as one — "trezegeut" for "trezeguet"
+// is the commonest slip of all and two plain edits away
+function near1(a, b) {
+  const la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  let i = 0, j = 0, e = 0;
+  while (i < la && j < lb) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++e > 1) return false;
+    if (la > lb) i++;
+    else if (lb > la) j++;
+    else if (a[i + 1] === b[j] && a[i] === b[j + 1]) { i += 2; j += 2; }
+    else { i++; j++; }
+  }
+  return e + (la - i) + (lb - j) <= 1;
+}
+// Last resort, and ONLY when the query matched nothing at all: swap one word for
+// a real name that is a single edit away and search again. A full sweep of the
+// word list costs ~10ms, which is affordable precisely because it cannot happen
+// on a keystroke that found something. Results come back in fame order — with a
+// misspelling there is no match quality left to rank by.
+function pRescue(nq, excl) {
+  const toks = nq.split(" ").filter(tk => tk.length > 3);  // too short to correct meaningfully
+  if (!toks.length) return [];
+  toks.sort((a, b) => b.length - a.length);  // the longest word carries the most signal
+  const words = pWords(), seen = new Set(), out = [];
+  for (const tk of toks) {
+    const alts = [];
+    for (const w of words) if (w.length && w !== tk && near1(w, tk)) alts.push(w);
+    for (const alt of alts.slice(0, 10)) {
+      for (const id of playerMatches(nq.replace(tk, alt), excl, false)) {
+        if (!seen.has(id)) { seen.add(id); out.push(id); }
+      }
+    }
+    if (out.length) break;
+  }
+  return out.sort((a, b) => DB.fame[b] - DB.fame[a]).slice(0, SUGG);
 }
 
 // a player row over two lines: name and birth year, then the clubs. The clubs are
