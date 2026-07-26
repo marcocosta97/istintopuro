@@ -555,7 +555,9 @@ body.quiz {
 #qhbtns button {  /* readable, actionable chips — not the anonymous grey they were */
   cursor: pointer; color: var(--accent); background: var(--hit);
   border: 1px solid var(--accent); border-radius: 7px; font: inherit; font-size: .82rem; font-weight: 500;
-  padding: .18rem .6rem; white-space: nowrap;
+  /* asymmetric: Apple Color Emoji bakes extra whitespace into the left of 💡,
+     so equal CSS padding still reads left-heavy on iOS/Mac Safari */
+  padding: .18rem .6rem .18rem .45rem; white-space: nowrap;
 }
 /* the #1/#2 on the paired identikits: still a footnote, but a chip label is
    already small — shrink it less than the "+N" on a full-size stage row, and
@@ -584,7 +586,7 @@ body.quiz {
   /* left-aligned and tight so all three fit one line down to ~360px; flex-end
      used to strand the third chip on a second line with a gap beside it */
   #qhbtns { flex-basis: 100%; flex-wrap: wrap; justify-content: flex-start; gap: .28rem; row-gap: .35rem; margin-left: 0; }
-  #qhbtns button { padding: .16rem .38rem; font-size: .75rem; }
+  #qhbtns button { padding: .16rem .38rem .16rem .28rem; font-size: .75rem; }
 }
 @media (prefers-reduced-motion: no-preference) {
   #qcard.shake { animation: qshake .3s; }
