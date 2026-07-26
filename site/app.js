@@ -383,13 +383,11 @@ const matches = (q) => mode === "club" ? clubMatches(q) : playerMatches(q);
 // "sociedad" the reverse — Huesca starts with it, Real Sociedad merely contains
 // it as a word. Neither reading deserves to win on shape alone, so both defer to
 // the marquee list and squad size, which is what those signals are for.
-// `pad` is the space-padded form of `n`, precomputed in boot(); `word` and `whole`
-// are " nq" and " nq " built once per query. Returns 99 for no match, so callers
-// can Math.min freely.
-function clubTier(n, pad, nq, word, whole) {
+// `pad` is the space-padded form of `n`, precomputed in boot(); `word` is " nq",
+// built once per query. Returns 99 for no match, so callers can Math.min freely.
+function clubTier(n, pad, nq, word) {
   if (n === nq) return T_NAME;
-  if (n.startsWith(nq) || (whole && pad.includes(whole))) return T_WORD;
-  if (pad.includes(word)) return T_PREFIX;
+  if (pad.includes(word)) return T_WORD;  // any word starts with the query
   return n.includes(nq) ? T_INFIX : 99;
 }
 
@@ -397,11 +395,11 @@ function clubMatches(q, rescue = true) {
   const nq = norm(q);
   if (!nq) return [];
   const toks = nq.split(" ");
-  const word = " " + nq, whole = nq.length >= 3 ? word + " " : "";
+  const word = " " + nq;
   const out = [];
   // a club answers to its full name, its name minus legal-form tokens, its
   // initials and its aliases — score against all of them and keep the best
-  const tier = (n, p) => clubTier(n, p, nq, word, whole);
+  const tier = (n, p) => clubTier(n, p, nq, word);
   for (let i = 0; i < DB.clubs.length; i++) {
     if (clubIds.includes(i)) continue;
     let rank = Math.min(tier(DB.searchNames[i], DB.padNames[i]), tier(DB.sortNames[i], DB.padSort[i]));
@@ -416,15 +414,17 @@ function clubMatches(q, rescue = true) {
     if (rank > T_ALL && toks.length > 1
         && toks.every(tk => DB.padNames[i].includes(" " + tk))) rank = T_ALL;
     if (rank > T_INFIX) continue;
-    const c = DB.clubs[i];  // clubs currently in a covered league outrank lower-tier and dissolved ones
-    const cur = !c[4] && (c[5] ?? -1) >= 0 ? 0 : 1;
+    const c = DB.clubs[i];
+    // first division, then second, then everything outside the covered leagues —
+    // "socie" should not answer four out-of-league Sociedads before Real Sociedad
+    const div = c[4] || (c[5] ?? -1) < 0 ? 2 : DB.leagues[c[5]][1] - 1;
     // squad size alone can't rank a shared word: "united" and "city" are Sheffield
     // and Birmingham by roster, Manchester by everything a searcher means
     const mq = MARQUEE.has(c[3]) ? 0 : 1;
-    out.push([rank, DB.postings[i].length, i, c[4] ? 1 : 0, cur, mq, al]);
+    out.push([rank, DB.postings[i].length, i, c[4] ? 1 : 0, div, mq, al]);
   }
-  // best rank, then current-league > alive > dissolved, marquee ahead, named
-  // before aliased, then bigger clubs
+  // best rank, then division, marquee ahead, named before aliased, alive before
+  // dissolved, then bigger clubs
   const ids = out.sort((a, b) => a[0] - b[0] || a[4] - b[4] || a[5] - b[5]
                               || a[6] - b[6] || a[3] - b[3] || b[1] - a[1])
                  .slice(0, SUGG).map(x => x[2]);
@@ -577,10 +577,15 @@ function hilite(name, nq) {
   return html + esc(name.slice(at));
 }
 
-// match tiers, best first. Splitting a whole word from a word PREFIX is what
-// separates Jonathan David from Alan Davidson on "david" — the old ranking
-// scored both as an equally good hit.
-const T_NAME = 0, T_WORD = 1, T_START = 2, T_PREFIX = 3, T_ALL = 4, T_INFIX = 5;
+// Match tiers, best first: the whole name, then any word starting with the query,
+// then every query word matched out of order, then anywhere inside a word.
+// Deliberately coarse. Finer shapes — a WHOLE word beating a word prefix, a name
+// start beating a later word — all assume the query is finished, which in a
+// type-ahead it usually isn't: they answered "beck" with Christian Beck and no
+// Beckham, "maldi" with Maldini Kacurri above Paolo Maldini, "ibrahi" with five
+// Ibrahimas and no Zlatan. Fame (players) and division/stature (clubs) rank
+// within a tier, and they know which name the searcher meant; the shape doesn't.
+const T_NAME = 0, T_WORD = 1, T_ALL = 2, T_INFIX = 3;
 
 // hits come out of indexOf in increasing position, so the id cursor only moves
 // forward — no binary search per hit
@@ -631,20 +636,15 @@ function playerMatches(q, excl = playerIds, rescue = true) {  // quiz mode passe
     worst = ranks[ids.length - 1];
   };
 
-  // pass 1 — the query as a contiguous word start, which covers tiers 0..3.
-  // One or two characters are an initial or a nobiliary particle, never a name,
-  // so matching one *exactly* is no evidence: below three characters the whole-
-  // word tier is switched off, or "ma" answers Ma Mingyu before Marcus Rashford
-  // and "de" answers Óscar de Paula before Rodrigo De Paul.
-  const end = nq.length + 1, wordy = nq.length >= 3;
+  // pass 1 — any word starting with the query, which covers tiers 0 and 1
+  const end = nq.length + 1;
   pScan(" " + nq, (p, i) => {
     if (mark[i] === gen) return;
     mark[i] = gen;
-    const atStart = p === off[i], whole = blob.charCodeAt(p + end) === 32;
-    push(atStart && whole && p + end === off[i + 1] ? T_NAME
-       : whole && wordy ? T_WORD : atStart ? T_START : T_PREFIX, i);
+    const whole = p === off[i] && blob.charCodeAt(p + end) === 32 && p + end === off[i + 1];
+    push(whole ? T_NAME : T_WORD, i);
   });
-  const full = () => ids.length === SUGG && worst <= T_PREFIX;
+  const full = () => ids.length === SUGG && worst <= T_WORD;
 
   // pass 2 — every query word matches SOME name word, in any order: "silva david"
   // and "david jonathan" found nothing at all before this
