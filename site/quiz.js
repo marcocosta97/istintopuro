@@ -1049,7 +1049,7 @@ function qOpenPlayer(pid) {
 // club/player mode (even the mode===m no-op click) closes the quiz view
 function qEnter() {
   if (!DB || document.body.classList.contains("quiz")) return;
-  DB.pNorm ||= DB.names.map(norm);  // guess box searches all players, like player mode
+  pIndex();  // guess box searches all players, like player mode
   if (!qBuilt) { qBuild(); qBuilt = true; }
   // restore the same board a club/player detour left behind: a past replay if one
   // was open, else today's live game (a stale replay date that has become today
@@ -1109,7 +1109,7 @@ document.addEventListener("dbready", () => {
     for (let n = a0; n < num; n += 15) { const d = qShift(today, n - num); steps.push(() => qStagesFor(d)); }
     steps.push(() => qStagesFor(today));
   }
-  steps.push(() => DB.pNorm ||= DB.names.map(norm));
+  steps.push(pIndex);
   const idle = (fn) => window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 5000 }) : setTimeout(fn, 1200);
   const next = () => { const s = steps.shift(); if (s) { s(); idle(next); } };
   idle(next);

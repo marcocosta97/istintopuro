@@ -222,7 +222,7 @@ function setMode(m) {
   $("controls").hidden = m === "player";
   if (m === "player") {
     $("advbody").hidden = true;
-    DB.pNorm ||= DB.names.map(norm);  // one-time (~62k names), on the toggle click, not per keystroke
+    pIndex();  // one-time (~69k names), on the toggle click, not per keystroke
   } else $("advbody").hidden = $("advtoggle").getAttribute("aria-expanded") !== "true";
   applyLang();  // mode-aware: swaps tagline/placeholder, re-renders chips + results
   focusSearch();
@@ -366,6 +366,7 @@ function postings(ci) {
 }
 
 // ---------------------------------------------------------------- search
+const SUGG = 8;  // suggestion rows offered
 const matches = (q) => mode === "club" ? clubMatches(q) : playerMatches(q);
 
 function clubMatches(q) {
@@ -381,26 +382,161 @@ function clubMatches(q) {
     else if (DB.aliasNorm[i].some(a => a.startsWith(nq))) rank = 0;
     const c = DB.clubs[i];  // clubs currently in a covered league outrank lower-tier and dissolved ones
     const cur = !c[4] && (c[5] ?? -1) >= 0 ? 0 : 1;
-    if (rank >= 0) out.push([rank, DB.postings[i].length, i, c[4] ? 1 : 0, cur]);
+    // squad size alone can't rank a shared word: "united" and "city" are Sheffield
+    // and Birmingham by roster, Manchester by everything a searcher means
+    const mq = MARQUEE.has(c[3]) ? 0 : 1;
+    if (rank >= 0) out.push([rank, DB.postings[i].length, i, c[4] ? 1 : 0, cur, mq]);
   }
-  // best rank first, then current-league > alive > dissolved, then bigger clubs first
-  return out.sort((a, b) => a[0] - b[0] || a[4] - b[4] || a[3] - b[3] || b[1] - a[1]).slice(0, 8).map(x => x[2]);
+  // best rank, then current-league > alive > dissolved, marquee ahead, then bigger clubs
+  return out.sort((a, b) => a[0] - b[0] || a[4] - b[4] || a[5] - b[5] || a[3] - b[3] || b[1] - a[1])
+            .slice(0, SUGG).map(x => x[2]);
 }
 
-function playerMatches(q, excl = playerIds) {  // quiz mode passes its own exclusions
-  const nq = norm(q), word = " " + nq;
-  if (!nq) return [];
-  const out = [];
-  for (let i = 0; i < DB.pNorm.length; i++) {
-    if (excl.includes(i)) continue;
-    const n = DB.pNorm[i];
-    let rank = -1;
-    if (n.startsWith(nq) || n.includes(word)) rank = 0;  // full-name or surname/word prefix
-    else if (n.includes(nq)) rank = 1;
-    if (rank >= 0) out.push([rank, DB.imgs[i] ? 0 : 1, i]);  // a photo is a cheap notability proxy
+// ------------------------------------------------------------ player name index
+// Every normalised name, space-separated and concatenated into one blob, plus the
+// offset each starts at. A query then scans with String.indexOf over ~1.1 MB —
+// which every engine does at memory speed — instead of running 69k JS-level
+// String.includes calls per keystroke. Each name is stored with a LEADING space
+// and the blob ends with one, so " " + query finds every word start (a name's
+// first word included) and the char just past a match tells a whole word from a
+// prefix. Costs ~180 ms once; the quiz's idle warm pays it before anyone types.
+function pIndex() {
+  if (DB.pBlob) return;
+  const n = DB.names.length, off = new Int32Array(n + 1), parts = new Array(n);
+  let pos = 0;
+  for (let i = 0; i < n; i++) {
+    const s = " " + norm(DB.names[i]);
+    parts[i] = s; off[i] = pos; pos += s.length;
   }
-  return out.sort((a, b) => a[0] - b[0] || a[1] - b[1]
-    || DB.names[a[2]].localeCompare(DB.names[b[2]])).slice(0, 8).map(x => x[2]);
+  off[n] = pos;
+  DB.pOff = off;
+  DB.pBlob = parts.join("") + " ";
+  DB.pMark = new Int32Array(n);  // per-query dedupe marks, see pGen
+  pFame();
+}
+
+// Global recognisability: the club-independent sibling of quiz.js's qFame, with
+// the same stature-weighted appearances, goals, era and recency terms — summed
+// over the whole covered career instead of one puzzle pair. It exists to order
+// suggestions: "david" has 897 word-level matches, and without a fame signal the
+// top eight are whoever sorts first in the alphabet, which is how Jonathan David
+// stayed unreachable behind David Abraham and David Aganzo.
+const pEra = (b) => b >= 1970 ? 1 : b >= 1955 ? 0.85 : b >= 1940 ? 0.65 : 0.45;
+const pRec = (age) => age <= 28 ? 200 : age <= 32 ? 150 : age <= 36 ? 90 : age <= 41 ? 45 : 10;
+function pFame() {
+  if (DB.fame) return DB.fame;
+  const n = DB.names.length;
+  const apps = new Float32Array(n), goals = new Float32Array(n), mApps = new Float32Array(n);
+  DB.clubs.forEach((c, ci) => {
+    const w = stature(ci), mq = MARQUEE.has(c[3]);
+    const arr = postings(ci), ap = DB.apps[ci], gl = DB.goals[ci];
+    for (let i = 0; i < arr.length; i++) {
+      const p = arr[i];
+      if (ap[i] > 0) { apps[p] += w * ap[i]; if (mq) mApps[p] += w * ap[i]; }
+      if (gl[i] > 0 && !DB.gkSet.has(p)) goals[p] += w * gl[i];  // gk goal qualifiers are unreliable
+    }
+  });
+  const year = +(DB.built || "").slice(0, 4) || new Date().getFullYear();
+  const fame = DB.fame = new Float32Array(n);
+  for (let p = 0; p < n; p++) {
+    const b = DB.births[p], age = b ? year - b : 99;
+    const rec = pRec(age) * Math.min(1, (apps[p] || 12) / 25);  // unknown apps: keep a sliver
+    fame[p] = rec + pEra(b) * (0.75 * Math.min(apps[p], 400) + 3 * Math.min(goals[p], 90)
+      + 0.35 * Math.min(mApps[p], 300)) + (DB.imgs[p] ? 20 : 0);
+  }
+  return fame;
+}
+
+// match tiers, best first. Splitting a whole word from a word PREFIX is what
+// separates Jonathan David from Alan Davidson on "david" — the old ranking
+// scored both as an equally good hit.
+const T_NAME = 0, T_WORD = 1, T_START = 2, T_PREFIX = 3, T_ALL = 4, T_INFIX = 5;
+
+// hits come out of indexOf in increasing position, so the id cursor only moves
+// forward — no binary search per hit
+function pScan(needle, cb) {
+  const blob = DB.pBlob, off = DB.pOff, last = DB.names.length - 1;
+  let i = 0, p = blob.indexOf(needle);
+  while (p >= 0) {
+    while (i < last && off[i + 1] <= p) i++;
+    cb(p, i);
+    p = blob.indexOf(needle, p + 1);
+  }
+}
+// does name `i` have a word starting with `tk`? Bounded manual scan on purpose:
+// String.indexOf takes no end limit, so a miss would sweep the rest of the blob
+// — once per candidate, that is the whole index re-read.
+function pHasWord(i, tk) {
+  const blob = DB.pBlob, hi = DB.pOff[i + 1], L = tk.length;
+  for (let p = DB.pOff[i]; p + L < hi; p++) {
+    if (blob.charCodeAt(p) !== 32) continue;
+    let k = 0;
+    while (k < L && blob.charCodeAt(p + 1 + k) === tk.charCodeAt(k)) k++;
+    if (k === L) return true;
+  }
+  return false;
+}
+
+let pGen = 0;
+function playerMatches(q, excl = playerIds) {  // quiz mode passes its own exclusions
+  pIndex();
+  const nq = norm(q);
+  if (!nq) return [];
+  const blob = DB.pBlob, off = DB.pOff, mark = DB.pMark, fame = DB.fame;
+  const gen = ++pGen;
+  for (const i of excl) mark[i] = gen;  // exclusions ride the same marks as dedupe
+
+  // bounded insertion instead of sorting every hit: "a" matches 55k names, and
+  // all but the best SUGG of them are dead weight
+  const ids = [], ranks = [];
+  let worst = T_INFIX + 1;
+  const better = (rA, iA, rB, iB) => rA !== rB ? rA < rB
+    : fame[iA] !== fame[iB] ? fame[iA] > fame[iB]
+    : DB.names[iA].localeCompare(DB.names[iB]) < 0;
+  const push = (rank, id) => {
+    if (ids.length === SUGG && !better(rank, id, worst, ids[SUGG - 1])) return;
+    let k = ids.length < SUGG ? ids.length : SUGG - 1;
+    while (k > 0 && better(rank, id, ranks[k - 1], ids[k - 1])) { ids[k] = ids[k - 1]; ranks[k] = ranks[k - 1]; k--; }
+    ids[k] = id; ranks[k] = rank;
+    worst = ranks[ids.length - 1];
+  };
+
+  // pass 1 — the query as a contiguous word start, which covers tiers 0..3.
+  // One or two characters are an initial or a nobiliary particle, never a name,
+  // so matching one *exactly* is no evidence: below three characters the whole-
+  // word tier is switched off, or "ma" answers Ma Mingyu before Marcus Rashford
+  // and "de" answers Óscar de Paula before Rodrigo De Paul.
+  const end = nq.length + 1, wordy = nq.length >= 3;
+  pScan(" " + nq, (p, i) => {
+    if (mark[i] === gen) return;
+    mark[i] = gen;
+    const atStart = p === off[i], whole = blob.charCodeAt(p + end) === 32;
+    push(atStart && whole && p + end === off[i + 1] ? T_NAME
+       : whole && wordy ? T_WORD : atStart ? T_START : T_PREFIX, i);
+  });
+  const full = () => ids.length === SUGG && worst <= T_PREFIX;
+
+  // pass 2 — every query word matches SOME name word, in any order: "silva david"
+  // and "david jonathan" found nothing at all before this
+  const toks = nq.split(" ");
+  if (toks.length > 1 && !full()) {
+    // anchor on the longest word: fewest hits to verify the others against
+    const ai = toks.reduce((a, b, k) => toks[a].length >= b.length ? a : k, 0);
+    const rest = toks.filter((_, k) => k !== ai);
+    pScan(" " + toks[ai], (p, i) => {
+      if (mark[i] === gen || !rest.every(tk => pHasWord(i, tk))) return;
+      mark[i] = gen;
+      push(T_ALL, i);
+    });
+  }
+  // pass 3 — anywhere inside a word ("brahim" for Ibrahimović). Skipped once the
+  // list is full of better tiers, which is the common case.
+  if (!full()) pScan(nq, (p, i) => {
+    if (mark[i] === gen) return;
+    mark[i] = gen;
+    push(T_INFIX, i);
+  });
+  return ids;
 }
 
 let cursor = -1;
