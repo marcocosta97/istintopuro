@@ -366,7 +366,7 @@ function postings(ci) {
 }
 
 // ---------------------------------------------------------------- search
-const SUGG = 8;  // suggestion rows offered
+const SUGG = 12;  // suggestion rows offered; the dropdown scrolls past ~6
 const matches = (q) => mode === "club" ? clubMatches(q) : playerMatches(q);
 
 function clubMatches(q) {
@@ -445,6 +445,69 @@ function pFame() {
       + 0.35 * Math.min(mApps[p], 300)) + (DB.imgs[p] ? 20 : 0);
   }
   return fame;
+}
+
+// player -> the clubs they turn up at, as one flat CSR-style pair of arrays. A
+// name on its own often isn't enough to recognise anyone: this dataset holds
+// three players called David Silva, all born 1986, and only the clubs tell them
+// apart. Built on demand — the postings are already decoded by then (pFame).
+function pClubIndex() {
+  if (DB.pcAt) return;
+  const n = DB.names.length, at = new Int32Array(n + 1);
+  DB.clubs.forEach((c, ci) => { for (const p of postings(ci)) at[p + 1]++; });
+  for (let i = 0; i < n; i++) at[i + 1] += at[i];
+  const club = new Int32Array(at[n]), apps = new Int32Array(at[n]), fill = at.slice(0, n);
+  DB.clubs.forEach((c, ci) => {
+    const arr = postings(ci), ap = DB.apps[ci];
+    for (let i = 0; i < arr.length; i++) { const k = fill[arr[i]]++; club[k] = ci; apps[k] = ap[i]; }
+  });
+  DB.pcAt = at; DB.pcClub = club; DB.pcApps = apps;
+}
+// the clubs a suggestion row names: most appearances first, short FM-style names
+function pClubs(pid, max) {
+  pClubIndex();
+  const out = [];
+  for (let k = DB.pcAt[pid]; k < DB.pcAt[pid + 1]; k++) out.push([DB.pcApps[k], DB.pcClub[k]]);
+  return out.sort((a, b) => b[0] - a[0]).slice(0, max).map(x => coreClub(DB.clubs[x[1]][0]));
+}
+
+// norm() is not length-preserving (ß -> ss, punctuation -> space, runs collapse),
+// so a hit found in the normalised text can't be sliced out of the original by
+// offset. Rebuild the normalisation here character by character, keeping a map
+// back to the source index, and highlight against that instead of guessing.
+function normMap(s) {
+  const map = [];
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const c = (TRANSLIT[s[i]] || s[i]).normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .toLowerCase().replace(/[^a-z0-9]+/g, " ");
+    for (const ch of c) {
+      if (ch !== " ") { out += ch; map.push(i); }
+      else if (out && out[out.length - 1] !== " ") { out += ch; map.push(i); }
+    }
+  }
+  if (out.endsWith(" ")) { out = out.slice(0, -1); map.pop(); }
+  return { n: out, map };
+}
+// bold whatever the query matched, so a long name shows at a glance WHY it is here
+function hilite(name, nq) {
+  if (!nq) return esc(name);
+  const { n, map } = normMap(name), spans = [];
+  for (const tk of nq.split(" ")) {
+    if (!tk) continue;
+    const w = n.indexOf(" " + tk);
+    const p = w >= 0 ? w + 1 : n.startsWith(tk) ? 0 : n.indexOf(tk);
+    if (p >= 0) spans.push([map[p], map[Math.min(p + tk.length, n.length) - 1] + 1]);
+  }
+  if (!spans.length) return esc(name);
+  spans.sort((a, b) => a[0] - b[0]);
+  let html = "", at = 0;
+  for (const [s, e] of spans) {
+    if (s < at) continue;  // overlapping tokens: keep the first, drop the rest
+    html += esc(name.slice(at, s)) + "<b>" + esc(name.slice(s, e)) + "</b>";
+    at = e;
+  }
+  return html + esc(name.slice(at));
 }
 
 // match tiers, best first. Splitting a whole word from a word PREFIX is what
@@ -539,8 +602,19 @@ function playerMatches(q, excl = playerIds) {  // quiz mode passes its own exclu
   return ids;
 }
 
+// a player row over two lines: name and birth year, then the clubs. The clubs are
+// what make a half-remembered name recognisable — "Jonathan David" means nothing
+// to someone who only recalls Lille and Juventus.
+function playerRow(id, nq) {
+  const clubs = pClubs(id, 3).map(esc).join(" · ");
+  return `<span class="s-row"><span>${flag(DB.nats[id])} ${hilite(DB.names[id], nq)}</span>`
+       + `<small>${DB.births[id] || ""}</small></span>`
+       + (clubs ? `<small class="s-sub">${clubs}</small>` : "");
+}
+
 let cursor = -1;
-function renderSuggestions(ids) {
+function renderSuggestions(ids, q = "") {
+  const nq = norm(q);
   sugg.innerHTML = "";
   sugg.hidden = ids.length === 0;
   cursor = ids.length ? 0 : -1;
@@ -548,10 +622,12 @@ function renderSuggestions(ids) {
     const li = document.createElement("li");
     if (mode === "club") {
       const c = DB.clubs[id];
-      li.innerHTML = `<span>${countryFlag(c[1])} ${esc(c[0])}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
-    } else  // birth year in the meta slot disambiguates homonyms
-      li.innerHTML = `<span>${flag(DB.nats[id])} ${esc(DB.names[id])}</span><small>${DB.births[id] || ""}</small>`;
-    li.className = i === cursor ? "active" : "";
+      li.innerHTML = `<span>${countryFlag(c[1])} ${hilite(c[0], nq)}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
+    } else {
+      li.innerHTML = playerRow(id, nq);
+      li.classList.add("two");
+    }
+    if (i === cursor) li.classList.add("active");
     li.onmousedown = (e) => { e.preventDefault(); addSel(id); };
     sugg.appendChild(li);
   });
@@ -562,14 +638,14 @@ function leagueNames(mask) {
   return DB.leagues.filter((_, i) => mask & (1 << i)).map(l => l[0]).join(" · ");
 }
 
-search.addEventListener("input", () => { browseOpen(false); renderSuggestions(matches(search.value)); });
+search.addEventListener("input", () => { browseOpen(false); renderSuggestions(matches(search.value), search.value); });
 search.addEventListener("keydown", (e) => {
   const items = [...sugg.children];
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault();
     if (!items.length) return;
     cursor = (cursor + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
-    items.forEach((li, i) => li.className = i === cursor ? "active" : "");
+    items.forEach((li, i) => li.classList.toggle("active", i === cursor));
   } else if ((e.key === "Enter" || e.key === "Tab") && cursor >= 0 && !sugg.hidden) {
     e.preventDefault();  // Tab confirms like Enter instead of leaving the field
     addSel(matches(search.value)[cursor]);

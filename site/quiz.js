@@ -574,14 +574,14 @@ function qBuild() {  // static skeleton, rendered once on first entry
     <div id="qcal"></div>`;
   $("qcal-open").onclick = () => qCalOpen(true);
   const qse = $("qsearch");
-  qse.addEventListener("input", () => qSuggest(playerMatches(qse.value, [])));
+  qse.addEventListener("input", () => qSuggest(playerMatches(qse.value, []), qse.value));
   qse.addEventListener("keydown", (e) => {
     const items = [...$("qsugg").children];
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       if (!items.length) return;
       qCur = (qCur + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
-      items.forEach((li, i) => li.className = i === qCur ? "active" : "");
+      items.forEach((li, i) => li.classList.toggle("active", i === qCur));
     } else if ((e.key === "Enter" || e.key === "Tab") && qCur >= 0 && !$("qsugg").hidden) {
       e.preventDefault();
       qPick(playerMatches(qse.value, [])[qCur]);
@@ -623,14 +623,16 @@ function qResign() {
 }
 
 let qCur = -1;
-function qSuggest(ids) {  // same look as the solver's player suggestions
-  const ul = $("qsugg");
+// Deliberately NOT the solver's two-line row: naming a candidate's clubs here
+// would answer the puzzle outright. Birth year only, plus the match highlight.
+function qSuggest(ids, q = "") {
+  const ul = $("qsugg"), nq = norm(q);
   ul.innerHTML = "";
   ul.hidden = ids.length === 0;
   qCur = ids.length ? 0 : -1;
   ids.forEach((pid, i) => {
     const li = document.createElement("li");
-    li.innerHTML = `<span>${flag(DB.nats[pid])} ${esc(DB.names[pid])}</span><small>${DB.births[pid] || ""}</small>`;
+    li.innerHTML = `<span>${flag(DB.nats[pid])} ${hilite(DB.names[pid], nq)}</span><small>${DB.births[pid] || ""}</small>`;
     li.className = i === qCur ? "active" : "";
     li.onmousedown = (e) => { e.preventDefault(); qPick(pid); };
     ul.appendChild(li);

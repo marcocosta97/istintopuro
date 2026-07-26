@@ -171,6 +171,15 @@ h1 .accent { color: var(--accent); }
 #suggestions li small { color: var(--muted); text-align: right; }
 .defunct { color: var(--muted); font-size: .82em; white-space: nowrap; }
 #suggestions li.active, #suggestions li:hover { background: var(--hit); }
+/* two-line player row: name + birth year, then the clubs that place the name */
+#suggestions li.two { flex-direction: column; align-items: stretch; gap: .05rem; }
+.s-row { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; }
+#suggestions li .s-sub {
+  text-align: left; font-size: .82em; line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* the matched span: the reason this row is in the list */
+#suggestions b, #qsugg b { font-weight: 600; color: var(--accent); }
 
 /* FM-style team browser: country › league › current clubs (Others = out of league) */
 #browse {
