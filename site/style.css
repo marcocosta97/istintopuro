@@ -134,6 +134,9 @@ h1 .accent { color: var(--accent); }
 .chip button {
   all: unset; cursor: pointer; padding: 0 .3rem; color: var(--muted); font-size: 1rem;
 }
+/* the right padding above is short because the × button carries its own .3rem.
+   The quiz's chips are read-only, so without this they sit visibly off-centre. */
+.chip:not(:has(button)) { padding-right: .6rem; }
 .chip button:hover { color: var(--fg); }
 .clearchip {  /* ghost chip at the end of the row: clears the whole selection */
   cursor: pointer; font: inherit; font-size: .8rem; color: var(--muted);
