@@ -343,6 +343,12 @@ async function boot() {
   DB.sortNames = DB.clubs.map(c => sortName(c[0]));
   DB.searchInitials = DB.clubs.map(c => initialsOf(c[0]));
   DB.aliasNorm = DB.clubs.map(c => (ALIASES[c[3]] || []).map(norm));
+  // space-padded copies so clubMatches can test word boundaries without building
+  // a new string per club per keystroke
+  const pad = (s) => " " + s + " ";
+  DB.padNames = DB.searchNames.map(pad);
+  DB.padSort = DB.sortNames.map(pad);
+  DB.padAlias = DB.aliasNorm.map(a => a.map(pad));
   DB.byQid = new Map(DB.clubs.map((c, i) => [c[3], i]));  // hash restore + example queries
   clubIds = location.hash.slice(1).split(",").map(q => DB.byQid.get(q)).filter(i => i !== undefined);
   search.disabled = false;
@@ -369,27 +375,88 @@ function postings(ci) {
 const SUGG = 12;  // suggestion rows offered; the dropdown scrolls past ~6
 const matches = (q) => mode === "club" ? clubMatches(q) : playerMatches(q);
 
-function clubMatches(q) {
+// Where `nq` lands in one candidate string, on the ladder the player search uses
+// (T_NAME … T_INFIX). 474 clubs is small enough that plain string tests beat any
+// index — the whole search runs in well under a millisecond.
+// Unlike the player ladder, a whole word and a name start share ONE tier here:
+// "juve" is a whole word of Juve Stabia but only a prefix of Juventus, and
+// "sociedad" the reverse — Huesca starts with it, Real Sociedad merely contains
+// it as a word. Neither reading deserves to win on shape alone, so both defer to
+// the marquee list and squad size, which is what those signals are for.
+// `pad` is the space-padded form of `n`, precomputed in boot(); `word` and `whole`
+// are " nq" and " nq " built once per query. Returns 99 for no match, so callers
+// can Math.min freely.
+function clubTier(n, pad, nq, word, whole) {
+  if (n === nq) return T_NAME;
+  if (n.startsWith(nq) || (whole && pad.includes(whole))) return T_WORD;
+  if (pad.includes(word)) return T_PREFIX;
+  return n.includes(nq) ? T_INFIX : 99;
+}
+
+function clubMatches(q, rescue = true) {
   const nq = norm(q);
   if (!nq) return [];
+  const toks = nq.split(" ");
+  const word = " " + nq, whole = nq.length >= 3 ? word + " " : "";
   const out = [];
+  // a club answers to its full name, its name minus legal-form tokens, its
+  // initials and its aliases — score against all of them and keep the best
+  const tier = (n, p) => clubTier(n, p, nq, word, whole);
   for (let i = 0; i < DB.clubs.length; i++) {
     if (clubIds.includes(i)) continue;
-    let rank = -1;
-    if (DB.searchNames[i].startsWith(nq) || DB.sortNames[i].startsWith(nq)) rank = 0;
-    else if (DB.searchNames[i].includes(nq)) rank = 1;
-    else if (DB.searchInitials[i] === nq.replace(/ /g, "")) rank = 0;
-    else if (DB.aliasNorm[i].some(a => a.startsWith(nq))) rank = 0;
+    let rank = Math.min(tier(DB.searchNames[i], DB.padNames[i]), tier(DB.sortNames[i], DB.padSort[i]));
+    // `al` marks a club reached ONLY through an alias. It breaks ties late rather
+    // than costing a tier, so "monaco" answers AS Monaco before Bayern (aliased
+    // "bayern monaco") without dropping alias-only clubs off the list entirely.
+    let al = 0;
+    const av = DB.aliasNorm[i], ap = DB.padAlias[i];
+    for (let k = 0; k < av.length; k++) { const t = tier(av[k], ap[k]); if (t < rank) { rank = t; al = 1; } }
+    if (DB.searchInitials[i] === nq.replace(/ /g, "") && T_WORD < rank) { rank = T_WORD; al = 0; }
+    // every word matched, in any order: "madrid real" and "ham west" found nothing
+    if (rank > T_ALL && toks.length > 1
+        && toks.every(tk => DB.padNames[i].includes(" " + tk))) rank = T_ALL;
+    if (rank > T_INFIX) continue;
     const c = DB.clubs[i];  // clubs currently in a covered league outrank lower-tier and dissolved ones
     const cur = !c[4] && (c[5] ?? -1) >= 0 ? 0 : 1;
     // squad size alone can't rank a shared word: "united" and "city" are Sheffield
     // and Birmingham by roster, Manchester by everything a searcher means
     const mq = MARQUEE.has(c[3]) ? 0 : 1;
-    if (rank >= 0) out.push([rank, DB.postings[i].length, i, c[4] ? 1 : 0, cur, mq]);
+    out.push([rank, DB.postings[i].length, i, c[4] ? 1 : 0, cur, mq, al]);
   }
-  // best rank, then current-league > alive > dissolved, marquee ahead, then bigger clubs
-  return out.sort((a, b) => a[0] - b[0] || a[4] - b[4] || a[5] - b[5] || a[3] - b[3] || b[1] - a[1])
-            .slice(0, SUGG).map(x => x[2]);
+  // best rank, then current-league > alive > dissolved, marquee ahead, named
+  // before aliased, then bigger clubs
+  const ids = out.sort((a, b) => a[0] - b[0] || a[4] - b[4] || a[5] - b[5]
+                              || a[6] - b[6] || a[3] - b[3] || b[1] - a[1])
+                 .slice(0, SUGG).map(x => x[2]);
+  if (!rescue || (ids.length && out.some(x => x[0] < T_INFIX))) return ids;
+  return cRescue(nq, ids);  // "bayren", "dortmond" — same one-edit retry as the names
+}
+
+// the distinct words a club answers to, for the typo rescue (~900 of them)
+function cWords() {
+  if (DB.cWordList) return DB.cWordList;
+  const set = new Set();
+  const add = (n) => { for (const w of n.split(" ")) if (w.length > 3) set.add(w); };
+  DB.searchNames.forEach(add);
+  DB.aliasNorm.forEach(arr => arr.forEach(add));
+  return DB.cWordList = [...set];
+}
+function cRescue(nq, had) {
+  const toks = nq.split(" ").filter(tk => tk.length > 3);
+  if (!toks.length) return had;
+  toks.sort((a, b) => b.length - a.length);
+  const words = cWords(), seen = new Set(had), out = had.slice();
+  for (const tk of toks) {
+    const alts = [];
+    for (const w of words) if (w !== tk && near1(w, tk)) alts.push(w);
+    for (const alt of alts.slice(0, 10)) {
+      for (const id of clubMatches(nq.replace(tk, alt), false)) {
+        if (!seen.has(id)) { seen.add(id); out.push(id); }
+      }
+    }
+    if (out.length > had.length) break;
+  }
+  return out.slice(0, SUGG);
 }
 
 // ------------------------------------------------------------ player name index
