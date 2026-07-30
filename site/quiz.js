@@ -489,7 +489,9 @@ const QSTR = {
     qsBorn: (y) => `nato nel ${y}`,
     qsAtClub: "gioca ancora in una delle due squadre", qsActive: "ancora in attività",
     qsApps: (n) => `${n} pres`, qsGoals: (n) => `${n} gol`, qsGk: "portiere",
-    qOk: "Giusto!", qNo: "No…", qDup: "già provato",
+    qOk: "Giusto!", qDup: "già provato",
+    qNoNone: "No… non ha mai giocato per nessuna delle squadre",
+    qNoMissing: (l) => `No… non ha mai giocato per ${l.join(" o ")}`,
     qWon: "Schedina completata!", qLost: "Tentativi finiti.",
     qNewDay: "È mezzanotte: c'è una nuova schedina", qPlay: "gioca",
     qStartsOn: (d) => `La schedina del giorno inizia ${d}. Torna a giocare!`,
@@ -520,7 +522,9 @@ const QSTR = {
     qsAtClub: "still plays for one of the two clubs", qsActive: "still an active player",
     qsApps: (n) => `${n} app${n === 1 ? "" : "s"}`,
     qsGoals: (n) => `${n} goal${n === 1 ? "" : "s"}`, qsGk: "goalkeeper",
-    qOk: "Correct!", qNo: "No…", qDup: "already tried",
+    qOk: "Correct!", qDup: "already tried",
+    qNoNone: "No… played for none of them",
+    qNoMissing: (l) => `No… didn't play for ${l.join(" or ")}`,
     qWon: "Quiz completed!", qLost: "Out of guesses.",
     qNewDay: "It's past midnight: a new quiz is out", qPlay: "play it",
     qStartsOn: (d) => `The daily quiz starts ${d}. Come back to play!`,
@@ -639,14 +643,23 @@ function qSuggest(ids, q = "") {
   });
 }
 
+// which of the stage's (already-visible) clubs a wrong guess didn't play for —
+// no new info leaked, the chips are on screen already
+function qWrongMsg(pid, st) {
+  const q = QSTR[lang];
+  const missing = st.clubs.filter(ci => qApps(ci, pid) < 0).map(ci => coreClub(DB.clubs[ci][0]));
+  return missing.length === st.clubs.length ? q.qNoNone : q.qNoMissing(missing);
+}
+
 function qPick(pid) {
   if (pid === undefined) return;
   $("qsearch").value = "";
   $("qsugg").hidden = true;
+  const st = qPz.stages[qs.stage];
   const ev = qGuess(pid);
   if (ev === null) { qRender(); return; }  // frozen (rolled past midnight)
   const q = QSTR[lang], good = ev === "stage" || ev === "won";
-  qFlash(ev === "dup" ? q.qDup : good ? q.qOk : q.qNo, good ? "ok" : "no");
+  qFlash(ev === "dup" ? q.qDup : good ? q.qOk : qWrongMsg(pid, st), good ? "ok" : "no");
   if (ev === "wrong" || ev === "dup") {
     $("qcard").classList.remove("shake");
     void $("qcard").offsetWidth;  // restart the animation
@@ -661,7 +674,7 @@ function qFlash(text, cls) {
   const el = $("qmsg"), g = ++qMsgGen;
   el.textContent = text;
   el.className = cls;
-  setTimeout(() => { if (g === qMsgGen) { el.textContent = ""; el.className = ""; } }, 1800);
+  setTimeout(() => { if (g === qMsgGen) { el.textContent = ""; el.className = ""; } }, 3000);
 }
 
 const qClubNames = (st) => st.clubs.map(ci => coreClub(DB.clubs[ci][0])).join(" × ");
