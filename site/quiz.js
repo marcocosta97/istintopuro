@@ -39,6 +39,8 @@ const qLaunchLabel = () => {  // e.g. "lunedì 20 luglio" for the pre-launch mes
 // or Napoli × Man United (McTominay) play easy despite small intersections, while
 // two mid clubs whose only overlap is journeymen play hard. Each stage buckets by
 // a computed `ease` score; drawing from broad pools keeps clubs varied day to day.
+// A stage is normally 2 clubs; the two hardest ladders also draw 3-club variants
+// (see QHARD3/QIMP3), and everything from qEase down is club-count agnostic.
 // Pools in index order (stable within a build). Roster >= 30 is the fairness floor.
 function qPools() {
   if (DB.qPools) return DB.qPools;
@@ -98,7 +100,7 @@ const qRecBonus = (age) => age <= 28 ? 200 : age <= 32 ? 150 : age <= 36 ? 90 : 
 //          long-server maxed the old formula and headlined "medium" stages
 //   rec×   the recency bonus only counts if the player actually featured at the
 //          pair (a 0-app academy body was outscoring real answers)
-//   career fame earned at marquee clubs OUTSIDE the pair travels with the
+//   career fame earned at marquee clubs OUTSIDE the stage travels with the
 //          player, at a discount (Thuram at Parma × Barcelona read as a
 //          journeyman when only pair-local tallies counted)
 const qEra = (b) => b >= 1970 ? 1 : b >= 1955 ? 0.85 : b >= 1940 ? 0.65 : 0.45;
@@ -130,15 +132,19 @@ function qEase(clubs, answers) {
   const sup = (f) => Math.max(f - 250, 0);
   const f0 = top[0], f1 = top[1];
   let e = f0 + 0.3 * sup(f1) + 0.18 * sup(top[2]) + 0.1 * sup(top[3]) + Math.min(answers.length, 25) * 2;
-  const nMarquee = (MARQUEE.has(DB.clubs[clubs[0]][3]) ? 1 : 0) + (MARQUEE.has(DB.clubs[clubs[1]][3]) ? 1 : 0);
-  if (nMarquee < 2 && f1 < 430) e -= Math.min((430 - f1) * 1.5, 150);  // lone-star penalty
+  // marquee RATIO, not count, so a 3-club stage stays on the 2-club scale: at two
+  // clubs r = 1 / 0.5 / 0 reproduces the old nMarquee 2 / 1 / 0 branches exactly
+  // (verified identical over all 4623 non-empty pairs).
+  const r = clubs.filter(ci => MARQUEE.has(DB.clubs[ci][3])).length / clubs.length;
+  if (r < 1 && f1 < 430) e -= Math.min((430 - f1) * 1.5, 150) * Math.min((1 - r) * 2, 1);  // lone-star penalty
   // the Bundesliga and Ligue 1 are less globally followed — their players are
-  // harder to place, so those pairs read a notch harder (compounds when both are)
-  e *= qLeagueEase(clubs[0]) * qLeagueEase(clubs[1]);
+  // harder to place, so those clubs read a notch harder (compounds when several are).
+  // Geometric mean squared: the product would punish a triple for its club count alone.
+  e *= Math.pow(clubs.reduce((a, ci) => a * qLeagueEase(ci), 1), 2 / clubs.length);
   // easy leans on legend TEAMS more than on a lone legend player from a non-legend
-  // club: only near the easy line, boost two-marquee pairs and demote pairs missing
+  // club: only near the easy line, boost all-marquee stages and demote ones missing
   // a giant. Below this zone (all of medium/hard) nothing changes.
-  if (e >= 500) e += nMarquee === 2 ? 35 : -(2 - nMarquee) * 45;
+  if (e >= 500) e += r === 1 ? 35 : -(1 - r) * 90;
   return e;
 }
 const qLeagueEase = (ci) => { const cc = leagueCC(ci); return cc === "DE" || cc === "FR" ? 0.93 : 1; };
@@ -151,7 +157,8 @@ const qEffective = (clubs, answers) => answers.filter(p => !clubs.some(ci => qAp
 // per-stage constraint ladders: QT seeded attempts per tier, then relax. This
 // table is the whole difficulty tuning surface — rerun quizDebug() after
 // touching it or a dataset refresh. Fields per tier:
-//   p      the two clubs' pools ("star" big club, "field" = star ∪ sub, etc.)
+//   p      one pool name per club ("star" big club, "field" = star ∪ sub, etc.);
+//          its LENGTH is the club count, so a 3-entry tier asks a 3-club stage
 //   size   [min, max] answer-set size
 //   ease   [min, max) qEase band (absent = any); bands re-cut 2026-07 against
 //          the ground-truth anchors (Juve×Parma 546 easy … Athletic×Celta 413
@@ -179,6 +186,24 @@ const QIMPOSSIBLE = [  // obscure pool; more than one answer is fine as long as
   { p: ["obs", "any100"], size: [1, 3], ease: [-1e9, 440] },  // from turning known
 ];
 
+// 3-club variants of the two hardest ladders. A third club is a different FLAVOUR
+// of hard, not simply more of it: it shrinks the intersection toward journeymen,
+// so triples land in the hard band on their own (of the 3804 field triples with
+// >=2 answers, 1839 score 140-425) and need no bands of their own. Three giants
+// sharing exactly two players — Chelsea x Real x Barça is Eto'o and Marcos Alonso —
+// is a puzzle field x field structurally cannot produce.
+// A seeded daily coin prepends these; when nothing fits the band the day falls
+// through to the 2-club tiers below, so a stage can never fail for want of a triple.
+const Q3ODDS = 0.5;  // per ladder, per day — the whole frequency knob
+const QHARD3 = [
+  { p: ["field", "field", "field"], size: [2, 12], ease: [140, 370] },
+  { p: ["field", "field", "field"], size: [2, 15], ease: [90, 400] },
+];
+const QIMP3 = [
+  { p: ["obs", "any300", "any300"], size: [1, 2], ease: [-1e9, 360], birth: 1 },
+  { p: ["obs", "any300", "any100"], size: [1, 3], ease: [-1e9, 440] },
+];
+
 // balance across the leagues that produced a candidate (leagueCC, not nationality,
 // so Monaco counts as French), then pick UNIFORMLY within the league — with a wide
 // in-band pool this spreads clubs so none recurs daily
@@ -192,24 +217,25 @@ function qChoose(cands, rng, used) {
   return best;
 }
 
-const qPairKey = (a, b) => a < b ? a + "," + b : b + "," + a;
+const qComboKey = (clubs) => clubs.slice().sort((a, b) => a - b).join(",");
 function qStage(rng, ladder, used, banned) {
   const P = qPools();
   for (let ti = 0; ti < ladder.length; ti++) {
     const tier = ladder[ti];
-    const A = P[tier.p[0]].filter(i => !used.has(i));       // pools don't change within a tier
-    const B = P[tier.p[1]].filter(i => !used.has(i));
-    if (!A.length || B.length < 2) continue;
-    const cands = new Map();  // in-band fits this tier, deduped by pair
+    const pools = tier.p.map(p => P[p].filter(i => !used.has(i)));  // pools don't change within a tier
+    // slot k needs k+1 free clubs for a distinct draw to be possible at all
+    if (pools.some((pool, k) => pool.length < k + 1)) continue;
+    const cands = new Map();  // in-band fits this tier, deduped by combination
     for (let a = 0; a < QT; a++) {
-      const c0 = A[rng() * A.length | 0];
-      const c1 = B[rng() * B.length | 0];
-      if (c0 === c1 || banned.has(qPairKey(c0, c1))) continue;
-      const v = qPairInfo(c0, c1);
+      const clubs = pools.map(pool => pool[rng() * pool.length | 0]);
+      if (new Set(clubs).size !== clubs.length) continue;
+      const key = qComboKey(clubs);
+      if (banned.has(key)) continue;
+      const v = qComboInfo(clubs);
       if (v.n < tier.size[0] || v.n > tier.size[1]) continue;
       if (tier.birth && !v.b) continue;
       if (tier.ease && (v.ease < tier.ease[0] || v.ease >= tier.ease[1])) continue;
-      cands.set(qPairKey(c0, c1), { clubs: [c0, c1], tier: ti });
+      cands.set(key, { clubs, tier: ti });
     }
     if (cands.size) {
       const best = qChoose(cands, rng, used);
@@ -221,7 +247,7 @@ function qStage(rng, ladder, used, banned) {
   const pairs = [];
   for (let x = 0; x < P.star.length; x++) for (let y = x + 1; y < P.star.length; y++) {
     const [a, b] = [P.star[x], P.star[y]];
-    if (DB.clubs[a][1] === DB.clubs[b][1] && !used.has(a) && !used.has(b) && !banned.has(qPairKey(a, b))) pairs.push([a, b]);
+    if (DB.clubs[a][1] === DB.clubs[b][1] && !used.has(a) && !used.has(b) && !banned.has(qComboKey([a, b]))) pairs.push([a, b]);
   }
   for (let i = pairs.length - 1; i > 0; i--) { const j = rng() * (i + 1) | 0; [pairs[i], pairs[j]] = [pairs[j], pairs[i]]; }
   for (const p of pairs) {
@@ -230,24 +256,31 @@ function qStage(rng, ladder, used, banned) {
   }
 }
 
-const QLADDERS = [QEASY, QMEDIUM, QHARD, QIMPOSSIBLE];
 const qShift = (date, k) => {  // date string ± k days, UTC arithmetic like qNum
   const [y, m, d] = date.split("-").map(Number), t = new Date(Date.UTC(y, m - 1, d + k));
   return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`;
 };
-// pair facts qStage filters on, memoized: the chain replay below resamples the
-// same pairs thousands of times, and numbers are all the ladder checks need
-const qPairCache = new Map();
-function qPairInfo(c0, c1) {
-  const key = qPairKey(c0, c1);
-  let v = qPairCache.get(key);
+// combination facts qStage filters on, memoized: the chain replay below resamples
+// the same clubs thousands of times, and numbers are all the ladder checks need
+const qComboCache = new Map();
+function qComboInfo(clubs) {
+  const key = qComboKey(clubs);
+  let v = qComboCache.get(key);
   if (!v) {
-    const clubs = [c0, c1], eff = qEffective(clubs, intersect(clubs.map(postings)));
-    qPairCache.set(key, v = { n: eff.length, ease: qEase(clubs, eff), b: !!(eff.length && DB.births[eff[0]]) });
+    const eff = qEffective(clubs, intersect(clubs.map(postings)));
+    qComboCache.set(key, v = { n: eff.length, ease: qEase(clubs, eff), b: !!(eff.length && DB.births[eff[0]]) });
   }
   return v;
 }
-// repetition guard: no pair from the previous 10 days, no club from the previous
+// the day's four ladders. The two hardest each toss a seeded coin for their 3-club
+// variant; the coins are drawn BEFORE any stage so the rng stream stays a function
+// of the date alone, not of how many tiers a stage happened to try.
+function qLadders(rng) {
+  const hard3 = rng() < Q3ODDS, imp3 = rng() < Q3ODDS;
+  return [QEASY, QMEDIUM, hard3 ? [...QHARD3, ...QHARD] : QHARD,
+          imp3 ? [...QIMP3, ...QIMPOSSIBLE] : QIMPOSSIBLE];
+}
+// repetition guard: no combination from the previous 10 days, no club from the previous
 // 2. Each day is seeded from the ACTUAL previous schedules — an approximate
 // lookback proved leaky, because one day's deviation cascades. The chain is
 // replayed from a FIXED 90-day grid anchor (not from launch, and not a sliding
@@ -261,19 +294,20 @@ function qStagesFor(date) {
   const num = qNum(date);
   if (num < 1) {  // pre-launch dates (debug only): no history to guard against
     const rng = qRng(qHash(date)), used = new Set(), banned = new Set();
-    return QLADDERS.map(l => qStage(rng, l, used, banned));
+    return qLadders(rng).map(l => qStage(rng, l, used, banned));
   }
   const a0 = Math.floor((num - 1) / QWIN) * QWIN + 1;  // this window's first day
   for (let i = a0; i <= num; i++) {
     if (qChain[i]) continue;
     const rng = qRng(qHash(i === num ? date : qShift(date, i - num))), used = new Set(), banned = new Set();
+    const ladders = qLadders(rng);
     for (let k = Math.max(a0, i - 10); k < i; k++)
       for (const st of qChain[k]) {
         if (!st) continue;
-        banned.add(qPairKey(st.clubs[0], st.clubs[1]));
+        banned.add(qComboKey(st.clubs));
         if (i - k <= 2) st.clubs.forEach(ci => used.add(ci));
       }
-    qChain[i] = QLADDERS.map(l => qStage(rng, l, used, banned));
+    qChain[i] = ladders.map(l => qStage(rng, l, used, banned));
   }
   return qChain[num];
 }
@@ -487,7 +521,8 @@ const QSTR = {
     qsIni: (ini, dec) => `iniziali ${ini}` + (dec ? `, nato negli anni ${dec >= 2000 ? dec : "'" + String(dec).slice(2)}` : ""),
     qsCar: (l) => `è passato anche da ${l.join(" · ")}`,
     qsBorn: (y) => `nato nel ${y}`,
-    qsAtClub: "gioca ancora in una delle due squadre", qsActive: "ancora in attività",
+    qsAtClub: (n) => `gioca ancora in una delle ${n === 2 ? "due" : "tre"} squadre`,
+    qsActive: "ancora in attività",
     qsApps: (n) => `${n} pres`, qsGoals: (n) => `${n} gol`, qsGk: "portiere",
     qOk: "Giusto!", qDup: "già provato",
     qNoNone: "No… non ha mai giocato per nessuna delle squadre",
@@ -519,7 +554,8 @@ const QSTR = {
     qsIni: (ini, dec) => `initials ${ini}` + (dec ? `, born in the ${dec}s` : ""),
     qsCar: (l) => `also played for ${l.join(" · ")}`,
     qsBorn: (y) => `born in ${y}`,
-    qsAtClub: "still plays for one of the two clubs", qsActive: "still an active player",
+    qsAtClub: (n) => `still plays for one of the ${n === 2 ? "two" : "three"} clubs`,
+    qsActive: "still an active player",
     qsApps: (n) => `${n} app${n === 1 ? "" : "s"}`,
     qsGoals: (n) => `${n} goal${n === 1 ? "" : "s"}`, qsGk: "goalkeeper",
     qOk: "Correct!", qDup: "already tried",
@@ -779,7 +815,7 @@ function qRender() {
 
 // career facts for a hinted player, loaded lazily from the shard (async is fine
 // at hint time): still active / still at one of the puzzle clubs, the OTHER
-// clubs of the career, and the years of the spells at the pair.
+// clubs of the career, and the years of the spells at the stage's clubs.
 const qCareerNote = new Map();  // pid -> null (in flight) | {at, active, others, spans}
 async function qLoadCareer(pid, st) {
   if (qCareerNote.has(pid)) return;
@@ -792,7 +828,7 @@ async function qLoadCareer(pid, st) {
   const spells = career.filter(e => e[0]);  // [team, start, end, apps, goals, loan]
   const names = new Set(st.clubs.map(ci => DB.clubs[ci][0]));  // canonical names match within a build
   const open = spells.filter(sp => sp[1] && !sp[2]);  // started, no end recorded = ongoing
-  // the two clubs the player is best known for OUTSIDE the pair: a permanent
+  // the two clubs the player is best known for OUTSIDE the stage: a permanent
   // spell beats a loan, then the bigger tally, then the more recent one. Deduped
   // by name, since a return spell shows up twice.
   const seen = new Set();
@@ -800,7 +836,7 @@ async function qLoadCareer(pid, st) {
     .sort((a, b) => (a[5] ? 1 : 0) - (b[5] ? 1 : 0)
       || Math.max(b[3], 0) - Math.max(a[3], 0) || (b[1] || 0) - (a[1] || 0))
     .slice(0, 2).map(sp => coreClub(sp[0]));  // raw: qHintText escapes the whole line
-  // years at the pair, one entry per club with both ends recorded. A return
+  // years at the stage's clubs, one entry per club with both ends recorded. A return
   // spell is listed as a second range rather than merged: "1935–1936, 1944–1945"
   // is the truth, "1935–1945" would invent a decade at the club.
   const yrs = new Map();
@@ -821,7 +857,7 @@ const QHNUM = { ini: 1, ini2: 2 };
 const QIDENT = ["ini", "ini2"];
 const qIdentRank = (kind) => QIDENT.slice(0, QIDENT.indexOf(kind))
   .filter(k => qs.hints[k] === qs.stage).length;
-// "ini2" falls back to "car" — the top answer's clubs outside the pair — only
+// "ini2" falls back to "car" — the top answer's clubs outside the stage — only
 // once the stage has no unrevealed answer left for it to profile. That is the
 // impossible tier's usual [1,2]/[1,3] single answer ALREADY taken by identikit
 // #1 on this stage; if #1 went on an earlier stage the lone answer is still
@@ -829,13 +865,13 @@ const qIdentRank = (kind) => QIDENT.slice(0, QIDENT.indexOf(kind))
 const qHintKey = (kind, st) =>
   kind === "ini2" && qIdentRank(kind) >= st.answers.length ? "car" : kind;
 
-// initials + birth decade, then nationality, the tallies at the two clubs, and
+// initials + birth decade, then nationality, the tallies at the stage's clubs, and
 // (once the shard lands) whether the player is still around. Goalkeepers say so
 // in the goals slot: their goal counts are unreliable and always suppressed, so
 // without the tag a keeper reads as an outfielder who never scored.
 function qIdentikit(p, st) {
   const q = QSTR[lang], b = DB.births[p], gk = DB.gkSet.has(p);
-  let apps = 0, goals = 0;  // combined at the two clubs
+  let apps = 0, goals = 0;  // combined across the stage's clubs
   for (const ci of st.clubs) { const a = qApps(ci, p); if (a > 0) apps += a; const g = qGoals(ci, p); if (g > 0) goals += g; }
   let s = esc(q.qsIni(DB.names[p].split(" ").map(w => w[0] + ".").join(" "), b ? Math.floor(b / 10) * 10 : 0));
   const extra = [DB.nats[p] ? flag(DB.nats[p]) : "", apps ? q.qsApps(apps) : "",
@@ -843,7 +879,7 @@ function qIdentikit(p, st) {
   if (extra.length) s += " · " + extra.join(" · ");
   const note = qCareerNote.get(p);
   if (note === undefined) qLoadCareer(p, st);  // not fetched yet: load, re-render appends the note
-  else if (note && note.at) s += " · " + esc(q.qsAtClub);
+  else if (note && note.at) s += " · " + esc(q.qsAtClub(st.clubs.length));
   else if (note && note.active) s += " · " + esc(q.qsActive);
   return s;
 }
@@ -858,7 +894,7 @@ function qHintText(kind, st) {
       .map(([cc, n]) => `${n} ${cc ? flag(cc) : "?"}`).join(" · ");
   }
   if (kind === "ini" || kind === "ini2") return qIdentikit(qRanked(st)[qIdentRank(kind)], st);
-  // "car": other clubs, else the years spent at the pair, else — when the shard
+  // "car": other clubs, else the years spent at the stage's clubs, else — when the shard
   // is unavailable and only index-local facts remain — the exact birth year
   const p = qFace(st), note = qCareerNote.get(p);
   if (!note) { if (note === undefined) qLoadCareer(p, st); return "…"; }  // the load re-renders
@@ -1110,7 +1146,7 @@ $("mode-player").addEventListener("click", qExit);
 langSel.addEventListener("change", () => { if (qBuilt && document.body.classList.contains("quiz")) qRender(); });
 // a shared https://…/#quiz link opens straight into the game once data is ready
 document.addEventListener("dbready", () => { if (location.hash === "#quiz") qEnter(); }, { once: true });
-// warm the quiz while the solver idles after boot: the chain replay, the pair
+// warm the quiz while the solver idles after boot: the chain replay, the combination
 // cache and the guess-box name index are all memoized, so paying them here
 // makes the Quiz toggle instant even late in a 90-day window. One idle slice
 // per step — replay in 15-day bites — so no single block stalls a fresh page

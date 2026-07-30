@@ -26,8 +26,11 @@ in the pipeline and in `site/app.js`.
 Quiz difficulty is rated by how recognisable the answer set is, not the
 clubs; the tuning lives in one table at the top of `site/quiz.js`, and
 `quizDebug(30)` in the console prints the next month of puzzles to
-sanity-check after a dataset refresh. An archive calendar replays past
-days for practice; game state persists in `localStorage`.
+sanity-check after a dataset refresh. A stage is usually two clubs; the
+two hardest each toss a seeded daily coin for a three-club variant, which
+plays as a different flavour of hard rather than simply a harder one. An
+archive calendar replays past days for practice; game state persists in
+`localStorage`.
 
 ## Refreshing the data
 
