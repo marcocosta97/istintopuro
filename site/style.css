@@ -763,3 +763,17 @@ body.qcal :is(#qhead, #qstages, #qcard, #qend, #qnewday, #qlog) { display: none;
   .qcbox, body.qcal #qcal { transition: none; animation: none; }
   .qcell.play:hover .qcbox { transform: none; }
 }
+
+/* Flags for states Unicode has no regional-indicator emoji for (Yugoslavia, the GDR,
+   Kosovo, the Netherlands Antilles). Sized in em so they track whatever text they sit
+   in, and 4:3 like the emoji flags they stand beside. The browser fetches the SVG only
+   when a row actually carries one, so the 99.7% of players with an emoji flag pay
+   nothing. Baseline nudge matches how emoji flags sit on the line. */
+.hflag {
+  display: inline-block; width: 1.22em; height: .92em; vertical-align: -.11em;
+  background: center / contain no-repeat; border-radius: 1px;
+}
+.hf-yu { background-image: url(flags/yu.svg); }
+.hf-dd { background-image: url(flags/dd.svg); }
+.hf-xk { background-image: url(flags/xk.svg); }
+.hf-an { background-image: url(flags/an.svg); }

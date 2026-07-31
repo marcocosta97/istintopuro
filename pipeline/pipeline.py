@@ -23,7 +23,8 @@ Emitted formats — site/data/index.json (one file, whole club-mode dataset):
   apps/goals per club: one value per posting, summed across the player's
             spells there, -1 = unknown
   gks       delta-encoded ids of P413 goalkeepers (UI hides their goals)
-  names/births/nats  one entry per player id
+  names/births/nats  one entry per player id; a nat is comma-separated when a
+            player represented more than one country ("CH,HR"), "" when unknown
   imgs      Commons filename prefixed with 2 hex md5 chars — the hashed
             directory path, so the client builds direct thumb URLs and
             skips Special:FilePath's uncacheable redirects
@@ -483,15 +484,33 @@ NAT_FIX = {
     "Q207272": "PL",  # Second Polish Republic
 }
 
-# dissolved states that DO carry a P297 code — no emoji flag exists for these, so
-# they must never reach the index. DD's successor is unambiguous; the Yugoslav
-# lineage is not (same policy as NAT_FIX: don't guess a successor).
-ISO_OBSOLETE = {"DD": "DE", "YU": None, "SU": None, "CS": None}
+# P297 codes outside current ISO 3166-1, so Unicode has no regional-indicator flag
+# for them. These used to be dropped (or mapped to a successor) because they rendered
+# as letter boxes; site/flags/<cc>.svg now covers them, so they stay as themselves —
+# a GDR international is shown under the GDR, not backdated into modern Germany.
+# Exhaustive: a survey of every P297-carrying item found only 10 non-ISO codes, and
+# the other 6 (Ascension, Clipperton, Sark, Diego Garcia, Trust Territory of the
+# Pacific Islands, Tristan da Cunha) have no football nationals. stage_validate
+# fails the build if a code ever appears that neither this set nor an emoji covers.
+NO_EMOJI_FLAG = {"YU", "DD", "XK", "AN"}
 
-def pick_nat(ccs):  # prefer a current-ISO citizenship, else an unambiguous successor
-    cur = sorted(c for c in ccs if c and c not in ISO_OBSOLETE)
-    if cur: return cur[0]
-    return next((ISO_OBSOLETE[c] for c in ccs if ISO_OBSOLETE.get(c)), None)
+# officially assigned ISO 3166-1 alpha-2 codes — exactly the set Unicode gives a
+# regional-indicator flag, so it is what stage_validate checks nat codes against
+ISO_ALPHA2 = set("""AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG
+BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU
+CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF
+GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS
+IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC
+MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO
+NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD
+SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR
+TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW""".split())
+
+def pick_nat(ccs):  # a single citizenship, used only when no sport country is known
+    cur = sorted(c for c in ccs if c and c in ISO_ALPHA2)
+    if cur: return cur[0]                       # a state that still exists wins: someone
+    old = sorted(c for c in ccs if c)           # holding DD+DE citizenship is German today
+    return old[0] if old else None              # ...but DD alone is now renderable, not dropped
 
 # ---------------------------------------------------------------- stage: attrs
 def stage_attrs():
@@ -516,12 +535,16 @@ def stage_attrs():
         out = []
         for r in rows:
             img = v(r, "image")
-            # P1532 (country represented in sport) beats citizenship when it names
-            # one unambiguous country: it's the actual football nationality (e.g.
-            # Balotelli GH+IT citizenship but plays for Italy; picking the
-            # alphabetically-first citizenship code was giving him a Ghana flag)
-            spccs = [c for c in (v(r, "spccs") or "").split(",") if c]
-            nat = spccs[0] if len(spccs) == 1 else None
+            # P1532 (country represented in sport) beats citizenship: it's the actual
+            # football nationality (Balotelli holds GH+IT but plays for Italy; the
+            # alphabetically-first citizenship code was giving him a Ghana flag).
+            # ALL of them count, comma-joined — a player who turned out for two
+            # countries earns both flags (Rakitić: Swiss youth, then Croatia at
+            # senior level, and taking one of them left him under the wrong flag).
+            # Citizenship stays single, though: it says nothing about who a player
+            # represented, so a second passport is not a second flag.
+            spccs = sorted({c for c in (v(r, "spccs") or "").split(",") if c})
+            nat = ",".join(spccs)
             if not nat:
                 nat = pick_nat((v(r, "ccs") or "").split(","))
             if not nat and "natq" in r:  # citizenship without ISO code: curated map
@@ -998,6 +1021,13 @@ def stage_validate():
     chk(not missing, f"missing career shards: {missing[:5]}")
     cov = apps_coverage(idx)
     chk(cov >= APPS_FLOOR, f"apps coverage {cov:.1%} below floor {APPS_FLOOR:.0%}")
+    # every nat code must be renderable: a real ISO 3166-1 alpha-2 (emoji flag) or one
+    # of the four we ship an SVG for. Codes that are neither used to reach the client
+    # and render as two letter boxes — 216 players shipped that way before anyone
+    # noticed, so this is a build failure, not a cosmetic issue.
+    codes = {c for n in idx["nats"] if n for c in n.split(",")}
+    unrenderable = sorted(c for c in codes if c not in ISO_ALPHA2 and c not in NO_EMOJI_FLAG)
+    chk(not unrenderable, f"nat codes with no flag: {unrenderable}")
     seeds = {int(p[1:]) for ps in (load("roster") or {}).values() for p in ps}
     if seeds and not missing:
         shipped = set()

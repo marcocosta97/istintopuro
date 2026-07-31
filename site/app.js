@@ -281,7 +281,25 @@ const coreClub = (name) => {
   while (b > a + 1 && isLegal(w[b - 1])) b--;
   return w.slice(a, b).join(" ");
 };
-const flag = (cc) => cc ? String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1A5 + c.charCodeAt(0))) : "";
+// A nat is comma-separated when a player represented more than one country, so flag()
+// takes the whole field and returns HTML (never plain text — callers interpolate it).
+// Yugoslavia, the GDR, Kosovo and the Netherlands Antilles have no regional-indicator
+// emoji; site/flags/<cc>.svg covers them, fetched only when such a row is rendered.
+const NO_EMOJI_FLAG = new Set(["YU", "DD", "XK", "AN"]);
+const oneFlag = (cc) => NO_EMOJI_FLAG.has(cc)
+  ? `<span class="hflag hf-${cc.toLowerCase()}" role="img" aria-label="${cc}"></span>`
+  : String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1A5 + c.charCodeAt(0)));
+const flag = (nat) => nat ? nat.split(",").map(oneFlag).join("") : "";
+// a player's countries as a list ("" = unknown, kept as a single "" bucket so the
+// nationality filter can offer an "unknown" row like any other)
+const natsOf = (p) => { const n = DB.nats[p]; return n ? n.split(",") : [""]; };
+// Intl.DisplayNames resolves the deprecated codes to whichever state succeeded them
+// (YU -> "Serbia", DD -> "Germany", AN -> "Curaçao"), which mislabels the flag and
+// collides with the successor's own row in the filter — two rows reading "Germania".
+const HIST_NAME = { YU: { it: "Jugoslavia", en: "Yugoslavia" },
+                    DD: { it: "Germania Est", en: "East Germany" },
+                    XK: { it: "Kosovo", en: "Kosovo" },
+                    AN: { it: "Antille Olandesi", en: "Netherlands Antilles" } };
 // defunct marker: a dagger + dissolution year for clubs with Wikidata P576 (c[4])
 const defunct = (c) => c[4] ? ` <span class="defunct" title="${t.dissolved(c[4])}">†${c[4]}</span>` : "";
 // year span of a career spell: single-year ranges collapse, unknown bounds show "?"
@@ -1037,11 +1055,14 @@ function solve() {
   const yf = +byFrom.value || 0, yt = +byTo.value || 0;
   if (yf || yt)  // a set bound excludes unknown birth years
     ids = ids.filter(p => { const b = DB.births[p]; return b && (!yf || b >= yf) && (!yt || b <= yt); });
-  // nationality counts are taken before this filter, so unchecked rows keep their numbers
+  // nationality counts are taken before this filter, so unchecked rows keep their numbers.
+  // The filter lists COUNTRIES, not the combinations the nat field stores, so a
+  // dual-national is counted under each of his and stays visible while either is ticked.
   natCounts.clear();
-  for (const p of ids) { const cc = DB.nats[p]; natCounts.set(cc, (natCounts.get(cc) || 0) + 1); }
+  for (const p of ids)
+    for (const cc of natsOf(p)) natCounts.set(cc, (natCounts.get(cc) || 0) + 1);
   renderNats();
-  if (natOff.size) ids = ids.filter(p => !natOff.has(DB.nats[p]));
+  if (natOff.size) ids = ids.filter(p => !natsOf(p).every(cc => natOff.has(cc)));
   const key = sortBy === "goals" ? (p) => goalsOf.get(p) || 0
             : sortBy === "birth" ? (p) => DB.births[p] || 9999 * sortDir  // unknown last
             : (p) => appsOf.get(p) || 0;
@@ -1235,6 +1256,7 @@ function renderNats() {
   try { dn = new Intl.DisplayNames([lang], { type: "region" }); } catch {}
   const natName = (cc) => {
     if (!cc) return t.natUnknown;
+    if (HIST_NAME[cc]) return HIST_NAME[cc][lang] || HIST_NAME[cc].en;
     try { return (dn && dn.of(cc)) || cc; } catch { return cc; }
   };
   const rows = [...natCounts].map(([cc, n]) => [cc, n, natName(cc)])
@@ -1247,7 +1269,9 @@ function renderNats() {
     cb.type = "checkbox"; cb.checked = !natOff.has(cc);
     cb.onchange = () => { if (cb.checked) natOff.delete(cc); else natOff.add(cc); solve(); };
     const lab = document.createElement("label");
-    lab.append(cb, ` ${cc ? flag(cc) + " " : ""}${name}`);
+    const txt = document.createElement("span");   // flag() is HTML, so it cannot be appended as text
+    txt.innerHTML = ` ${cc ? flag(cc) + " " : ""}${esc(name)}`;
+    lab.append(cb, txt);
     const cnt = document.createElement("span");
     cnt.className = "ncount"; cnt.textContent = n.toLocaleString(lang);
     lab.appendChild(cnt);

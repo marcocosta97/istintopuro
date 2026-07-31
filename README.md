@@ -63,5 +63,8 @@ Pushing to `master` deploys `site/` to GitHub Pages.
 
 MIT. Data derived from [Wikidata](https://www.wikidata.org) (CC0);
 photos are served by Wikimedia Commons under their own licenses.
+The four flags in `site/flags/` (Yugoslavia, the GDR, Kosovo, the
+Netherlands Antilles — states Unicode has no emoji flag for) are
+public domain, from Wikimedia Commons.
 The [Barlow Semi Condensed](https://github.com/jpt/barlow) typeface
 (`site/fonts/`) is © The Barlow Project Authors, SIL OFL 1.1.
