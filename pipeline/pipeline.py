@@ -4,6 +4,7 @@
 Stages (each checkpoints to data/, reruns skip completed stages):
   clubs    - club universe of the 10 leagues (top 5 + 2nd divisions, incl. historical items)
   members  - player QIDs per club (P54)
+  roster   - current-squad seeds from enwiki squad tables (players Wikidata has no P54 for)
   attrs    - player attributes (label, birth year, nationality, image)
   careers  - full P54 career statements per player (any team, with years/apps/goals)
   wp       - Wikipedia-infobox career overlay (every player; richness-guarded replace)
@@ -396,6 +397,75 @@ def stage_members():
     n_players = len({p for ps in members.values() for p in ps})
     print(f"members: {sum(map(len, members.values()))} postings, {n_players} distinct players")
 
+# ---------------------------------------------------------------- stage: roster
+# Player DISCOVERY is P54-only, and recent Wikidata items increasingly carry no P54
+# at all: Ange-Yoan Bonny (Q101067809) has 26 claims and not one club statement, so
+# no stage ever sees him even though enwiki holds his full career. The infobox
+# overlay would fix him outright — it just never gets asked, because its candidate
+# set comes from members. So seed members from the one source that lists a club's
+# players without going through P54: the squad table on the club's own enwiki
+# article. Scope is the CURRENT clubs only, which is where the gap actually bites
+# (recent signings) and keeps the seed set to squads people search for.
+# A seed earns its posting the ordinary way — stage_build keeps it only if
+# load_careers() ends up placing a qualified spell at that club — so a wrong or
+# non-human wikilink costs one wasted fetch and then drops out on its own.
+SQUAD = re.compile(r"\{\{\s*(?:fs|football squad) player\b[^}]*?\|\s*name\s*=\s*\[\[([^\]|#]+)", re.I)
+
+def stage_roster():
+    clubs = load("clubs")
+    cur = [q for qs in CURRENT.values() for q in qs if q in clubs]
+
+    # club QID -> enwiki article title (same WDQS route stage_wp uses for players)
+    title = {}
+    for _, batch in batched(cur, 100):
+        vals = " ".join(f"wd:{q}" for q in batch)
+        for r in sparql(f"""SELECT ?c ?t WHERE {{ VALUES ?c {{ {vals} }}
+            ?a schema:about ?c ; schema:isPartOf <https://en.wikipedia.org/> ; schema:name ?t . }}"""):
+            title[qid(v(r, "c"))] = v(r, "t")
+    have = [[c, title[c]] for c in cur if c in title]
+    print(f"roster: {len(have)}/{len(cur)} current clubs have an enwiki article", flush=True)
+
+    # squad tables sit mid-article, so this needs the full wikitext (no rvsection=0).
+    # Unlinked squad names are players with no enwiki article, hence no infobox and
+    # nothing to recover — dropping them costs nothing.
+    def fetch(batch):
+        by = {t: c for c, t in batch}
+        data = wp_get(action="query", prop="revisions", rvprop="content",
+                      rvslots="main", redirects=1, titles="|".join(t for _, t in batch))
+        q = (data or {}).get("query", {})
+        norm = {n["from"]: n["to"] for n in q.get("normalized", [])}
+        redir = {r["from"]: r["to"] for r in q.get("redirects", [])}
+        fwd = {redir.get(norm.get(t, t), norm.get(t, t)): c for t, c in by.items()}
+        out = []
+        for pg in q.get("pages", []):
+            revs = pg.get("revisions")
+            if not revs or pg["title"] not in fwd: continue
+            names = sorted({m.strip() for m in SQUAD.findall(revs[0]["slots"]["main"]["content"])})
+            if names: out.append([fwd[pg["title"]], names])
+        return out
+    raw = resumable("roster", have, 50, fetch)   # -> [[clubQID, [playerTitle, ...]], ...]
+
+    linked = {t for _, names in raw for t in names}
+    t2q = titles_to_qids(linked, "roster_titles")   # cache outlives a squad, so count over `linked`
+    roster, seeded = {}, set()
+    for cq, names in raw:
+        ps = {t2q[t] for t in names if t2q.get(t)}
+        if ps:
+            roster[cq] = sorted(ps)
+            seeded |= ps
+    save("roster", roster)
+    unresolved = sum(1 for t in linked if not t2q.get(t))   # redlinks: no article, nothing to mine
+    print(f"roster: {sum(map(len, roster.values()))} squad postings over {len(roster)} clubs, "
+          f"{len(seeded)} distinct players; {unresolved} of {len(linked)} titles unresolved")
+
+def load_members():
+    """P54 memberships with the enwiki squad-table seeds laid on top. Kept separate
+    from members.json on disk so that checkpoint stays pure Wikidata."""
+    members = load("members")
+    for cq, ps in (load("roster") or {}).items():
+        members[cq] = sorted(set(members.get(cq, ())) | set(ps))
+    return members
+
 # citizenship (P27) states without an ISO code (P297) whose modern country is
 # unambiguous — historical/umbrella items like Eriksen's "Kingdom of Denmark".
 # Genuinely ambiguous ones (USSR, Yugoslavia, Czechoslovakia, Austria-Hungary)
@@ -425,7 +495,7 @@ def pick_nat(ccs):  # prefer a current-ISO citizenship, else an unambiguous succ
 
 # ---------------------------------------------------------------- stage: attrs
 def stage_attrs():
-    members = load("members")
+    members = load_members()
     players = sorted({p for ps in members.values() for p in ps})
     def fetch(batch):
         vals = " ".join(f"wd:{q}" for q in batch)
@@ -466,7 +536,7 @@ def stage_attrs():
 
 # --------------------------------------------------------------- stage: careers
 def stage_careers():
-    members = load("members")
+    members = load_members()
     players = sorted({p for ps in members.values() for p in ps})
     def fetch(batch):
         vals = " ".join(f"wd:{q}" for q in batch)
@@ -536,6 +606,30 @@ def wp_get(**params):
             if i == 4: raise
             time.sleep(5 * (i + 1))
 
+def titles_to_qids(titles, cache):
+    """enwiki page titles -> QIDs (None where unresolved), 50/req, cached in
+    data/<cache>.json. Skips interwiki wikilinks (":de:…"): MediaWiki returns them
+    under query.interwiki with no page, and an all-interwiki batch omits
+    query.pages entirely — .get() guards that anyway, but there is nothing to
+    resolve, so they stay unresolved."""
+    t2q = load(cache) or {}
+    todo = [t for t in sorted(titles) if t not in t2q and not t.startswith(":")]
+    for _, batch in batched(todo, 50):
+        data = wp_get(action="query", prop="pageprops", ppprop="wikibase_item",
+                      redirects=1, titles="|".join(batch))
+        q = (data or {}).get("query", {})
+        # a title is keyed in the response by its NORMALISED form ("Bury__F.C." ->
+        # "Bury F.C."), and normalisation happens before redirects are followed, so
+        # both hops have to be walked in that order or the lookup silently misses
+        norm = {n["from"]: n["to"] for n in q.get("normalized", [])}
+        redir = {r["from"]: r["to"] for r in q.get("redirects", [])}
+        page_q = {pg["title"]: pg.get("pageprops", {}).get("wikibase_item")
+                  for pg in q.get("pages", [])}
+        for t in batch:
+            t2q[t] = page_q.get(redir.get(norm.get(t, t), norm.get(t, t)))  # None if unresolved
+    save(cache, t2q)
+    return t2q
+
 # senior career only. Not line-anchored: many infoboxes pack several params on
 # one line (| years1 = … | clubs1 = … | caps1 = …), so match each "|field=" where
 # it sits and read the value up to the next pipe or newline. The (\d+)= shape keeps
@@ -583,14 +677,18 @@ def wd_metrics(spells):
     return nq, ns
 
 def stage_wp():
-    careers, members = load("careers"), load("members")
+    careers, members = load("careers"), load_members()
     players = {p for ps in members.values() for p in ps}
     # trigger = every player. A Wikidata career that "looks complete" (all spells
     # dated) is an unreliable signal: it can still miss a whole club and its stats
     # (e.g. Biraghi's Torino), which no bare-P54 marker flags. The richness guard
     # below keeps a genuinely-complete career untouched, so fetching is the only cost.
-    cand = sorted(p for p in players if careers.get(p))
-    wd = {p: wd_metrics(careers[p]) for p in cand}   # pid -> (qualified spells, stat fields)
+    # Squad-table seeds have NO Wikidata career at all, so the "has a career worth
+    # improving" test would drop exactly the players the seeding exists for; for them
+    # the infobox is not an overlay but the whole record (wd_metrics 0, guard vacuous).
+    seeded = {p for ps in (load("roster") or {}).values() for p in ps}
+    cand = sorted(p for p in players if careers.get(p) or p in seeded)
+    wd = {p: wd_metrics(careers.get(p, ())) for p in cand}  # pid -> (qualified spells, stat fields)
     limit = int(os.environ.get("WP_LIMIT", 0))   # dry-run slice; 0 = all
     if limit: cand = cand[:limit]
     print(f"wp: {len(cand)} candidates (all players)", flush=True)
@@ -622,27 +720,9 @@ def stage_wp():
         return out
     raw = resumable("wp", have, 50, fetch)   # -> [[pid, [[clubTitle,...], ...]], ...]
 
-    # phase 3 — resolve the distinct club TITLES -> QIDs (50/req, redirects folded), cached.
-    # Skip interwiki wikilinks (":de:…" etc.): MediaWiki returns them under query.interwiki
-    # with no page, and an all-interwiki batch omits query.pages entirely — .get() guards
-    # that anyway, but there's nothing to resolve, so they stay unresolved (=None).
-    titles = sorted({sp[0] for _, spells in raw for sp in spells if not sp[0].startswith(":")})
-    t2q = load("wp_titles") or {}
-    todo = [t for t in titles if t not in t2q]
-    for _, batch in batched(todo, 50):
-        data = wp_get(action="query", prop="pageprops", ppprop="wikibase_item",
-                      redirects=1, titles="|".join(batch))
-        q = (data or {}).get("query", {})
-        # a title is keyed in the response by its NORMALISED form ("Bury__F.C." ->
-        # "Bury F.C."), and normalisation happens before redirects are followed, so
-        # both hops have to be walked in that order or the lookup silently misses
-        norm = {n["from"]: n["to"] for n in q.get("normalized", [])}
-        redir = {r["from"]: r["to"] for r in q.get("redirects", [])}
-        page_q = {pg["title"]: pg.get("pageprops", {}).get("wikibase_item")
-                  for pg in q.get("pages", [])}
-        for t in batch:
-            t2q[t] = page_q.get(redir.get(norm.get(t, t), norm.get(t, t)))  # None if unresolved
-    save("wp_titles", t2q)
+    # phase 3 — resolve the distinct club TITLES -> QIDs
+    titles = sorted({sp[0] for _, spells in raw for sp in spells})
+    t2q = titles_to_qids(titles, "wp_titles")
 
     # emit in the exact careers shape, dropping spells whose club title wouldn't
     # resolve. Richness guard: replace only if the infobox is at least as complete as
@@ -732,7 +812,7 @@ def img_key(tail):
     return hashlib.md5(f.encode()).hexdigest()[:2] + f
 
 def stage_build():
-    clubs, members, attrs = load("clubs"), load("members"), load("attrs")
+    clubs, members, attrs = load("clubs"), load_members(), load("attrs")
     careers, teams = load_careers(), load("teams")
 
     merged = merge_map(clubs, members)
@@ -869,6 +949,16 @@ def stage_build():
 # from ratcheting into the new normal one accepted refresh at a time.
 APPS_FLOOR = 0.85
 
+# Squad-table seeds are the one slice of the dataset with no Wikidata anchor at all:
+# for a player with no P54 the infobox IS the record, so a broken parse makes him
+# VANISH rather than degrade, and neither the apps-coverage guard (he contributes no
+# postings to thin out) nor the 3%-shrink player count can see 2.6k of them go. Hence
+# a direct check. Measured: ~50% of resolved seeds are players Wikidata already knew
+# via P54 and survive any parse failure, while 99.8% of the rest land a qualified
+# spell at a universe club — so a healthy run sits near 100% and a dead parser at
+# ~50%. The floor goes between, nearer the failure so normal churn never trips it.
+ROSTER_FLOOR = 0.85
+
 def apps_coverage(idx):
     tot = sum(len(c) for c in idx["apps"])
     return sum(1 for c in idx["apps"] for a in c if a >= 0) / tot if tot else 0
@@ -908,6 +998,16 @@ def stage_validate():
     chk(not missing, f"missing career shards: {missing[:5]}")
     cov = apps_coverage(idx)
     chk(cov >= APPS_FLOOR, f"apps coverage {cov:.1%} below floor {APPS_FLOOR:.0%}")
+    seeds = {int(p[1:]) for ps in (load("roster") or {}).values() for p in ps}
+    if seeds and not missing:
+        shipped = set()
+        for i in range(NSHARDS):
+            shipped |= {e[0] for e in
+                        json.loads((SITE_DATA / "career" / f"{i}.json").read_bytes()).values()}
+        kept = len(seeds & shipped) / len(seeds)
+        chk(kept >= ROSTER_FLOOR,
+            f"roster seeds in index {kept:.1%} below floor {ROSTER_FLOOR:.0%}")
+        print(f"  roster seeds: {len(seeds & shipped)}/{len(seeds)} in index ({kept:.1%})")
     base = os.environ.get("VALIDATE_BASELINE")
     if base:
         old = json.loads(Path(base).read_bytes())
@@ -921,9 +1021,9 @@ def stage_validate():
         sys.exit("validate FAILED:\n  " + "\n  ".join(errs[:20]))
     print(f"validate: OK ({nc} clubs, {np} players)")
 
-STAGES = {"clubs": stage_clubs, "members": stage_members, "attrs": stage_attrs,
-          "careers": stage_careers, "wp": stage_wp, "teams": stage_teams,
-          "build": stage_build, "validate": stage_validate}
+STAGES = {"clubs": stage_clubs, "members": stage_members, "roster": stage_roster,
+          "attrs": stage_attrs, "careers": stage_careers, "wp": stage_wp,
+          "teams": stage_teams, "build": stage_build, "validate": stage_validate}
 
 if __name__ == "__main__":
     DATA.mkdir(exist_ok=True)

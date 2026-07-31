@@ -17,7 +17,10 @@ is extracted from Wikidata and precomputed into a static index that the
 client intersects in under a millisecond. Photos (Wikimedia Commons),
 nationalities and loan spells come from the same extraction; careers that
 Wikidata leaves incomplete are filled from the English Wikipedia infobox.
-No server, no tracking.
+Players are found through their Wikidata club statements, which recent
+items increasingly lack altogether — so current squads are additionally
+seeded from the squad table on each club's Wikipedia article, and their
+careers come entirely from the infobox. No server, no tracking.
 
 The emitted data formats are documented in `pipeline/pipeline.py`'s
 docstring; heuristics and quality passes are commented where they live,
@@ -40,9 +43,11 @@ python3 pipeline/pipeline.py build      # rebuild site/data from checkpoints
 ```
 
 A weekly GitHub Action re-runs the pipeline and deploys; the `validate`
-stage blocks a malformed or shrunken dataset, and one whose apps coverage
-dropped — half the careers come from the Wikipedia overlay, so a broken
-parse degrades the data badly without changing any count. One list needs a human:
+stage blocks a malformed or shrunken dataset, one whose apps coverage
+dropped, and one where too few squad-table seeds survived — half the careers
+come from the Wikipedia overlay, and for seeded players it is their only
+source, so a broken parse degrades or empties the data without changing any
+of the counts the shrink guards watch. One list needs a human:
 `CURRENT` in `pipeline.py` (each league's clubs this season) — refresh it
 every August.
 
