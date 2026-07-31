@@ -661,10 +661,16 @@ def titles_to_qids(titles, cache):
 # only the target before it.
 FIELD = re.compile(r"\|\s*(years|clubs|caps|goals)(\d+)\s*=\s*([^|\n]*)")
 
+# "2022–2023" -> closed, "2025–" -> open (still there), and a bare "2023" -> a spell
+# that both started and ended that year. The trailing dash is the whole distinction:
+# reading a lone year as open-ended made a one-season stay sort as if it were current
+# (Diouf's 2023 at Basel outlived his 2023–2025 at Lens and the career read backwards).
 def wp_years(s):
-    m = re.search(r"(\d{4})(?:\s*[–\-]\s*(\d{4}))?", s)
+    m = re.search(r"(\d{4})\s*([–\-])?\s*(\d{4})?", s)
     if not m: return None, None
-    return int(m.group(1)), (int(m.group(2)) if m.group(2) else None)  # open-ended -> None
+    start = int(m.group(1))
+    if m.group(3): return start, int(m.group(3))
+    return (start, None) if m.group(2) else (start, start)
 
 def wp_club(s):
     loan = 1 if ("→" in s or "(loan)" in s.lower()) else 0   # infobox loan convention
@@ -699,6 +705,27 @@ def wd_metrics(spells):
     ns = sum((sp[3] is not None) + (sp[4] is not None) for sp in spells)
     return nq, ns
 
+def national_teams(careers, clubs):
+    """QIDs of the national sides sitting in Wikidata careers, by the same NATIONAL name
+    test stage_build uses. The guard has to compare like with like: parse_infobox reads
+    SENIOR CLUB rows only, while a P54 career also carries every youth-international cap,
+    so those caps counted for Wikidata and against the overlay. Suso's 8 Spain youth
+    statements (nq 14, ns 24) outweighed a complete 7-row club career (7, 14) and cost
+    him his Sevilla and Cádiz stats; it rejected 20% of overlays measured. Universe clubs
+    never need the lookup — they are clubs by construction."""
+    cached = load("nat_teams")
+    if cached is not None: return set(cached)
+    teams = sorted({sp[0] for c in careers.values() for sp in c} - set(clubs))
+    nat = set()
+    for _, batch in batched(teams, 400):
+        vals = " ".join(f"wd:{q}" for q in batch)
+        for r in sparql(f"""SELECT ?t ?l WHERE {{ VALUES ?t {{ {vals} }}
+            ?t rdfs:label ?l FILTER(LANG(?l)="en") }}"""):
+            if NATIONAL.search(v(r, "l") or ""): nat.add(qid(v(r, "t")))
+    save("nat_teams", sorted(nat))
+    print(f"wp: {len(nat)} national sides excluded from the richness guard", flush=True)
+    return nat
+
 def stage_wp():
     careers, members = load("careers"), load_members()
     players = {p for ps in members.values() for p in ps}
@@ -711,7 +738,9 @@ def stage_wp():
     # the infobox is not an overlay but the whole record (wd_metrics 0, guard vacuous).
     seeded = {p for ps in (load("roster") or {}).values() for p in ps}
     cand = sorted(p for p in players if careers.get(p) or p in seeded)
-    wd = {p: wd_metrics(careers.get(p, ())) for p in cand}  # pid -> (qualified spells, stat fields)
+    nat = national_teams(careers, load("clubs"))   # compare club spells only, as the infobox does
+    wd = {p: wd_metrics([sp for sp in careers.get(p, ()) if sp[0] not in nat])
+          for p in cand}                           # pid -> (qualified spells, stat fields)
     limit = int(os.environ.get("WP_LIMIT", 0))   # dry-run slice; 0 = all
     if limit: cand = cand[:limit]
     print(f"wp: {len(cand)} candidates (all players)", flush=True)
