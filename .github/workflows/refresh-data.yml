@@ -58,7 +58,17 @@ jobs:
           if git diff --cached --quiet; then
             echo "No dataset changes this week."
           else
-            git commit -m "Weekly data refresh ($(date -u +%Y-%m-%d))"
+            # validate writes the body: counts and coverage, none of which can be read
+            # back out of a one-line minified index.json diff
+            if [ -f data/commit-body.txt ]; then
+              git commit -F - <<EOF
+Weekly data refresh ($(date -u +%Y-%m-%d))
+
+$(cat data/commit-body.txt)
+EOF
+            else
+              git commit -m "Weekly data refresh ($(date -u +%Y-%m-%d))"
+            fi
             git push origin HEAD:master
           fi
 

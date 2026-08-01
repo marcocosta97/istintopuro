@@ -1080,6 +1080,24 @@ def stage_validate():
         sys.exit("validate FAILED:\n  " + "\n  ".join(errs[:20]))
     print(f"validate: OK ({nc} clubs, {np} players)")
 
+    # Body for the refresh commit. The diff is one line of minified JSON, so none of
+    # this is readable from it — which is the only reason it earns the three lines the
+    # commit rule allows. Deltas need VALIDATE_BASELINE, as the weekly job sets.
+    def delta(new, old, pct=False):
+        d = new - old
+        return "" if not d else (f" ({d:+.1f}pt)" if pct else f" ({d:+,})")
+    gcov = sum(1 for c in idx["goals"] for g in c if g >= 0) / max(sum(map(len, idx["goals"])), 1)
+    wp_n = len(load("wp") or {})
+    lines = [f"{nc:,} clubs, {np:,} players{delta(np, op) if base else ''}, "
+             f"{sum(map(len, idx['postings'])):,} postings",
+             f"apps {cov:.1%}{delta(cov * 100, ov * 100, True) if base else ''}, goals {gcov:.1%}"
+             + (f"; {len(seeds & shipped):,} of {len(seeds):,} squad seeds kept"
+                if seeds and not missing else "")]
+    if wp_n:
+        lines.append(f"{wp_n:,} careers from Wikipedia infoboxes, "
+                     f"{np - wp_n:,} straight from Wikidata")
+    (DATA / "commit-body.txt").write_text("\n".join(lines) + "\n")
+
 STAGES = {"clubs": stage_clubs, "members": stage_members, "roster": stage_roster,
           "attrs": stage_attrs, "careers": stage_careers, "wp": stage_wp,
           "teams": stage_teams, "build": stage_build, "validate": stage_validate}
