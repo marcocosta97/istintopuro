@@ -795,19 +795,22 @@ search.addEventListener("keydown", (e) => {
     else if (mode === "player" && playerIds.length) removePlayer(playerIds[playerIds.length - 1]);
   } else if (e.key === "Escape") { sugg.hidden = true; }
 });
-search.addEventListener("blur", () => setTimeout(() => {
-  if (document.activeElement !== search) sugg.hidden = true;
-}, 100));
+// The suggestion list is NOT tied to the input keeping focus. It used to hide on blur,
+// which meant putting the phone keyboard away also threw away the list you opened it to
+// read. Every path that should close it already says so (selection, Escape, mode switch,
+// browse, empty query); the only case blur really stood for is a tap somewhere else.
+document.addEventListener("pointerdown", (e) => {
+  if (!sugg.hidden && !e.target.closest("#picker")) sugg.hidden = true;
+});
 
-// Phones: the on-screen keyboard costs half the viewport and nothing takes it away —
-// page scrolling never dismisses it — so reading results happens through a slot.
-// A finger drag anywhere outside the picker means "I'm done typing, let me read".
+// Phones: the keyboard costs half the viewport and nothing takes it away — page
+// scrolling never dismisses it — so the list is read through a slot. Any drag means
+// "I'm done typing, let me read", including a drag on the suggestions themselves.
 // touchmove and not scroll: focusing an input makes the browser scroll it into view,
-// and blurring on that would close the keyboard on the very tap that opened it.
-// Drags inside #picker are exempt — that is the suggestions list, which scrolls itself.
+// and blurring on that would shut the keyboard on the very tap that opened it.
 if (matchMedia("(pointer: coarse)").matches)
-  document.addEventListener("touchmove", (e) => {
-    if (document.activeElement === search && !e.target.closest("#picker")) search.blur();
+  document.addEventListener("touchmove", () => {
+    if (document.activeElement === search) search.blur();
   }, { passive: true });
 
 // ------------------------------------------------------- FM-style team browser
@@ -912,7 +915,7 @@ function addClub(ci) {
   clubIds.push(ci);
   search.value = ""; sugg.hidden = true;
   renderChips(); solve(); syncHash();
-  search.focus();
+  focusSearch();   // desktop keeps typing; on touch the keyboard stays down to read the result
 }
 function removeClub(ci) {
   clubIds = clubIds.filter(x => x !== ci);
@@ -925,7 +928,7 @@ function addPlayer(pid) {
   playerIds.push(pid);
   search.value = ""; sugg.hidden = true;
   renderChips(); solve();
-  search.focus();
+  focusSearch();
 }
 function removePlayer(pid) {
   playerIds = playerIds.filter(x => x !== pid);
