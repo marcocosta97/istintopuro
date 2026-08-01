@@ -799,6 +799,17 @@ search.addEventListener("blur", () => setTimeout(() => {
   if (document.activeElement !== search) sugg.hidden = true;
 }, 100));
 
+// Phones: the on-screen keyboard costs half the viewport and nothing takes it away —
+// page scrolling never dismisses it — so reading results happens through a slot.
+// A finger drag anywhere outside the picker means "I'm done typing, let me read".
+// touchmove and not scroll: focusing an input makes the browser scroll it into view,
+// and blurring on that would close the keyboard on the very tap that opened it.
+// Drags inside #picker are exempt — that is the suggestions list, which scrolls itself.
+if (matchMedia("(pointer: coarse)").matches)
+  document.addEventListener("touchmove", (e) => {
+    if (document.activeElement === search && !e.target.closest("#picker")) search.blur();
+  }, { passive: true });
+
 // ------------------------------------------------------- FM-style team browser
 const browse = $("browse"), browseBtn = $("browsebtn"), brBack = $("br-back");
 let brCC = null, brLG = null;  // drill-down state: country code, league index | "x" (Others)
