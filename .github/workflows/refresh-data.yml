@@ -60,12 +60,10 @@ jobs:
           else
             # validate writes the body: counts and coverage, none of which can be read
             # back out of a one-line minified index.json diff
+            # two -m give subject then body; no heredoc, whose closing marker would have
+            # to sit at column 0 and so would end this YAML block scalar early
             if [ -f data/commit-body.txt ]; then
-              git commit -F - <<EOF
-Weekly data refresh ($(date -u +%Y-%m-%d))
-
-$(cat data/commit-body.txt)
-EOF
+              git commit -m "Weekly data refresh ($(date -u +%Y-%m-%d))" -m "$(cat data/commit-body.txt)"
             else
               git commit -m "Weekly data refresh ($(date -u +%Y-%m-%d))"
             fi
