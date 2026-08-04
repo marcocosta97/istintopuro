@@ -834,7 +834,12 @@ EXTRA_MERGE = {"Q56542463": "Q8643",   # LR Vicenza -> Vicenza Calcio (2018 refo
                "Q2338486": "Q19516",   # Olympique Lillois -> Lille OSC (1944 merger)
                "Q2277043": "Q210864",  # US du Mans -> Le Mans FC
                "Q97905919": "Q15789",  # "FC Bayern München" dupe item -> FC Bayern Munich
-               "Q51243017": "Q704"}    # Lyon Olympique Universitaire -> OL (1950 split)
+               "Q51243017": "Q704",    # Lyon Olympique Universitaire -> OL (1950 split)
+               # bot-made "…men's team" items the name heuristic misses (trailing token)
+               "Q97905939": "Q102720",     # Hertha BSC Berlin -> Hertha BSC
+               "Q97905936": "Q142005",     # FC Hansa Rostock -> F.C. Hansa Rostock
+               "Q97905981": "Q14551982",   # SSV Ulm 1846 -> SSV Ulm 1846 Fußball
+               "Q97905972": "Q3163786"}    # Blau-Weiß 90 Berlin -> SpVgg Blau-Weiß 1890 Berlin
 
 def club_core(name):
     import unicodedata
