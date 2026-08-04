@@ -354,22 +354,32 @@ def resumable(stage, items, batch_size, fetch_batch):
 def stage_clubs():
     lgs = " ".join(f"wd:{q}" for q in LEAGUES)
     rows = sparql(f"""
-      SELECT DISTINCT ?club ?clubLabel ?cc ?lg ?dissolved WHERE {{
+      SELECT DISTINCT ?club ?clubLabel ?cc ?lg ?dissolved ?teamDissolved WHERE {{
         VALUES ?lg {{ {lgs} }}
         {{ ?club p:P118/ps:P118 ?lg . ?club wdt:P31 wd:Q476028 . }}
         UNION {{ ?season wdt:P3450 ?lg . ?season wdt:P1923 ?club . }}
         OPTIONAL {{ ?club wdt:P17/wdt:P297 ?cc }}
         OPTIONAL {{ ?club wdt:P576 ?dissolved }}
+        OPTIONAL {{ VALUES ?teamClass {{ wd:Q103229495 wd:Q15944511 }}
+                    ?club wdt:P31 ?teamClass ; wdt:P361/wdt:P576 ?teamDissolved }}
         SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul,it,es,de,fr". }}
       }}""")
     clubs = {}
     for r in rows:
         q = qid(v(r, "club"))
-        c = clubs.setdefault(q, {"name": v(r, "clubLabel"), "cc": v(r, "cc"), "leagues": set(), "dissolved": None})
+        c = clubs.setdefault(q, {"name": v(r, "clubLabel"), "cc": v(r, "cc"), "leagues": set(),
+                                 "dissolved": None, "pdissolved": None})
         c["leagues"].add(LEAGUE_ALIAS.get(qid(v(r, "lg")), qid(v(r, "lg"))))
         if not c["cc"]: c["cc"] = v(r, "cc")
         d = year(v(r, "dissolved"))
         if d: c["dissolved"] = d
+        # "…men's team" items (P31 Q103229495/Q15944511) hold the P54 statements but
+        # none of the club's own metadata: take the parent club's P576 (Blau-Weiß 90)
+        p = year(v(r, "teamDissolved"))
+        if p: c["pdissolved"] = p
+    for c in clubs.values():
+        p = c.pop("pdissolved")
+        c["dissolved"] = c["dissolved"] or p
     dropped = []
     for q in list(clubs):
         name = clubs[q]["name"] or q
@@ -841,6 +851,19 @@ EXTRA_MERGE = {"Q56542463": "Q8643",   # LR Vicenza -> Vicenza Calcio (2018 refo
                "Q97905981": "Q14551982",   # SSV Ulm 1846 -> SSV Ulm 1846 Fußball
                "Q97905972": "Q3163786"}    # Blau-Weiß 90 Berlin -> SpVgg Blau-Weiß 1890 Berlin
 
+# Clubs Wikidata never got a P576 for, though they demonstrably ceased to exist.
+# Only lineages that end here: a club whose tradition continues under a new item
+# (phoenix, rename, merger into a club we carry) belongs in EXTRA_MERGE instead.
+EXTRA_DISSOLVED = {"Q3626037": 1931,   # AC La Dominante (FBC Liguria from 1930)
+                   "Q2311455": 1946,   # AC Sampierdarenese (merged -> Sampdoria)
+                   "Q3747545": 1926,   # FBC Internazionale-Naples (-> AC Napoli)
+                   "Q3629464": 1946,   # Audace FC Taranto (merged -> Taranto)
+                   "Q3820995": 1926,   # SS Pro Roma (-> Fortitudo-Pro Roma)
+                   "Q4005164": 1928,   # US Ideale Bari (merged -> US Bari)
+                   "Q959103":  1935,   # Club Français
+                   "Q1514915": 1944,   # SC Fives (merged -> Lille, P1366 but no P576)
+                   "Q3590859": 1944}   # ÉF Reims-Champagne (wartime federal team)
+
 def club_core(name):
     import unicodedata
     s = unicodedata.normalize("NFD", name).encode("ascii", "ignore").decode().lower()
@@ -926,7 +949,7 @@ def stage_build():
         sp = [spell(player_qids[i], groups[cq]) for i in ids]
         deltas = [ids[0]] + [b - a for a, b in zip(ids, ids[1:])] if ids else []
         # a merged group is "dissolved" only if the whole lineage ended (no refounded/active member)
-        diss = [clubs[q].get("dissolved") for q in groups[cq]]
+        diss = [clubs[q].get("dissolved") or EXTRA_DISSOLVED.get(q) for q in groups[cq]]
         dissolved = max(diss) if diss and all(diss) else 0
         cur = cur_of.get(cq, -1)
         if cur >= 0: dissolved = 0  # playing a covered league now = alive (stale P576 on refounded lineages)
