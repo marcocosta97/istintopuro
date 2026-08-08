@@ -627,9 +627,21 @@ function qBuild() {  // static skeleton, rendered once on first entry
       qPick(playerMatches(qse.value, [])[qCur]);
     } else if (e.key === "Escape") $("qsugg").hidden = true;
   });
-  qse.addEventListener("blur", () => setTimeout(() => {
-    if (document.activeElement !== qse) $("qsugg").hidden = true;
-  }, 100));
+  // Not tied to keeping focus: hiding on blur meant dismissing the phone keyboard
+  // also threw away the list it was opened to read. Every real close path already
+  // says so (pick, Escape, skip/resign, empty query); blur only ever meant a tap
+  // elsewhere, so a pointerdown outside #qwrap covers that instead.
+  document.addEventListener("pointerdown", (e) => {
+    if (!$("qsugg").hidden && !e.target.closest("#qwrap")) $("qsugg").hidden = true;
+  });
+  // Phones: the keyboard costs half the viewport and nothing takes it away, so the
+  // list is read through a slot. Any drag means "done typing, let me read" — including
+  // a drag on the suggestions. touchmove, not scroll: focusing an input scrolls it
+  // into view, and blurring on that would shut the keyboard on the tap that opened it.
+  if (matchMedia("(pointer: coarse)").matches)
+    document.addEventListener("touchmove", () => {
+      if (document.activeElement === qse) qse.blur();
+    }, { passive: true });
   for (const kind of QHINTS)  // render either way: a rolled-over
     $("qh-" + kind).onclick = () => { qHint(kind); qRender(); };  // day shows its bar
   // easy/medium/hard: skip just that stage and move on. impossible (the last
@@ -702,7 +714,8 @@ function qPick(pid) {
     $("qcard").classList.add("shake");
   }
   qRender();
-  if (!qs.done) $("qsearch").focus();
+  // desktop keeps typing; on touch the keyboard stays down to read the result
+  if (!qs.done && !matchMedia("(pointer: coarse)").matches) $("qsearch").focus();
 }
 
 let qMsgGen = 0;
