@@ -286,9 +286,16 @@ const coreClub = (name) => {
 // Yugoslavia, the GDR, Kosovo and the Netherlands Antilles have no regional-indicator
 // emoji; site/flags/<cc>.svg covers them, fetched only when such a row is rendered.
 const NO_EMOJI_FLAG = new Set(["YU", "DD", "XK", "AN"]);
-const oneFlag = (cc) => NO_EMOJI_FLAG.has(cc)
-  ? `<span class="hflag hf-${cc.toLowerCase()}" role="img" aria-label="${cc}"></span>`
-  : String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1A5 + c.charCodeAt(0)));
+// every flag carries its country as title + aria-label: the emoji alone is unreadable
+// for anyone who doesn't know the flag (and for screen readers). Hover only, so touch
+// gets nothing — the nationality filter panel is where a phone reads the names.
+const oneFlag = (cc) => {
+  const n = esc(natName(cc));
+  return NO_EMOJI_FLAG.has(cc)
+    ? `<span class="hflag hf-${cc.toLowerCase()}" role="img" title="${n}" aria-label="${n}"></span>`
+    : `<span role="img" title="${n}" aria-label="${n}">`
+      + String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1A5 + c.charCodeAt(0))) + "</span>";
+};
 const flag = (nat) => nat ? nat.split(",").map(oneFlag).join("") : "";
 // a player's countries as a list ("" = unknown, kept as a single "" bucket so the
 // nationality filter can offer an "unknown" row like any other)
@@ -300,6 +307,23 @@ const HIST_NAME = { YU: { it: "Jugoslavia", en: "Yugoslavia" },
                     DD: { it: "Germania Est", en: "East Germany" },
                     XK: { it: "Kosovo", en: "Kosovo" },
                     AN: { it: "Antille Olandesi", en: "Netherlands Antilles" } };
+// country name for a single code. Called once per rendered flag, so the Intl instance
+// and its answers are cached: constructing DisplayNames per row was the whole cost.
+let dnCache = new Map(), dnFor = null, dnLang = null;
+const natName = (cc) => {
+  if (!cc) return t.natUnknown;
+  if (HIST_NAME[cc]) return HIST_NAME[cc][lang] || HIST_NAME[cc].en;
+  if (dnLang !== lang) {
+    dnLang = lang; dnCache = new Map();
+    try { dnFor = new Intl.DisplayNames([lang], { type: "region" }); } catch { dnFor = null; }
+  }
+  if (!dnCache.has(cc)) {
+    let n = cc;
+    try { n = (dnFor && dnFor.of(cc)) || cc; } catch { /* not a region code */ }
+    dnCache.set(cc, n);
+  }
+  return dnCache.get(cc);
+};
 // defunct marker: a dagger + dissolution year for clubs with Wikidata P576 (c[4])
 const defunct = (c) => c[4] ? ` <span class="defunct" title="${t.dissolved(c[4])}">†${c[4]}</span>` : "";
 // year span of a career spell: single-year ranges collapse, unknown bounds show "?"
@@ -822,12 +846,10 @@ const canHover = matchMedia("(hover: hover)").matches;
 // English, even for its Welsh clubs. Player nationality flags keep flag() (real GB).
 const ENG = { flag: "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}",
               it: "Inghilterra", en: "England" };
-const countryFlag = (cc) => cc === "GB" ? ENG.flag : flag(cc);
-const countryName = (cc) => {
-  if (cc === "GB") return ENG[lang] || ENG.en;
-  try { return new Intl.DisplayNames([lang], { type: "region" }).of(cc) || cc; }
-  catch { return cc; }
-};
+const countryName = (cc) => cc === "GB" ? (ENG[lang] || ENG.en) : natName(cc);
+const countryFlag = (cc) => cc === "GB"
+  ? `<span role="img" title="${esc(countryName(cc))}" aria-label="${esc(countryName(cc))}">${ENG.flag}</span>`
+  : flag(cc);
 
 function browseOpen(open) {
   if (browse.hidden === !open) return;
@@ -1266,13 +1288,6 @@ let natOff = new Set();       // unchecked nationality codes ("" = unknown)
 let natCounts = new Map();    // current list's per-nationality counts (pre-nationality-filter)
 
 function renderNats() {
-  let dn = null;
-  try { dn = new Intl.DisplayNames([lang], { type: "region" }); } catch {}
-  const natName = (cc) => {
-    if (!cc) return t.natUnknown;
-    if (HIST_NAME[cc]) return HIST_NAME[cc][lang] || HIST_NAME[cc].en;
-    try { return (dn && dn.of(cc)) || cc; } catch { return cc; }
-  };
   const rows = [...natCounts].map(([cc, n]) => [cc, n, natName(cc)])
     .sort((a, b) => b[1] - a[1] || a[2].localeCompare(b[2]));
   const st = natList.scrollTop;  // rebuilt on every solve: keep the reading position
