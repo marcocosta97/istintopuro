@@ -5,7 +5,7 @@ Stages (each checkpoints to data/, reruns skip completed stages):
   clubs    - club universe of the 10 leagues (top 5 + 2nd divisions, incl. historical items)
   members  - player QIDs per club (P54)
   roster   - current-squad seeds from enwiki squad tables (players Wikidata has no P54 for)
-  attrs    - player attributes (label, birth year, nationality, image)
+  attrs    - player attributes (label, birth year, nationality, image, enwiki title)
   careers  - full P54 career statements per player (any team, with years/apps/goals)
   wp       - Wikipedia-infobox career overlay (every player; richness-guarded replace)
   teams    - labels for career teams outside the club universe
@@ -24,7 +24,9 @@ Emitted formats — site/data/index.json (one file, whole club-mode dataset):
             spells there, -1 = unknown
   gks       delta-encoded ids of P413 goalkeepers (UI hides their goals)
   names/births/nats  one entry per player id; a nat is comma-separated when a
-            player represented more than one country ("CH,HR"), "" when unknown
+            player represented more than one country ("CH,HR"), "" when unknown;
+            a name is the common one (enwiki title) when the label is a legal
+            name the game would never use — see common_name()
   imgs      Commons filename prefixed with 2 hex md5 chars — the hashed
             directory path, so the client builds direct thumb URLs and
             skips Special:FilePath's uncacheable redirects
@@ -531,11 +533,13 @@ def stage_attrs():
         rows = sparql(f"""
           SELECT ?p (SAMPLE(?len) AS ?en) (SAMPLE(?lmul) AS ?mul) (MIN(?b) AS ?birth)
                  (SAMPLE(?img) AS ?image) (GROUP_CONCAT(DISTINCT ?cc; separator=",") AS ?ccs)
-                 (SAMPLE(?ctry) AS ?natq) (SAMPLE(?gk1) AS ?gk)
+                 (SAMPLE(?ctry) AS ?natq) (SAMPLE(?gk1) AS ?gk) (SAMPLE(?page) AS ?enwiki)
                  (GROUP_CONCAT(DISTINCT ?spcc; separator=",") AS ?spccs) WHERE {{
             VALUES ?p {{ {vals} }}
             OPTIONAL {{ ?p rdfs:label ?len FILTER(LANG(?len)="en") }}
             OPTIONAL {{ ?p rdfs:label ?lmul FILTER(LANG(?lmul) IN ("mul","it","es","de","fr")) }}
+            OPTIONAL {{ ?a schema:about ?p ; schema:isPartOf <https://en.wikipedia.org/> ;
+                           schema:name ?page }}
             OPTIONAL {{ ?p wdt:P569 ?b }}
             OPTIONAL {{ ?p wdt:P18 ?img }}
             OPTIONAL {{ ?p wdt:P27 ?ctry . OPTIONAL {{ ?ctry wdt:P297 ?cc }} }}
@@ -561,7 +565,8 @@ def stage_attrs():
                 nat = NAT_FIX.get(qid(v(r, "natq")))
             out.append([qid(v(r, "p")), v(r, "en") or v(r, "mul"),
                         year(v(r, "birth", "")), nat,
-                        img.rsplit("/", 1)[1] if img else None, num(r, "gk")])
+                        img.rsplit("/", 1)[1] if img else None, num(r, "gk"),
+                        v(r, "enwiki")])  # article title = common name, see common_name()
         return out
     rows = resumable("attrs", players, 350, fetch)
     save("attrs", {r[0]: r[1:] for r in rows})
@@ -891,6 +896,22 @@ def img_key(tail):
     f = unquote(tail).replace(" ", "_")
     return hashlib.md5(f.encode()).hexdigest()[:2] + f
 
+DISAMB = re.compile(r"\s*\([^()]*\)\s*$")   # "Dodô (footballer, born 1998)"
+
+def common_name(label, page):
+    """Display name: a Wikidata label is often the LEGAL name where football uses
+    something else entirely — Fiorentina's Dodô is labelled "Domilson Cordeiro dos
+    Santos", Javi Martínez "Javier Martínez González". The enwiki article title is
+    the common name by policy (WP:COMMONNAME), so prefer it, but only when it is
+    SHORTER in words: equal or longer means the label is already the everyday name
+    and the title would only add a disambiguator or a stray transliteration.
+    ~4% of players are renamed by this; every sampled rename was an improvement."""
+    if not page: return label
+    short = DISAMB.sub("", page).strip()
+    if not short: return label
+    if not label: return short
+    return short if len(short.split()) < len(label.split()) else label
+
 def stage_build():
     clubs, members, attrs = load("clubs"), load_members(), load("attrs")
     careers, teams = load_careers(), load("teams")
@@ -931,8 +952,11 @@ def stage_build():
     print(f"  dropped {n_dropped} unqualified postings, "
           f"merged {len(merged)} duplicate club items")
 
+    # display name per player, chosen once: it also orders the ids
+    disp = {q: common_name(a[0], a[5] if len(a) > 5 else None) for q, a in attrs.items()}
+    renamed = sum(1 for q, a in attrs.items() if disp[q] != a[0])
     player_qids = sorted({p for ps in kept_members.values() for p in ps},
-                         key=lambda q: (attrs.get(q, [None])[0] or "￿", q))
+                         key=lambda q: (disp.get(q) or "￿", q))
     pid = {q: i for i, q in enumerate(player_qids)}
 
     club_qids = sorted(kept_members, key=lambda q: clubs[q]["name"])
@@ -961,7 +985,7 @@ def stage_build():
     names, births, nats, imgs, gk_pids = [], [], [], [], []
     for i, q in enumerate(player_qids):
         a = attrs.get(q) or [None] * 5
-        names.append(a[0] or q); births.append(a[1] or 0)
+        names.append(disp.get(q) or q); births.append(a[1] or 0)
         nats.append(a[2] or ""); imgs.append(img_key(a[3]) if a[3] else "")
         if len(a) > 4 and a[4]: gk_pids.append(i)  # P413 goalkeeper: their goal counts are unreliable
 
@@ -1007,6 +1031,8 @@ def stage_build():
     print(f"  index.json {len(blob)/1e6:.2f} MB raw, {gz/1e6:.2f} MB gzip")
     print(f"  career shards total {shard_bytes/1e6:.2f} MB ({NSHARDS} files)")
     print(f"  goalkeepers: {len(gk_pids)} ({len(gk_pids)/len(names):.0%})")
+    # ~4% on a healthy run; 0 means a pre-2026-08-08 attrs checkpoint with no titles
+    print(f"  common names from enwiki titles: {renamed} of {len(attrs)}")
     print(f"  coverage: birth {sum(1 for b in births if b)/len(names):.0%}, "
           f"img {sum(1 for i in imgs if i)/len(names):.0%}, "
           f"nat {sum(1 for n in nats if n)/len(names):.0%}, "
