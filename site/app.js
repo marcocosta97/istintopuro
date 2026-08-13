@@ -70,6 +70,7 @@ const STR = {
     browse: "Sfoglia per campionato",
     others: "Altre",
     back: "indietro",
+    pivot: "compagni ↗", pivotT: "Apri in modalità Giocatori",
     copyLink: "copia link", copyLinkT: "Copia il link a questa selezione", copied: "copiato ✓",
     themeDark: "Passa al tema scuro", themeLight: "Passa al tema chiaro",
   },
@@ -117,6 +118,7 @@ const STR = {
     browse: "Browse by league",
     others: "Others",
     back: "back",
+    pivot: "teammates ↗", pivotT: "Open in player mode",
     copyLink: "copy link", copyLinkT: "Copy a link to this selection", copied: "copied ✓",
     themeDark: "Switch to dark theme", themeLight: "Switch to light theme",
   },
@@ -1483,6 +1485,16 @@ async function wikiSitelinks(qid) {
   return p;
 }
 
+// carry one player over into player mode, replacing that mode's selection —
+// the same move quiz.js makes from a revealed answer (qOpenPlayer). Scrolls back
+// up: the row clicked can be far down a long list, and the new view is one card.
+function openPlayerMode(pid) {
+  playerIds = [pid];
+  scrollTo(0, 0);
+  if (mode !== "player") setMode("player");
+  else { renderChips(); solve(); }
+}
+
 async function toggleCareer(li, pid) {
   const open = li.querySelector(".career");
   if (open) { open.remove(); li.querySelector(".expand").textContent = "▸"; return; }
@@ -1506,9 +1518,14 @@ async function toggleCareer(li, pid) {
        <span class="cyears">${yspan(s, e)}</span><span class="cteam">${loan[i] ? `<span class="loan" title="${t.loan}">↳</span> ` : ""}${esc(team)}</span>
        <span class="cstats">${apps != null ? apps + " " + t.apps(apps) : ""}${!gk && goals != null ? " · " + goals + " " + t.goals(goals) : ""}</span>
      </div>`).join("") || `<div class='crow'>${t.noData}</div>`)
+    // the reverse question, asked from the player you just found. Pointless in
+    // player mode, where he is already the selection.
+    + (mode === "club" ? `<button type="button" class="wiki pivot" title="${esc(t.pivotT)}">${t.pivot}</button>` : "")
     + (qid ? `<a class="wiki wiki-pedia" href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${lang}wiki/Q${qid}" target="_blank" rel="noopener">Wikipedia ↗</a>
               <a class="wiki" href="https://www.wikidata.org/wiki/Q${qid}" target="_blank" rel="noopener">Wikidata ↗</a>` : "");
   div.onclick = (e) => e.stopPropagation();
+  const pv = div.querySelector(".pivot");
+  if (pv) pv.onclick = () => openPlayerMode(pid);
   li.appendChild(div);
   if (qid) {
     const a = div.querySelector(".wiki-pedia");
