@@ -1535,6 +1535,22 @@ results.addEventListener("keydown", (e) => {
   else revealRow(to);
 });
 
+// ArrowDown reaches the list from anywhere that isn't already listening for it: after
+// a dice roll the focus sits on the button, after most other actions on <body>, and
+// there the key only scrolled the page. Panels that own their own arrows keep them.
+addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (document.body.classList.contains("quiz") || document.querySelector("dialog[open]")) return;
+  if (!browse.hidden || !natPanel.hidden) return;
+  const a = document.activeElement;
+  if (a && (a.matches("input, select, textarea") || a.closest("#results"))) return;
+  const first = navRows()[0];
+  if (!first) return;
+  e.preventDefault();
+  first.focus({ preventScroll: true });
+  revealRow(first);
+});
+
 // imgs entries are "hh" (md5 prefix, the Commons hashed-directory path) + underscored
 // filename: enough to hit upload.wikimedia.org directly, skipping the two uncacheable
 // Special:FilePath redirects that made every re-render refetch
