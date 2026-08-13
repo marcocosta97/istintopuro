@@ -192,7 +192,7 @@ function applyLang() {
     const sel = mode === "club" ? clubIds : playerIds;
     if (sel.length) solve();
     else {
-      results.innerHTML = ""; status.textContent = t.stats(DB.names.length, DB.clubs.length);
+      clearResults(); status.textContent = t.stats(DB.names.length, DB.clubs.length);
       renderNats(); renderExamples();
     }
   }
@@ -1112,8 +1112,7 @@ function intersect(lists) {
 function solve() {
   if (mode === "player") return solvePlayers();
   syncSort();  // the row is shared with the team-mates list: take it back
-  placeControls(null);
-  results.innerHTML = "";
+  clearResults();
   if (clubIds.length === 0) {  // no nagging: the stats line + dice nudge are the empty state
     status.textContent = t.stats(DB.names.length, DB.clubs.length);
     natCounts.clear(); renderNats(); renderExamples();
@@ -1206,7 +1205,7 @@ async function shareLink(btn) {
 // one player = plain lookup: the usual result row with the career panel open
 let sharedNames = new Set();  // shared clubs of the current selection: highlighted in expanded careers
 async function solvePlayers() {
-  results.innerHTML = "";
+  clearResults();
   const g = ++solveGen;
   sharedNames = new Set();
   if (!playerIds.length) {
@@ -1383,6 +1382,10 @@ const refilter = () => { if (inMates()) paintMates(); else solve(); };
 // top, above the player's own card and a section header, controlling neither. They are
 // single elements carrying their own state, so they move to the list they act on
 // rather than being duplicated — and inside a folded section they fold away with it.
+// #results is emptied in several places and the sort row may be borrowed inside it,
+// so every wipe goes through here — otherwise the row leaves the document with the
+// list and, being reachable only by reference, silently never comes back.
+function clearResults() { placeControls(null); results.innerHTML = ""; }
 function placeControls(host) {
   const m = document.querySelector("main"), parent = host || m;
   // Already there: do nothing. Re-inserting a node detaches it first, which blurs
@@ -1498,7 +1501,8 @@ document.addEventListener("keydown", (e) => {
 
 // opts.into renders somewhere other than #results (the teammates list), opts.metaOf
 // replaces the combined apps/goals in the right-hand column with something else the
-// caller finds more to the point there, opts.page overrides how many rows a batch is
+// caller finds more to the point there, opts.page overrides how many rows a batch is,
+// opts.hitOf gives the club names to highlight when that row's career is opened
 function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0, opts = {}) {
   const into = opts.into || results, page = opts.page || PAGE;
   const frag = document.createDocumentFragment();
@@ -1526,6 +1530,7 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0, opts = {}) {
     li.tabIndex = 0;  // keyboard: Enter/Space toggles the career, arrows walk the list
     li.setAttribute("aria-expanded", "false");
     li.dataset.pid = pid;
+    if (opts.hitOf) li.hitNames = opts.hitOf(pid);  // read back by toggleCareer
     li.onkeydown = (e) => {
       // same as an arrow move: what it unfolds has to end up on screen
       if (e.target === li && (e.key === "Enter" || e.key === " ")) {
@@ -1747,7 +1752,11 @@ async function renderMates(pid, gen) {
         + (spans.length > 1 ? ` <span class="mplus">${t.matesMore(spans.length - 1)}</span>` : "")
         + (tally ? ` <span class="mtally">· ${tally}</span>` : "");
     };
-    renderResults(ids, appsOf, goalsOf, zeroGoals, 0, { into: listUl, metaOf, page: MPAGE });
+    // opening a team-mate's career marks the spells that overlap the player above,
+    // the same way club mode marks the clubs you picked
+    const hitOf = (p) => new Set(map.get(p).filter(([ci]) => !matesOff.has(ci))
+      .map(([ci]) => DB.clubs[ci][0]));
+    renderResults(ids, appsOf, goalsOf, zeroGoals, 0, { into: listUl, metaOf, page: MPAGE, hitOf });
   };
 
   // the disclosure is the title only: the note beside it is a caption, and clicking
@@ -1939,8 +1948,11 @@ async function toggleCareer(li, pid) {
   try { [qid = 0, career = []] = await careerOf(pid); }
   catch { mark(false); return; }
   if (li.querySelector(".career")) return;
-  // club mode highlights the selected clubs; player mode the shared ones
-  const selNames = mode === "club" ? new Set(clubIds.map(ci => DB.clubs[ci][0])) : sharedNames;
+  // club mode highlights the selected clubs, player mode the shared ones — and a row
+  // that carries its own set (a team-mate, whose common ground is with the player
+  // above rather than with the selection) highlights that
+  const selNames = li.hitNames
+    || (mode === "club" ? new Set(clubIds.map(ci => DB.clubs[ci][0])) : sharedNames);
   const gk = DB.gkSet.has(pid);  // goalkeeper goal counts are unreliable, show apps only
   const div = document.createElement("div");
   div.className = "career";
