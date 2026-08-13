@@ -70,6 +70,7 @@ const STR = {
     browse: "Sfoglia per campionato",
     others: "Altre",
     back: "indietro",
+    copyLink: "copia link", copyLinkT: "Copia il link a questa selezione", copied: "copiato ✓",
     themeDark: "Passa al tema scuro", themeLight: "Passa al tema chiaro",
   },
   en: {
@@ -116,6 +117,7 @@ const STR = {
     browse: "Browse by league",
     others: "Others",
     back: "back",
+    copyLink: "copy link", copyLinkT: "Copy a link to this selection", copied: "copied ✓",
     themeDark: "Switch to dark theme", themeLight: "Switch to light theme",
   },
 };
@@ -1112,6 +1114,7 @@ function solve() {
   const ms = performance.now() - t0;
   status.innerHTML = t.found(ids.length, ms.toFixed(1))
     + (ids.length && clubIds.length > 1 ? ` <span class="comb">(${t.combNote})</span>` : "");
+  status.appendChild(linkBtn());
   if (ids.length === 0) {  // a dead end still deserves a way forward
     const li = document.createElement("li");
     li.className = "empty";
@@ -1119,6 +1122,39 @@ function solve() {
     results.appendChild(li);
   }
   renderResults(ids, appsOf, goalsOf, zeroGoals);
+}
+
+// ---------------------------------------------------------------- share
+// The club selection has always been in the URL hash (syncHash), but nothing on
+// the page said so, and on a phone copying the address bar is a chore. Sits at the
+// right of the status row, where player mode keeps its "dettagli" switch.
+function linkBtn() {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "linkbtn";
+  b.textContent = `🔗 ${t.copyLink}`;
+  b.title = t.copyLinkT;
+  b.onclick = () => shareLink(b);
+  return b;
+}
+async function shareLink(btn) {
+  const url = location.href;
+  // native sheet only on touch, like the quiz's share: on desktop navigator.share
+  // exists but often no-ops, so there we always copy
+  if (navigator.share && matchMedia("(pointer: coarse)").matches) {
+    try { await navigator.share({ url }); return; } catch (err) { if (err && err.name === "AbortError") return; }
+  }
+  const done = () => {
+    btn.textContent = t.copied; btn.classList.add("copied");
+    setTimeout(() => { btn.textContent = `🔗 ${t.copyLink}`; btn.classList.remove("copied"); }, 1500);
+  };
+  try { await navigator.clipboard.writeText(url); done(); return; } catch {}
+  try {  // last-ditch for older Safari without the async clipboard API
+    const ta = document.createElement("textarea");
+    ta.value = url; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    document.execCommand("copy"); ta.remove(); done();
+  } catch {}
 }
 
 // ------------------------------------------------------ solve: player mode

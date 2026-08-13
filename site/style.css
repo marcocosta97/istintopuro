@@ -355,6 +355,9 @@ label.frow { cursor: pointer; }
   border: 1px solid var(--line); border-radius: 7px; padding: .12rem .5rem;
 }
 #status button:hover { border-color: var(--accent); }
+/* copy-link, right edge of the status row — the slot player mode gives "dettagli" */
+.linkbtn { margin-left: auto; white-space: nowrap; }
+.linkbtn.copied, .linkbtn.copied:hover { color: var(--accent); border-color: var(--accent); background: var(--hit); }
 /* dettagli switch, pushed to the right edge of the status row */
 .dtg { margin-left: auto; display: inline-flex; align-items: center; gap: .4rem; cursor: pointer; font-size: .85rem; }
 .dtg input { position: absolute; opacity: 0; pointer-events: none; }
