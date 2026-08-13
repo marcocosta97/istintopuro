@@ -838,7 +838,12 @@ search.addEventListener("keydown", (e) => {
   const items = [...sugg.children];
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault();
-    if (!items.length) return;
+    // with no list open the arrows have nothing to walk here, so ArrowDown steps
+    // out of the field and into the results (which take over from there)
+    if (sugg.hidden || !items.length) {
+      if (e.key === "ArrowDown") navRows()[0]?.focus();
+      return;
+    }
     moveCursor(items, (cursor + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length);
   } else if ((e.key === "Enter" || e.key === "Tab") && cursor >= 0 && !sugg.hidden) {
     e.preventDefault();  // Tab confirms like Enter instead of leaving the field
@@ -1450,8 +1455,9 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
       im.src = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(DB.imgs[pid].slice(2))}?width=96`;
     };
     li.onclick = () => toggleCareer(li, pid);
-    li.tabIndex = 0;  // keyboard: Enter/Space toggles the career like a click
+    li.tabIndex = 0;  // keyboard: Enter/Space toggles the career, arrows walk the list
     li.setAttribute("aria-expanded", "false");
+    li.dataset.pid = pid;
     li.onkeydown = (e) => {
       if (e.target === li && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggleCareer(li, pid); }
     };
@@ -1469,6 +1475,38 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
     results.appendChild(li);
   }
 }
+
+// ------------------------------------------------------ keyboard: result list
+// The rows have always been tabbable and Enter has always opened a career, but the
+// arrows did nothing here: the page scrolled and the focus stayed behind, which is
+// worst exactly when a career is open and the row is tall. Now the arrows walk the
+// list, ArrowUp from the top returns to the search box, and an open career TRAVELS —
+// it closes behind you and opens on the row you land on, so holding ArrowDown reads
+// the careers one after another instead of leaving every panel open in your wake.
+const NAVSEL = "li.player:not(.sclub), li.more";
+const navRows = () => [...results.querySelectorAll(NAVSEL)];
+let navGen = 0;
+async function navOpen(row) {
+  const g = ++navGen;
+  await toggleCareer(row, +row.dataset.pid);
+  // a shard still in flight can land after the next arrow press: don't leave a trail
+  if (g !== navGen && row.querySelector(".career")) toggleCareer(row, +row.dataset.pid);
+}
+results.addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  const from = e.target;
+  if (!from.matches || !from.matches(NAVSEL)) return;  // a link inside an open career
+  const rows = navRows(), i = rows.indexOf(from), to = rows[i + (e.key === "ArrowDown" ? 1 : -1)];
+  if (!to) {
+    if (e.key === "ArrowUp" && i === 0) { e.preventDefault(); search.focus(); }
+    return;
+  }
+  e.preventDefault();
+  const open = !!from.querySelector(".career");
+  if (open) toggleCareer(from, +from.dataset.pid);
+  to.focus();
+  if (open && to.dataset.pid) navOpen(to);
+});
 
 // imgs entries are "hh" (md5 prefix, the Commons hashed-directory path) + underscored
 // filename: enough to hit upload.wikimedia.org directly, skipping the two uncacheable
