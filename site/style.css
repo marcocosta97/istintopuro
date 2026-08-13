@@ -377,7 +377,8 @@ label.frow { cursor: pointer; }
      where a collapsed card's bottom edge is */
   display: flex; align-items: center; gap: 0 .6rem; flex-wrap: wrap;
 }
-.player:hover { border-color: var(--accent); }
+/* not while the view is scrolling under a parked cursor — see noHover() in app.js */
+body:not(.nohover) .player:not(.sclub):hover { border-color: var(--accent); }
 .player img, .avatar {
   width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
 }

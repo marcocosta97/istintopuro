@@ -1509,6 +1509,15 @@ async function navOpen(row) {
   if (g !== navGen) { if (row.querySelector(".career")) toggleCareer(row, +row.dataset.pid); return; }
   revealRow(row);  // only now is the career in the layout
 }
+// A scroll moves the rows, not the mouse, and the browser keeps :hover on whatever
+// passed under a parked cursor — so the green border was left on a row three or four
+// back from the one being read, with the pointer nowhere near it. While the view is
+// moving, hover isn't what anyone means; the next real mouse move brings it back.
+// (Touch never gets here: a finger has no hover to go stale.)
+const noHover = (on) => document.body.classList.toggle("nohover", on);
+addEventListener("scroll", () => noHover(true), { passive: true });
+addEventListener("pointermove", (e) => { if (e.pointerType === "mouse") noHover(false); }, { passive: true });
+
 results.addEventListener("keydown", (e) => {
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   const from = e.target;
