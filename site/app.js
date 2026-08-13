@@ -1642,6 +1642,18 @@ async function renderMates(pid, gen) {
       chip.onclick = () => { matesOff.has(ci) ? matesOff.delete(ci) : matesOff.add(ci); paint(); };
       row.appendChild(chip);
     }
+    if (perClub.size > 1) {  // one control for the whole row, flipping to whichever
+      const none = [...perClub.keys()].every(ci => matesOff.has(ci));  // side is useful
+      const all = document.createElement("button");
+      all.type = "button";
+      all.className = "clearchip";
+      all.textContent = none ? `✓ ${t.natAll}` : `✕ ${t.natNone}`;
+      all.onclick = () => {
+        matesOff = none ? new Set() : new Set(perClub.keys());
+        paint();
+      };
+      row.appendChild(all);
+    }
     body.appendChild(row);
 
     // years shared, over the clubs still ticked — the default order, and the one
