@@ -1480,6 +1480,84 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
   }
 }
 
+// ------------------------------------------------------- all-time teammates
+// "Who else was there at the same time" is a question about a CLUB, but the years
+// that answer it are stored per PLAYER, inside the career shards — so asking it of
+// them means fetching all 128 (6 MB) to read four clubs. data/years/<club>.json
+// inverts that: one array per club, parallel to its postings, holding each player's
+// spells there as [start, end, start, end, …] offset from YEAR0. A club costs ~1 kB
+// gzipped, so a whole career's worth is a dozen.
+const YEAR0 = 1850;
+const yearsCache = new Map();
+function yearsOf(ci) {
+  if (!yearsCache.has(ci))  // versioned like the career shards: same staleness trap
+    yearsCache.set(ci, fetch(`data/years/${ci}.json?v=${DB.built || 0}`)
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(y => {
+        // The file carries no player ids of its own — it is positional. If it ever
+        // stops lining up with the postings it describes, every year in it belongs
+        // to somebody else, and nothing downstream could tell. Refuse it instead.
+        if (y.length !== postings(ci).length) throw new Error(`years/${ci}: length mismatch`);
+        return y;
+      })
+      .catch(err => { yearsCache.delete(ci); throw err; }));
+  return yearsCache.get(ci);
+}
+
+// The years two flat spell lists have in common, as runs of [first, last] — null if
+// none. Both lists are short (one entry per spell), so the double loop is the cheap
+// way. Runs stay separate rather than collapsing to one min-max span: Curci was at
+// Roma twice, 2004-08 and 2011-15, and "2004–2015" would claim three years with
+// Totti that he spent at Siena and Sampdoria.
+function overlap(a, b) {
+  const hits = [];
+  for (let i = 0; i < a.length; i += 2)
+    for (let j = 0; j < b.length; j += 2) {
+      const s = Math.max(a[i], b[j]), e = Math.min(a[i + 1], b[j + 1]);
+      if (s <= e) hits.push([s + YEAR0, e + YEAR0]);
+    }
+  if (!hits.length) return null;
+  hits.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  const runs = [hits[0]];
+  for (const [s, e] of hits.slice(1)) {
+    const last = runs[runs.length - 1];
+    if (s <= last[1] + 1) last[1] = Math.max(last[1], e);  // touching years read as one run
+    else runs.push([s, e]);
+  }
+  return runs;
+}
+const runYears = (runs) => runs.reduce((n, [s, e]) => n + e - s + 1, 0);
+const idxOf = (arr, v) => {  // position of a player id in a club's sorted postings
+  let lo = 0, hi = arr.length - 1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m] === v) return m; arr[m] < v ? lo = m + 1 : hi = m - 1; }
+  return -1;
+};
+
+// every player who was at one of pid's clubs while he was there:
+// Map(player id -> [[club index, [[from, to], …]], …]).
+// His own spells come out of the same files as everyone else's, so the two sides of
+// the comparison are read the same way — including how an open-ended spell was closed.
+async function matesOf(pid) {
+  pClubIndex();
+  const cis = [];
+  for (let k = DB.pcAt[pid]; k < DB.pcAt[pid + 1]; k++) cis.push(DB.pcClub[k]);
+  const years = await Promise.all(cis.map(yearsOf));
+  const out = new Map();
+  cis.forEach((ci, k) => {
+    const arr = postings(ci), y = years[k], me = idxOf(arr, pid);
+    const mine = me >= 0 ? y[me] : null;
+    if (!mine || !mine.length) return;  // no dated spell of his own: nothing to prove
+    for (let i = 0; i < arr.length; i++) {
+      if (i === me || !y[i].length) continue;
+      const runs = overlap(mine, y[i]);
+      if (!runs) continue;
+      const e = out.get(arr[i]);
+      if (e) e.push([ci, runs]); else out.set(arr[i], [[ci, runs]]);
+    }
+  });
+  return out;
+}
+
 // ------------------------------------------------------ keyboard: result list
 // The rows have always been tabbable and Enter has always opened a career, but the
 // arrows did nothing here: the page scrolled and the focus stayed behind, which is
