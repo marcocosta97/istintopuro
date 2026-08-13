@@ -33,6 +33,15 @@ Emitted formats — site/data/index.json (one file, whole club-mode dataset):
   leagues/nshards/built  league table, shard count, extraction date
             (footer stamp + shard-fetch cache-buster)
 
+site/data/years/<club index>.json — lazy-loaded spell years, one entry per
+  posting IN THE SAME ORDER (so it carries no ids of its own):
+  [start, end, start, end, ...] offset from YEAR0, one pair per dated spell at
+  that club, [] when none is dated. Spells stay separate here (unlike the
+  aggregated apps/goals above) because a player who left and came back was not
+  at the club in between. Answers "who was there at the same time", which the
+  career shards can only answer by fetching all of them — they are keyed by
+  player, and the question is asked about a club.
+
 site/data/career/<pid % nshards>.json — lazy-loaded careers, per player:
   [QID number, spells]   QID links Wikipedia via Special:GoToLinkedPage
   spell = [team, start, end, apps, goals(, 1)]  one per P54 statement, so
@@ -830,6 +839,11 @@ def stage_teams():
 
 # ----------------------------------------------------------------- stage: build
 NSHARDS = 128
+# spell years ship as offsets from here: two digits instead of four, over 200k of them.
+# YEAR_MAX is the plausibility ceiling that keeps typo years out of the overlap test.
+YEAR0 = 1850
+YEAR_MAX = 2100
+END_AGE = 42  # past this nobody is still under contract, whatever an unclosed spell says
 
 # national sides (senior/under-NN/Olympic/women's, any sport) — not clubs, keep out of careers
 NATIONAL = re.compile(r"\bnational\b.*\bteam\b|nationalmannschaft"
@@ -916,6 +930,11 @@ def stage_build():
     clubs, members, attrs = load("clubs"), load_members(), load("attrs")
     careers, teams = load_careers(), load("teams")
 
+    # data freshness = newest Wikidata checkpoint, not build time. Read up here because
+    # spells_at closes over its year, as the end of an open-ended spell.
+    built = time.strftime("%Y-%m-%d", time.localtime(max(p.stat().st_mtime for p in DATA.glob("*.json*"))))
+    built_year = int(built[:4])
+
     merged = merge_map(clubs, members)
     groups = {}  # canonical qid -> all qids folded into it
     for q in members: groups.setdefault(merged.get(q, q), []).append(q)
@@ -934,6 +953,34 @@ def stage_build():
             if a2 is not None: a = (a or 0) + a2  # sums across spells and group members
             if g2 is not None: g = (g or 0) + g2
         return s, e, a, g
+
+    def spells_at(p, qs):  # the same spells, kept apart and flattened: [s, e, s, e, ...]
+        qs = set(qs)
+        career = careers.get(p, ())
+        # An open spell runs until the player's next move — a loan out doesn't end it.
+        # With no later move it means "still there", but only for someone who could
+        # still be playing: for anyone long retired an unclosed spell is a missing end
+        # date, and reading it as ongoing makes him a team-mate of everyone who came
+        # after. Haki Korça (b. 1919) joined Roma in 1941 and Wikidata records no end —
+        # which is not an 85-year stay, and had him turning up beside Totti. There,
+        # claim only the season we can prove.
+        moves = sorted(s for _, s, _, _, _, ln in career if s and not ln)
+        birth = (attrs.get(p) or [None, None])[1]
+        playing = bool(birth) and birth + END_AGE >= built_year
+        out = []
+        for team, s, e, _a, _g, _ln in career:
+            if team not in qs or not s or not YEAR0 <= s <= YEAR_MAX: continue
+            if e is None:
+                e = next((m for m in moves if m > s), None) or (built_year if playing else s)
+            elif not s <= e <= YEAR_MAX:
+                # Wikidata noise — an end before the start, a 4-digit typo (14 spells in
+                # 225k). An impossible range is worse than a missing one here: 1299-9999
+                # would make that player a teammate of everyone the club ever had. Keep
+                # the start, which is the qualifier the pipeline already sorts on, and
+                # claim nothing beyond that season.
+                e = s
+            out.append((s, e))
+        return [x - YEAR0 for s, e in sorted(out) for x in (s, e)]
 
     # membership must include overlay spells: a player belongs to a club if
     # load_careers() places a spell there, not only if Wikidata P54 (members) listed
@@ -964,7 +1011,7 @@ def stage_build():
     cur_of = {merged.get(q, q): lmask[lq] for lq, qs in CURRENT.items() for q in qs}
     stray = sorted(q for q in cur_of if q not in kept_members)
     if stray: print(f"  WARNING: CURRENT clubs not in universe: {stray}")
-    out_clubs, postings, apps_col, goals_col = [], [], [], []
+    out_clubs, postings, apps_col, goals_col, years = [], [], [], [], []
     for cq in club_qids:
         c = clubs[cq]
         leagues = {l for q in groups[cq] for l in clubs[q]["leagues"]}
@@ -981,6 +1028,7 @@ def stage_build():
         postings.append(deltas)
         apps_col.append([-1 if s[2] is None else s[2] for s in sp])  # -1 = unknown
         goals_col.append([-1 if s[3] is None else s[3] for s in sp])
+        years.append([spells_at(player_qids[i], groups[cq]) for i in ids])
 
     names, births, nats, imgs, gk_pids = [], [], [], [], []
     for i, q in enumerate(player_qids):
@@ -990,8 +1038,6 @@ def stage_build():
         if len(a) > 4 and a[4]: gk_pids.append(i)  # P413 goalkeeper: their goal counts are unreliable
 
     SITE_DATA.mkdir(parents=True, exist_ok=True)
-    # data freshness = newest Wikidata checkpoint, not build time
-    built = time.strftime("%Y-%m-%d", time.localtime(max(p.stat().st_mtime for p in DATA.glob("*.json*"))))
     gks = [gk_pids[0]] + [b - a for a, b in zip(gk_pids, gk_pids[1:])] if gk_pids else []
     index = {"built": built, "nshards": NSHARDS,  # app.js reads the shard count from here
              "leagues": [list(LEAGUES[q]) for q in LEAGUE_ORDER],
@@ -1020,6 +1066,17 @@ def stage_build():
         (SITE_DATA / "career" / f"{si}.json").write_bytes(b)
         shard_bytes += len(b)
 
+    # Spell years per club, parallel to postings. Rewritten from empty: a club index
+    # freed by a shrinking universe would otherwise leave a stale file behind, and
+    # nothing in the format could tell that it now describes a different club.
+    (SITE_DATA / "years").mkdir(exist_ok=True)
+    for f in (SITE_DATA / "years").glob("*.json"): f.unlink()
+    years_bytes = 0
+    for ci, y in enumerate(years):
+        b = json.dumps(y, separators=(",", ":")).encode()
+        (SITE_DATA / "years" / f"{ci}.json").write_bytes(b)
+        years_bytes += len(b)
+
     n_post = sum(map(len, postings))
     gz = len(gzip.compress(blob, 6))
     with_apps = sum(1 for col in apps_col for a in col if a >= 0)
@@ -1030,6 +1087,9 @@ def stage_build():
     print(f"build: {len(out_clubs)} clubs, {len(names)} players, {n_post} postings")
     print(f"  index.json {len(blob)/1e6:.2f} MB raw, {gz/1e6:.2f} MB gzip")
     print(f"  career shards total {shard_bytes/1e6:.2f} MB ({NSHARDS} files)")
+    n_dated = sum(1 for y in years for sp in y if sp)
+    print(f"  years total {years_bytes/1e6:.2f} MB ({len(years)} files), "
+          f"{n_dated/max(n_post,1):.1%} of postings dated")
     print(f"  goalkeepers: {len(gk_pids)} ({len(gk_pids)/len(names):.0%})")
     # ~4% on a healthy run; 0 means a pre-2026-08-08 attrs checkpoint with no titles
     print(f"  common names from enwiki titles: {renamed} of {len(attrs)}")
@@ -1064,6 +1124,13 @@ APPS_FLOOR = 0.85
 # spell at a universe club — so a healthy run sits near 100% and a dead parser at
 # ~50%. The floor goes between, nearer the failure so normal churn never trips it.
 ROSTER_FLOOR = 0.85
+
+# The years files are a bare parallel array to postings — no ids of their own — so a
+# length that stops matching is a silent mis-pairing of every player at that club with
+# someone else's spells, not a visible failure. Checked per club, not sampled. The
+# floor is a second, softer guard: a posting exists because some spell was qualified,
+# and a start year is the commonest qualifier, so healthy runs sit at 99.7%.
+YEARS_FLOOR = 0.95
 
 def apps_coverage(idx):
     tot = sum(len(c) for c in idx["apps"])
@@ -1102,6 +1169,22 @@ def stage_validate():
         and sum(gk) < np)), "bad gks list")
     missing = [i for i in range(NSHARDS) if not (SITE_DATA / "career" / f"{i}.json").exists()]
     chk(not missing, f"missing career shards: {missing[:5]}")
+    ydir = SITE_DATA / "years"
+    stray = sorted(int(f.stem) for f in ydir.glob("*.json") if int(f.stem) >= nc) if ydir.is_dir() else []
+    chk(not stray, f"years files for clubs that no longer exist: {stray[:5]}")
+    y_dated = y_tot = 0
+    for c in range(nc):
+        f = ydir / f"{c}.json"
+        if not f.exists(): chk(False, f"club {c}: years file missing"); continue
+        y = json.loads(f.read_bytes())
+        chk(len(y) == len(idx["postings"][c]),
+            f"club {c}: years {len(y)} != postings {len(idx['postings'][c])}")
+        chk(all(len(sp) % 2 == 0 and all(x >= 0 for x in sp)
+                and all(sp[k] <= sp[k + 1] for k in range(0, len(sp), 2)) for sp in y),
+            f"club {c}: malformed spell years")
+        y_tot += len(y); y_dated += sum(1 for sp in y if sp)
+    ycov = y_dated / y_tot if y_tot else 0
+    chk(ycov >= YEARS_FLOOR, f"dated postings {ycov:.1%} below floor {YEARS_FLOOR:.0%}")
     cov = apps_coverage(idx)
     chk(cov >= APPS_FLOOR, f"apps coverage {cov:.1%} below floor {APPS_FLOOR:.0%}")
     # every nat code must be renderable: a real ISO 3166-1 alpha-2 (emoji flag) or one
@@ -1132,7 +1215,7 @@ def stage_validate():
               f"apps {ov:.1%} -> {cov:.1%}")
     if errs:
         sys.exit("validate FAILED:\n  " + "\n  ".join(errs[:20]))
-    print(f"validate: OK ({nc} clubs, {np} players)")
+    print(f"validate: OK ({nc} clubs, {np} players, {ycov:.1%} of postings dated)")
 
     # Body for the refresh commit. The diff is one line of minified JSON, so none of
     # this is readable from it — which is the only reason it earns the three lines the
