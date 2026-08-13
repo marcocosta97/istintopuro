@@ -1045,8 +1045,8 @@ function renderChips() {
 
 // ------------------------------------------------------- random demo query
 // shown whenever the current mode has no selection: one tap rolls 2–3
-// current top-division clubs, or 2–3 players born within a couple of years
-// of each other (photo + known birth year as the notability proxy)
+// current top-division clubs, or 2–3 players who were at one club at the
+// same time (photo as the notability proxy)
 function renderExamples() {  // a nudge toward the picker dice, not a control of its own
   const li = document.createElement("li");
   li.className = "examples";
@@ -1058,10 +1058,65 @@ const draw = (pool, n) => {  // n distinct random picks
   while (out.length < n && p.length) out.push(p.splice(Math.random() * p.length | 0, 1)[0]);
   return out;
 };
-// a roll must land on something to show: clubs re-draw until they intersect;
-// players are drawn same-age from one random roster, so a shared club is
-// guaranteed by construction. Both ease 3 picks down to 2 if draws keep failing.
-function runRandom(m) {
+// Weighted pick over [value, weight] rows, weight > 0.
+const weighted = (rows) => {
+  let tot = 0;
+  for (const [, w] of rows) tot += w;
+  let x = Math.random() * tot;
+  for (const [v, w] of rows) if ((x -= w) < 0) return v;
+  return rows[rows.length - 1][0];  // float drift only
+};
+
+// Players who were at one club AT THE SAME TIME. The roll used to pair by birth year
+// (±2), a proxy for "could have played together" that never asked whether they did —
+// so it would hand you a club's 1994 side beside its 2019 one, two men who share
+// nothing but a shirt and a decade of birth. The club's years file answers the real
+// question, and the draw is weighted by seasons shared, so a long partnership comes
+// up more often than one overlapping season. Returns null if the years aren't there.
+async function rollMates(n) {
+  for (let tries = 1; tries <= 40; tries++) {
+    if (tries === 20) n = 2;
+    const ci = Math.random() * DB.clubs.length | 0;
+    const arr = postings(ci);
+    let y;
+    try { y = await yearsOf(ci); } catch { return null; }  // caller falls back to the roster
+    const cand = [];  // a photo carries the card; an undated spell can prove nothing
+    for (let i = 0; i < arr.length; i++) if (y[i].length && DB.imgs[arr[i]]) cand.push(i);
+    if (cand.length < n) continue;
+    const a = cand[Math.random() * cand.length | 0];
+    const mates = [];
+    for (const i of cand) {
+      if (i === a) continue;
+      const runs = overlap(y[a], y[i]);
+      if (runs) mates.push([i, runYears(runs)]);
+    }
+    if (mates.length < n - 1) continue;
+    const b = weighted(mates);
+    if (n === 2) return [arr[a], arr[b]];
+    // a third has to have been there with BOTH of them, or "together" is a half-truth
+    const both = mates.filter(([i]) => i !== b && overlap(y[b], y[i]));
+    if (!both.length) continue;
+    return [arr[a], arr[b], arr[weighted(both)]];
+  }
+  return null;
+}
+
+// Fallback for a build with no years files (they only exist after a refresh): one
+// roster, photos, and nothing to say about when — a shared club is still guaranteed.
+function rollRoster(n) {
+  for (let tries = 1; tries <= 80; tries++) {
+    if (tries === 40) n = 2;
+    const cand = postings(Math.random() * DB.clubs.length | 0).filter(p => DB.imgs[p]);
+    if (cand.length >= n) return draw(cand, n);
+  }
+  return null;
+}
+
+let rollGen = 0;  // stale-async guard: only the newest roll may land
+// a roll must land on something to show: clubs re-draw until they intersect, players
+// until the club's years put them there together. Both ease 3 picks down to 2 if
+// draws keep failing.
+async function runRandom(m) {
   let n = 2 + (Math.random() < .35 ? 1 : 0);
   if (m === "club") {
     // first league index of each country group = the top division
@@ -1077,18 +1132,9 @@ function runRandom(m) {
     clubIds = pick;
     syncHash();
   } else {
-    let pick = null;
-    for (let tries = 1; !pick && tries <= 80; tries++) {
-      if (tries === 40) n = 2;
-      const arr = postings(Math.random() * DB.clubs.length | 0);
-      const cand = [];
-      for (let k = 0; k < arr.length; k++)
-        if (DB.imgs[arr[k]] && DB.births[arr[k]]) cand.push(arr[k]);
-      const a = cand[Math.random() * cand.length | 0];
-      if (a === undefined) continue;
-      const near = cand.filter(p => p !== a && Math.abs(DB.births[p] - DB.births[a]) <= 2);
-      if (near.length >= n - 1) pick = [a, ...draw(near, n - 1)];
-    }
+    const g = ++rollGen;
+    const pick = await rollMates(n) || rollRoster(n);
+    if (g !== rollGen || mode !== m) return;  // a newer roll, or the mode moved on
     if (!pick) return;
     playerIds = pick;
   }
