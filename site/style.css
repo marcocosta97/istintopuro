@@ -436,10 +436,14 @@ label.frow { cursor: pointer; }
 .cteam { flex: 1; }
 .cteam .loan { color: var(--muted); }
 .cstats { color: var(--muted); white-space: nowrap; }
-.career .wiki { display: inline-block; margin: .35rem .8rem 0 0; font-size: .8rem; color: var(--accent); text-decoration: none; }
-/* the pivot into player mode sits in the same footer row as the wiki links, and
-   reads as one of them — a button only because it stays on the page */
-.career button.pivot { cursor: pointer; background: transparent; border: none; padding: 0; font: inherit; font-size: .8rem; color: var(--accent); }
+.cfoot { display: flex; align-items: baseline; gap: .8rem; margin-top: .35rem; }
+.career .wiki { font-size: .8rem; color: var(--accent); text-decoration: none; }
+/* the pivot into player mode reads as one of the footer links — a button only
+   because it stays on the page — and holds the right edge, away from the sources */
+.career button.pivot {
+  margin-left: auto; cursor: pointer; background: transparent; border: none;
+  padding: 0; font: inherit; font-size: .8rem; color: var(--accent);
+}
 .career button.pivot:hover { text-decoration: underline; }
 
 /* player mode: one card per shared club, a .crow per selected player */

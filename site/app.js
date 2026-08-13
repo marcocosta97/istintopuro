@@ -1549,11 +1549,14 @@ async function toggleCareer(li, pid) {
        <span class="cyears">${yspan(s, e)}</span><span class="cteam">${loan[i] ? `<span class="loan" title="${t.loan}">↳</span> ` : ""}${esc(team)}</span>
        <span class="cstats">${apps != null ? apps + " " + t.apps(apps) : ""}${!gk && goals != null ? " · " + goals + " " + t.goals(goals) : ""}</span>
      </div>`).join("") || `<div class='crow'>${t.noData}</div>`)
-    // the reverse question, asked from the player you just found. Pointless in
-    // player mode, where he is already the selection.
-    + (mode === "club" ? `<button type="button" class="wiki pivot" title="${esc(t.pivotT)}">${t.pivot}</button>` : "")
+    // footer: the sources on the left, and pushed to the far right the reverse
+    // question, asked from the player you just found — pointless in player mode,
+    // where he is already the selection
+    + `<div class="cfoot">`
     + (qid ? `<a class="wiki wiki-pedia" href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${lang}wiki/Q${qid}" target="_blank" rel="noopener">Wikipedia ↗</a>
-              <a class="wiki" href="https://www.wikidata.org/wiki/Q${qid}" target="_blank" rel="noopener">Wikidata ↗</a>` : "");
+              <a class="wiki" href="https://www.wikidata.org/wiki/Q${qid}" target="_blank" rel="noopener">Wikidata ↗</a>` : "")
+    + (mode === "club" ? `<button type="button" class="wiki pivot" title="${esc(t.pivotT)}">${t.pivot}</button>` : "")
+    + `</div>`;
   div.onclick = (e) => e.stopPropagation();
   const pv = div.querySelector(".pivot");
   if (pv) pv.onclick = () => openPlayerMode(pid);
