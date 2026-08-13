@@ -135,6 +135,7 @@ function applyLang() {
   $("tagline").textContent = mode === "club" ? t.tagline : t.taglineP;
   $("foot").innerHTML = t.footer + (DB && DB.built ? `<div id="built">${t.built(DB.built)}</div>` : "");
   search.placeholder = mode === "club" ? t.placeholder : t.placeholderP;
+  search.setAttribute("aria-label", search.placeholder);  // the placeholder is not a reliable accessible name
   $("mode-club").textContent = t.modeClub;
   $("mode-player").textContent = t.modePlayer;
   browseBtn.title = t.browse;
@@ -227,7 +228,7 @@ function setMode(m) {
   mode = m;
   $("mode-club").setAttribute("aria-pressed", m === "club");
   $("mode-player").setAttribute("aria-pressed", m === "player");
-  browseOpen(false); sugg.hidden = true; search.value = "";
+  browseOpen(false); suggOpen(false); search.value = "";
   browseBtn.hidden = m === "player";
   $("controls").hidden = m === "player";
   if (m === "player") {
@@ -788,13 +789,32 @@ function playerRow(id, nq) {
 }
 
 let cursor = -1;
+let suggIds = [];   // what the list currently shows: the cursor indexes THIS, not a re-run of the search
+// The list is the popup of a combobox, so every open and close has to carry the
+// input's aria state with it — without that the arrow-key cursor below moves
+// through rows a screen reader never hears about.
+function suggOpen(open) {
+  sugg.hidden = !open;
+  search.setAttribute("aria-expanded", String(open));
+  if (!open) { search.removeAttribute("aria-activedescendant"); cursor = -1; }
+}
+function moveCursor(items, i) {
+  cursor = i;
+  items.forEach((li, k) => {
+    li.classList.toggle("active", k === i);
+    li.setAttribute("aria-selected", String(k === i));
+  });
+  if (i >= 0) search.setAttribute("aria-activedescendant", items[i].id);
+}
 function renderSuggestions(ids, q = "") {
   const nq = norm(q);
   sugg.innerHTML = "";
-  sugg.hidden = ids.length === 0;
-  cursor = ids.length ? 0 : -1;
+  suggIds = ids;
+  suggOpen(ids.length > 0);
   ids.forEach((id, i) => {
     const li = document.createElement("li");
+    li.id = "sg" + i;
+    li.setAttribute("role", "option");
     if (mode === "club") {
       const c = DB.clubs[id];
       li.innerHTML = `<span>${countryFlag(c[1])} ${hilite(c[0], nq)}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
@@ -802,10 +822,10 @@ function renderSuggestions(ids, q = "") {
       li.innerHTML = playerRow(id, nq);
       li.classList.add("two");
     }
-    if (i === cursor) li.classList.add("active");
     li.onmousedown = (e) => { e.preventDefault(); addSel(id); };
     sugg.appendChild(li);
   });
+  if (ids.length) moveCursor([...sugg.children], 0);
 }
 const addSel = (id) => mode === "club" ? addClub(id) : addPlayer(id);
 
@@ -819,22 +839,21 @@ search.addEventListener("keydown", (e) => {
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault();
     if (!items.length) return;
-    cursor = (cursor + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
-    items.forEach((li, i) => li.classList.toggle("active", i === cursor));
+    moveCursor(items, (cursor + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length);
   } else if ((e.key === "Enter" || e.key === "Tab") && cursor >= 0 && !sugg.hidden) {
     e.preventDefault();  // Tab confirms like Enter instead of leaving the field
-    addSel(matches(search.value)[cursor]);
+    addSel(suggIds[cursor]);  // the rendered list, not a second run of the search
   } else if (e.key === "Backspace" && !search.value) {
     if (mode === "club" && clubIds.length) removeClub(clubIds[clubIds.length - 1]);
     else if (mode === "player" && playerIds.length) removePlayer(playerIds[playerIds.length - 1]);
-  } else if (e.key === "Escape") { sugg.hidden = true; }
+  } else if (e.key === "Escape") { suggOpen(false); }
 });
 // The suggestion list is NOT tied to the input keeping focus. It used to hide on blur,
 // which meant putting the phone keyboard away also threw away the list you opened it to
 // read. Every path that should close it already says so (selection, Escape, mode switch,
 // browse, empty query); the only case blur really stood for is a tap somewhere else.
 document.addEventListener("pointerdown", (e) => {
-  if (!sugg.hidden && !e.target.closest("#picker")) sugg.hidden = true;
+  if (!sugg.hidden && !e.target.closest("#picker")) suggOpen(false);
 });
 
 // Phones: the keyboard costs half the viewport and nothing takes it away — page
@@ -866,7 +885,7 @@ function browseOpen(open) {
   browse.hidden = !open;
   browseBtn.setAttribute("aria-expanded", open);
   if (open) {
-    sugg.hidden = true;
+    suggOpen(false);
     // desktop opens with all three columns populated; mobile starts at the country list
     if (brCC === null && matchMedia("(min-width: 561px)").matches) { brCC = DB.leagues[0][2]; brLG = 0; }
     renderBrowse();
@@ -945,7 +964,7 @@ function syncHash() {
 function addClub(ci) {
   if (ci === undefined || clubIds.includes(ci)) return;
   clubIds.push(ci);
-  search.value = ""; sugg.hidden = true;
+  search.value = ""; suggOpen(false);
   renderChips(); solve(); syncHash();
   focusSearch();   // desktop keeps typing; on touch the keyboard stays down to read the result
 }
@@ -958,7 +977,7 @@ function removeClub(ci) {
 function addPlayer(pid) {
   if (pid === undefined || playerIds.includes(pid)) return;
   playerIds.push(pid);
-  search.value = ""; sugg.hidden = true;
+  search.value = ""; suggOpen(false);
   renderChips(); solve();
   focusSearch();
 }
@@ -1432,6 +1451,7 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
     };
     li.onclick = () => toggleCareer(li, pid);
     li.tabIndex = 0;  // keyboard: Enter/Space toggles the career like a click
+    li.setAttribute("aria-expanded", "false");
     li.onkeydown = (e) => {
       if (e.target === li && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggleCareer(li, pid); }
     };
@@ -1502,12 +1522,17 @@ function openPlayerMode(pid) {
 }
 
 async function toggleCareer(li, pid) {
+  // the arrow and aria-expanded are the same disclosure state, told twice
+  const mark = (o) => {
+    li.querySelector(".expand").textContent = o ? "▾" : "▸";
+    li.setAttribute("aria-expanded", String(o));
+  };
   const open = li.querySelector(".career");
-  if (open) { open.remove(); li.querySelector(".expand").textContent = "▸"; return; }
-  li.querySelector(".expand").textContent = "▾";
+  if (open) { open.remove(); mark(false); return; }
+  mark(true);
   let qid, career;
   try { [qid = 0, career = []] = await careerOf(pid); }
-  catch { li.querySelector(".expand").textContent = "▸"; return; }
+  catch { mark(false); return; }
   if (li.querySelector(".career")) return;
   // club mode highlights the selected clubs; player mode the shared ones
   const selNames = mode === "club" ? new Set(clubIds.map(ci => DB.clubs[ci][0])) : sharedNames;

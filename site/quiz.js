@@ -1126,7 +1126,7 @@ function qEnter() {
   $("mode-quiz").setAttribute("aria-pressed", "true");
   $("mode-club").setAttribute("aria-pressed", "false");
   $("mode-player").setAttribute("aria-pressed", "false");
-  sugg.hidden = true;
+  suggOpen(false);  // app.js: closes the solver's list AND clears its combobox aria state
   browseOpen(false);
   qRender();
 }
