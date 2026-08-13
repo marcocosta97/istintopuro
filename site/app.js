@@ -45,6 +45,7 @@ const STR = {
     disclaimer: `Nessun dato viene raccolto: tutto avviene nel tuo browser, senza server né tracciamento. Codice open source (<a href="${REPO}" target="_blank" rel="noopener">MIT su GitHub</a>). Carattere: <a href="https://github.com/jpt/barlow" target="_blank" rel="noopener">Barlow Semi Condensed</a> (SIL OFL).`,
     remove: "rimuovi", clearAll: "svuota",
     sort: "Ordina per", sortApps: "presenze", sortGoals: "gol", sortBirth: "nascita",
+    sortMates: "insieme",
     asc: "crescente", desc: "decrescente",
     adv: "Filtri",
     filtReset: "azzera", filtResetT: "Azzera i filtri",
@@ -99,6 +100,7 @@ const STR = {
     disclaimer: `No data is collected: everything happens in your browser, with no server or tracking. Open source (<a href="${REPO}" target="_blank" rel="noopener">MIT on GitHub</a>). Typeface: <a href="https://github.com/jpt/barlow" target="_blank" rel="noopener">Barlow Semi Condensed</a> (SIL OFL).`,
     remove: "remove", clearAll: "clear",
     sort: "Sort by", sortApps: "apps", sortGoals: "goals", sortBirth: "birth",
+    sortMates: "together",
     asc: "ascending", desc: "descending",
     adv: "Filters",
     filtReset: "reset", filtResetT: "Clear all filters",
@@ -157,7 +159,7 @@ function applyLang() {
   $("randbtn").setAttribute("aria-label", rl);
   if (DB && !browse.hidden) renderBrowse();
   $("l-sort").textContent = t.sort;
-  [t.sortApps, t.sortGoals, t.sortBirth].forEach((s, i) => sortSel.options[i].text = s);
+  [t.sortApps, t.sortGoals, t.sortBirth, t.sortMates].forEach((s, i) => sortSel.options[i].text = s);
   dirBtn.title = sortDir < 0 ? t.desc : t.asc;
   $("l-adv").textContent = t.adv;
   filtReset.textContent = `✕ ${t.filtReset}`;
@@ -242,11 +244,11 @@ function setMode(m) {
   $("mode-player").setAttribute("aria-pressed", m === "player");
   browseOpen(false); suggOpen(false); search.value = "";
   browseBtn.hidden = m === "player";
+  // solve() settles this: in player mode the row belongs to the team-mates list, which
+  // exists only while exactly one player is picked
   $("controls").hidden = m === "player";
-  if (m === "player") {
-    $("advbody").hidden = true;
-    pIndex();  // one-time (~69k names), on the toggle click, not per keystroke
-  } else $("advbody").hidden = $("advtoggle").getAttribute("aria-expanded") !== "true";
+  $("advbody").hidden = m === "player" || $("advtoggle").getAttribute("aria-expanded") !== "true";
+  if (m === "player") pIndex();  // one-time (~69k names), on the toggle click, not per keystroke
   applyLang();  // mode-aware: swaps tagline/placeholder, re-renders chips + results
   focusSearch();
 }
@@ -1106,6 +1108,7 @@ function intersect(lists) {
 
 function solve() {
   if (mode === "player") return solvePlayers();
+  syncSort();  // the row is shared with the team-mates list: take it back
   results.innerHTML = "";
   if (clubIds.length === 0) {  // no nagging: the stats line + dice nudge are the empty state
     status.textContent = t.stats(DB.names.length, DB.clubs.length);
@@ -1204,15 +1207,23 @@ async function solvePlayers() {
   sharedNames = new Set();
   if (!playerIds.length) {
     status.textContent = t.stats(DB.names.length, DB.clubs.length);
+    $("controls").hidden = true;
+    syncSort();
+    natCounts.clear(); renderNats();
     renderExamples(); return;
   }
   if (playerIds.length === 1) {
     status.textContent = "";
+    $("controls").hidden = false;  // sort + filters, applied to the team-mates below
+    syncSort();
     renderResults(playerIds, new Map(), new Map(), new Set());
     toggleCareer(results.firstChild, playerIds[0]);
     renderMates(playerIds[0], g);  // async: the section paints its own loading state
     return;
   }
+  $("controls").hidden = true;  // a list of shared clubs has nothing to sort or filter
+  syncSort();
+  natCounts.clear(); renderNats();
   let careers;
   try { careers = await Promise.all(playerIds.map(careerOf)); }
   catch { if (g === solveGen) status.textContent = t.loadFail; return; }
@@ -1353,13 +1364,30 @@ async function solvePlayers() {
   }
 }
 
-sortSel.onchange = () => { sortBy = sortSel.value; solve(); };
-dirBtn.onclick = () => {
-  sortDir = -sortDir;
-  dirBtn.textContent = sortDir < 0 ? "↓" : "↑";
-  dirBtn.title = sortDir < 0 ? t.desc : t.asc;
-  solve();
+// The sort row and the filter panel drive whichever list is on screen: the club
+// intersection, or a player's team-mates. They keep their own sort (the team-mates
+// list defaults to time spent together, which the other one has no notion of) and
+// share the filters, which mean the same thing in both.
+const inMates = () => mode === "player" && playerIds.length === 1;
+sortSel.onchange = () => {
+  if (inMates()) { matesSort = sortSel.value; paintMates(); }
+  else { sortBy = sortSel.value; solve(); }
 };
+dirBtn.onclick = () => {
+  const dir = inMates() ? (matesDir = -matesDir) : (sortDir = -sortDir);
+  dirBtn.textContent = dir < 0 ? "↓" : "↑";
+  dirBtn.title = dir < 0 ? t.desc : t.asc;
+  if (inMates()) paintMates(); else solve();
+};
+// point the shared widgets at the active list's own sort state
+function syncSort() {
+  const on = inMates();
+  sortSel.options[3].hidden = !on;   // "together" only means something for team-mates
+  sortSel.value = on ? matesSort : sortBy;
+  const dir = on ? matesDir : sortDir;
+  dirBtn.textContent = dir < 0 ? "↓" : "↑";
+  dirBtn.title = dir < 0 ? t.desc : t.asc;
+}
 // Typing a year is four keystrokes, and each one used to run a full solve plus a
 // rebuild of the nationality panel — with the half-typed bound ("19", "1") matching
 // almost nobody, so the list emptied and flashed on the way to the real value.
@@ -1568,8 +1596,11 @@ async function matesOf(pid) {
       if (i === me || !y[i].length) continue;
       const runs = overlap(mine, y[i]);
       if (!runs) continue;
+      // his tally at that club rides along: the filters and the sort row work on the
+      // same numbers here as in club mode (-1 = unknown, as in the index)
+      const row = [ci, runs, DB.apps[ci][i], (DB.goals[ci] || [])[i] ?? -1];
       const e = out.get(arr[i]);
-      if (e) e.push([ci, runs]); else out.set(arr[i], [[ci, runs]]);
+      if (e) e.push(row); else out.set(arr[i], [row]);
     }
   });
   return out;
@@ -1581,6 +1612,8 @@ async function matesOf(pid) {
 let matesOpen = localStorage.mates !== "0";
 let matesData = null;      // { pid, map } — kept so collapsing or filtering never refetches
 let matesOff = new Set();  // club indices unticked in the chip row
+let matesSort = "mates", matesDir = -1;   // its own sort: time together, longest first
+let paintMates = () => {};  // set below, so the sort row and filters can repaint the list
 
 const MPAGE = 25;  // shorter first page than the club list: this one opens by itself
                    // under the card, and 50 rows bury everything on every pick
@@ -1610,38 +1643,69 @@ async function renderMates(pid, gen) {
       row.appendChild(chip);
     }
     body.appendChild(row);
-    // Longest partnership first, fame breaking ties. Ordering by fame alone — the
-    // signal the search box uses — is wrong here: it leads on recency, so a player
-    // who passed through for one season outranks the ten-year team-mate, in a list
-    // whose whole subject is who someone actually played with. The right-hand column
-    // shows the span, so the order explains itself as you read down.
+
+    // years shared, over the clubs still ticked — the default order, and the one
+    // sort key this list has that the club list has no notion of
     const together = new Map();
     for (const [p, spans] of map) {
       const yrs = spans.reduce((n, [ci, runs]) => n + (matesOff.has(ci) ? 0 : runYears(runs)), 0);
       if (yrs) together.set(p, yrs);
     }
-    if (!together.size) {
+    // the same tallies club mode combines over the selected clubs, here over the
+    // shared ones, so "hide 0 apps" and the apps/goals sorts mean the same thing
+    const appsOf = new Map(), goalsOf = new Map(), zero = new Set(), zeroGoals = new Set();
+    for (const p of together.keys()) {
+      const gk = DB.gkSet.has(p);
+      let a = null, g = null, gKnown = 0, seen = 0;
+      for (const [ci, , ap, gl] of map.get(p)) {
+        if (matesOff.has(ci)) continue;
+        seen++;
+        if (ap >= 0) { a = (a || 0) + ap; if (ap === 0) zero.add(p); }
+        if (gl >= 0 && !gk) { g = (g || 0) + gl; gKnown++; }
+      }
+      if (a != null) appsOf.set(p, a);
+      if (g != null) goalsOf.set(p, g);
+      if (!gk && gKnown === seen && !g) zeroGoals.add(p);
+    }
+
+    let ids = [...together.keys()];
+    if (noZero.checked) ids = ids.filter(p => !zero.has(p));
+    const yf = +byFrom.value || 0, yt = +byTo.value || 0;
+    if (yf || yt) ids = ids.filter(p => { const b = DB.births[p]; return b && (!yf || b >= yf) && (!yt || b <= yt); });
+    natCounts.clear();  // counts before the nationality filter, exactly as solve() does
+    for (const p of ids) for (const cc of natsOf(p)) natCounts.set(cc, (natCounts.get(cc) || 0) + 1);
+    renderNats();
+    if (natOff.size) ids = ids.filter(p => !natsOf(p).every(cc => natOff.has(cc)));
+    if (!ids.length) {
       const li = document.createElement("li");
       li.className = "empty";
       li.textContent = t.noneFilter;
       body.appendChild(li);
       return;
     }
-    const ids = [...together.keys()].sort((a, b) =>
-      together.get(b) - together.get(a) || DB.fame[b] - DB.fame[a] || DB.names[a].localeCompare(DB.names[b]));
+    const key = matesSort === "goals" ? (p) => goalsOf.get(p) || 0
+              : matesSort === "birth" ? (p) => DB.births[p] || 9999 * matesDir
+              : matesSort === "apps" ? (p) => appsOf.get(p) || 0
+              : (p) => together.get(p);
+    ids.sort((a, b) => matesDir * (key(a) - key(b))
+      || DB.fame[b] - DB.fame[a] || DB.names[a].localeCompare(DB.names[b]));
     const ul = document.createElement("ul");
     body.appendChild(ul);
-    // right column: where and when they were together, longest spell first — the
-    // combined apps/goals of the other rows would say nothing about the pair
+    // right column: where and when they were together, longest spell first. Sorting by
+    // a tally puts that tally there too, so the order is never by an unseen number.
     const metaOf = (p) => {
       const spans = map.get(p).filter(([ci]) => !matesOff.has(ci))
         .sort((a, b) => runYears(b[1]) - runYears(a[1]));
       const [ci, runs] = spans[0];
+      const tally = matesSort === "apps" ? (appsOf.has(p) ? t.combApps(appsOf.get(p)) : "")
+                  : matesSort === "goals" ? (goalsOf.has(p) || zeroGoals.has(p) ? t.combGoals(goalsOf.get(p) || 0) : "")
+                  : "";
       return `${esc(coreClub(DB.clubs[ci][0]))} `
         + `<span class="myrs">${runs.map(([s, e]) => yspan(s, e)).join(", ")}</span>`
-        + (spans.length > 1 ? ` <span class="mplus">${t.matesMore(spans.length - 1)}</span>` : "");
+        + (spans.length > 1 ? ` <span class="mplus">${t.matesMore(spans.length - 1)}</span>` : "")
+        + (tally ? ` <span class="mtally">· ${tally}</span>` : "");
     };
-    renderResults(ids, new Map(), new Map(), new Set(), 0, { into: ul, metaOf, page: MPAGE });
+    renderResults(ids, appsOf, goalsOf, zeroGoals, 0, { into: ul, metaOf, page: MPAGE });
   };
 
   // the disclosure is the title only: the note beside it is a caption, and clicking
@@ -1664,6 +1728,7 @@ async function renderMates(pid, gen) {
     else if (n == null) body.textContent = t.matesLoad;
     else drawList();
   };
+  paintMates = () => { if (head.isConnected) paint(); };
 
   paint();
   if (!matesData || matesData.pid !== pid) {

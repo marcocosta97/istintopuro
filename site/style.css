@@ -483,6 +483,7 @@ body:not(.nohover) .player:not(.sclub):hover { border-color: var(--accent); }
    a muted speck, so it takes the accent and a size of its own */
 .marr { font-size: 1.1rem; line-height: 1; color: var(--accent); }
 .mhead .tot { color: var(--muted); opacity: .8; white-space: normal; text-align: right; }
+.mtally { color: var(--muted); }
 @media (max-width: 560px) {  /* side by side, the title wraps to three lines */
   .mhead { flex-wrap: wrap; row-gap: .15rem; }
   .mhead .tot { flex-basis: 100%; text-align: left; }
