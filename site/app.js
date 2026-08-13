@@ -1323,7 +1323,13 @@ dirBtn.onclick = () => {
   dirBtn.title = sortDir < 0 ? t.desc : t.asc;
   solve();
 };
-byFrom.oninput = byTo.oninput = solve;
+// Typing a year is four keystrokes, and each one used to run a full solve plus a
+// rebuild of the nationality panel — with the half-typed bound ("19", "1") matching
+// almost nobody, so the list emptied and flashed on the way to the real value.
+let bornTimer = 0;
+const solveSoon = () => { clearTimeout(bornTimer); bornTimer = setTimeout(solve, 250); };
+byFrom.oninput = byTo.oninput = solveSoon;
+byFrom.onchange = byTo.onchange = () => { clearTimeout(bornTimer); solve(); };  // spinner, blur, Enter: no wait
 noZero.onchange = solve;
 
 // ------------------------------------------------------- nationality filter
