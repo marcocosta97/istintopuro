@@ -491,6 +491,13 @@ body:not(.nohover) .player:not(.sclub):hover { border-color: var(--accent); }
 .mbody, .mbody ul { display: block; list-style: none; padding: 0; margin: 0; }
 .mbody[hidden] { display: none; }
 .mchips { display: flex; flex-wrap: wrap; gap: .35rem; margin: 0 0 .55rem; }
+/* the sort row and filter panel, moved in under the chips: tighter than at the top of
+   the page, and with air under them before the list starts */
+.mbody #controls { margin-top: 0; }
+.mbody #advbody { margin-bottom: .2rem; }
+.mbody #controls, .mbody #advbody { margin-left: .1rem; margin-right: .1rem; }
+.mbody #advbody + ul { margin-top: .55rem; }
+.mbody #controls + ul { margin-top: .55rem; }
 .mchip {  /* one per club: a filter, and the breakdown of where they overlapped */
   cursor: pointer; font: inherit; font-size: .82rem; white-space: nowrap;
   color: var(--fg); background: var(--hit); border: 1px solid var(--accent);

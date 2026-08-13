@@ -6,7 +6,10 @@ const search = $("search"), sugg = $("suggestions"), chips = $("chips"),
       results = $("results"), status = $("status"),
       sortSel = $("sortsel"), dirBtn = $("dirbtn"),
       byFrom = $("byfrom"), byTo = $("byto"), noZero = $("nozero"), langSel = $("langsel"),
-      advCount = $("advcount"), filtReset = $("filtreset");
+      advCount = $("advcount"), filtReset = $("filtreset"),
+      // held, not looked up: these two get moved between the page and the team-mates
+      // section, and a getElementById after a detach comes back empty-handed
+      controlsRow = $("controls"), advBody = $("advbody");
 
 // autofocus is a desktop convenience; on touch, focusing the field the user
 // hasn't tapped (mode switch, first load, clear-all) pops the keyboard
@@ -246,8 +249,8 @@ function setMode(m) {
   browseBtn.hidden = m === "player";
   // solve() settles this: in player mode the row belongs to the team-mates list, which
   // exists only while exactly one player is picked
-  $("controls").hidden = m === "player";
-  $("advbody").hidden = m === "player" || $("advtoggle").getAttribute("aria-expanded") !== "true";
+  controlsRow.hidden = m === "player";
+  advBody.hidden = m === "player" || $("advtoggle").getAttribute("aria-expanded") !== "true";
   if (m === "player") pIndex();  // one-time (~69k names), on the toggle click, not per keystroke
   applyLang();  // mode-aware: swaps tagline/placeholder, re-renders chips + results
   focusSearch();
@@ -1109,6 +1112,7 @@ function intersect(lists) {
 function solve() {
   if (mode === "player") return solvePlayers();
   syncSort();  // the row is shared with the team-mates list: take it back
+  placeControls(null);
   results.innerHTML = "";
   if (clubIds.length === 0) {  // no nagging: the stats line + dice nudge are the empty state
     status.textContent = t.stats(DB.names.length, DB.clubs.length);
@@ -1207,21 +1211,22 @@ async function solvePlayers() {
   sharedNames = new Set();
   if (!playerIds.length) {
     status.textContent = t.stats(DB.names.length, DB.clubs.length);
-    $("controls").hidden = true;
+    controlsRow.hidden = true;
+    placeControls(null);
     syncSort();
     natCounts.clear(); renderNats();
     renderExamples(); return;
   }
   if (playerIds.length === 1) {
     status.textContent = "";
-    $("controls").hidden = false;  // sort + filters, applied to the team-mates below
-    syncSort();
+    syncSort();  // renderMates puts the sort row and the filters inside its own section
     renderResults(playerIds, new Map(), new Map(), new Set());
     toggleCareer(results.firstChild, playerIds[0]);
     renderMates(playerIds[0], g);  // async: the section paints its own loading state
     return;
   }
-  $("controls").hidden = true;  // a list of shared clubs has nothing to sort or filter
+  controlsRow.hidden = true;  // a list of shared clubs has nothing to sort or filter
+  placeControls(null);
   syncSort();
   natCounts.clear(); renderNats();
   let careers;
@@ -1369,15 +1374,33 @@ async function solvePlayers() {
 // list defaults to time spent together, which the other one has no notion of) and
 // share the filters, which mean the same thing in both.
 const inMates = () => mode === "player" && playerIds.length === 1;
+// A filter change redraws the list it applies to. In the team-mates view that must NOT
+// be the whole solve: rebuilding the section moves the borrowed controls, and moving a
+// node blurs what is focused inside it — the year field, mid-word.
+const refilter = () => { if (inMates()) paintMates(); else solve(); };
+// The sort row and the filter panel live above the results, which is where they belong
+// when the results ARE the page. Driving the team-mates list they were stranded at the
+// top, above the player's own card and a section header, controlling neither. They are
+// single elements carrying their own state, so they move to the list they act on
+// rather than being duplicated — and inside a folded section they fold away with it.
+function placeControls(host) {
+  const m = document.querySelector("main"), parent = host || m;
+  // Already there: do nothing. Re-inserting a node detaches it first, which blurs
+  // whatever is focused inside — and solve() runs on every keystroke in a year field.
+  if (controlsRow.parentElement === parent && controlsRow.nextElementSibling === advBody
+      && (host || advBody.nextElementSibling === status)) return;
+  if (host) host.append(controlsRow, advBody);
+  else { m.insertBefore(controlsRow, status); m.insertBefore(advBody, status); }
+}
 sortSel.onchange = () => {
-  if (inMates()) { matesSort = sortSel.value; paintMates(); }
-  else { sortBy = sortSel.value; solve(); }
+  if (inMates()) matesSort = sortSel.value; else sortBy = sortSel.value;
+  refilter();
 };
 dirBtn.onclick = () => {
   const dir = inMates() ? (matesDir = -matesDir) : (sortDir = -sortDir);
   dirBtn.textContent = dir < 0 ? "↓" : "↑";
   dirBtn.title = dir < 0 ? t.desc : t.asc;
-  if (inMates()) paintMates(); else solve();
+  refilter();
 };
 // point the shared widgets at the active list's own sort state
 function syncSort() {
@@ -1392,10 +1415,10 @@ function syncSort() {
 // rebuild of the nationality panel — with the half-typed bound ("19", "1") matching
 // almost nobody, so the list emptied and flashed on the way to the real value.
 let bornTimer = 0;
-const solveSoon = () => { clearTimeout(bornTimer); bornTimer = setTimeout(solve, 250); };
+const solveSoon = () => { clearTimeout(bornTimer); bornTimer = setTimeout(refilter, 250); };
 byFrom.oninput = byTo.oninput = solveSoon;
-byFrom.onchange = byTo.onchange = () => { clearTimeout(bornTimer); solve(); };  // spinner, blur, Enter: no wait
-noZero.onchange = solve;
+byFrom.onchange = byTo.onchange = () => { clearTimeout(bornTimer); refilter(); };  // spinner, blur, Enter: no wait
+noZero.onchange = refilter;
 
 // ------------------------------------------------------- nationality filter
 const natToggle = $("nattoggle"), natPanel = $("natpanel"), natList = $("natlist");
@@ -1411,7 +1434,7 @@ function renderNats() {
     const li = document.createElement("li");
     const cb = document.createElement("input");
     cb.type = "checkbox"; cb.checked = !natOff.has(cc);
-    cb.onchange = () => { if (cb.checked) natOff.delete(cc); else natOff.add(cc); solve(); };
+    cb.onchange = () => { if (cb.checked) natOff.delete(cc); else natOff.add(cc); refilter(); };
     const lab = document.createElement("label");
     const txt = document.createElement("span");   // flag() is HTML, so it cannot be appended as text
     txt.innerHTML = ` ${cc ? flag(cc) + " " : ""}${esc(name)}`;
@@ -1447,7 +1470,7 @@ filtReset.onclick = () => {
   natOff.clear();
   noZero.checked = false;
   byFrom.value = byTo.value = "";
-  solve();
+  refilter();
 };
 
 function natClose() {
@@ -1466,8 +1489,8 @@ natToggle.onclick = (e) => {
   natToggle.setAttribute("aria-expanded", open);
 };
 natPanel.onclick = (e) => e.stopPropagation();
-$("natall").onclick = () => { natOff.clear(); solve(); };
-$("natnone").onclick = () => { for (const cc of natCounts.keys()) natOff.add(cc); solve(); };
+$("natall").onclick = () => { natOff.clear(); refilter(); };
+$("natnone").onclick = () => { for (const cc of natCounts.keys()) natOff.add(cc); refilter(); };
 document.addEventListener("click", natClose);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !natPanel.hidden) natClose();
@@ -1625,22 +1648,28 @@ async function renderMates(pid, gen) {
   results.append(head, body);
   const live = () => gen === solveGen && mode === "player" && head.isConnected;
   let err = false;
+  // The section is chips | borrowed controls | list, and the three are refreshed
+  // separately. Rebuilding the whole body on a filter change would move #controls,
+  // and moving a node blurs whatever is focused inside it — you would lose the year
+  // field mid-word, since typing there solves on a debounce.
+  let chipsRow = null, listUl = null;
 
-  const drawList = () => {
+  const drawChips = () => {
     const map = matesData.map;
-    if (!map.size) { body.textContent = t.matesNone; return; }
+    chipsRow.innerHTML = "";
     const perClub = new Map();
     for (const spans of map.values()) for (const [ci] of spans) perClub.set(ci, (perClub.get(ci) || 0) + 1);
-    const row = document.createElement("div");
-    row.className = "mchips";
     for (const [ci, n] of [...perClub].sort((a, b) => b[1] - a[1])) {
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "mchip" + (matesOff.has(ci) ? " off" : "");
       chip.setAttribute("aria-pressed", !matesOff.has(ci));
       chip.innerHTML = `${countryFlag(DB.clubs[ci][1])} ${esc(coreClub(DB.clubs[ci][0]))} <small>${n}</small>`;
-      chip.onclick = () => { matesOff.has(ci) ? matesOff.delete(ci) : matesOff.add(ci); paint(); };
-      row.appendChild(chip);
+      chip.onclick = () => {
+        matesOff.has(ci) ? matesOff.delete(ci) : matesOff.add(ci);
+        drawChips(); drawList();
+      };
+      chipsRow.appendChild(chip);
     }
     if (perClub.size > 1) {  // one control for the whole row, flipping to whichever
       const none = [...perClub.keys()].every(ci => matesOff.has(ci));  // side is useful
@@ -1650,12 +1679,15 @@ async function renderMates(pid, gen) {
       all.textContent = none ? `✓ ${t.natAll}` : `✕ ${t.natNone}`;
       all.onclick = () => {
         matesOff = none ? new Set() : new Set(perClub.keys());
-        paint();
+        drawChips(); drawList();
       };
-      row.appendChild(all);
+      chipsRow.appendChild(all);
     }
-    body.appendChild(row);
+  };
 
+  const drawList = () => {
+    const map = matesData.map;
+    listUl.innerHTML = "";
     // years shared, over the clubs still ticked — the default order, and the one
     // sort key this list has that the club list has no notion of
     const together = new Map();
@@ -1692,7 +1724,7 @@ async function renderMates(pid, gen) {
       const li = document.createElement("li");
       li.className = "empty";
       li.textContent = t.noneFilter;
-      body.appendChild(li);
+      listUl.appendChild(li);
       return;
     }
     const key = matesSort === "goals" ? (p) => goalsOf.get(p) || 0
@@ -1701,8 +1733,6 @@ async function renderMates(pid, gen) {
               : (p) => together.get(p);
     ids.sort((a, b) => matesDir * (key(a) - key(b))
       || DB.fame[b] - DB.fame[a] || DB.names[a].localeCompare(DB.names[b]));
-    const ul = document.createElement("ul");
-    body.appendChild(ul);
     // right column: where and when they were together, longest spell first. Sorting by
     // a tally puts that tally there too, so the order is never by an unseen number.
     const metaOf = (p) => {
@@ -1717,7 +1747,7 @@ async function renderMates(pid, gen) {
         + (spans.length > 1 ? ` <span class="mplus">${t.matesMore(spans.length - 1)}</span>` : "")
         + (tally ? ` <span class="mtally">· ${tally}</span>` : "");
     };
-    renderResults(ids, appsOf, goalsOf, zeroGoals, 0, { into: ul, metaOf, page: MPAGE });
+    renderResults(ids, appsOf, goalsOf, zeroGoals, 0, { into: listUl, metaOf, page: MPAGE });
   };
 
   // the disclosure is the title only: the note beside it is a caption, and clicking
@@ -1733,14 +1763,33 @@ async function renderMates(pid, gen) {
       localStorage.mates = matesOpen ? "1" : "0";
       paint();
     };
+    // Out of the section BEFORE the wipe below: they are borrowed elements, and
+    // innerHTML = "" would tear them out of the document with everything else.
+    placeControls(null);
     body.hidden = !matesOpen;
     body.innerHTML = "";
+    chipsRow = listUl = null;
+    const usable = matesOpen && !err && n != null && matesData.map.size > 0;
+    controlsRow.hidden = !usable;
     if (!matesOpen) return;
-    if (err) body.textContent = t.matesFail;
-    else if (n == null) body.textContent = t.matesLoad;
-    else drawList();
+    if (err) { body.textContent = t.matesFail; return; }
+    if (n == null) { body.textContent = t.matesLoad; return; }
+    if (!usable) { body.textContent = t.matesNone; return; }
+    chipsRow = document.createElement("div");
+    chipsRow.className = "mchips";
+    listUl = document.createElement("ul");
+    body.appendChild(chipsRow);
+    placeControls(body);   // under the club chips, above the list they filter
+    body.appendChild(listUl);
+    drawChips();
+    drawList();
   };
-  paintMates = () => { if (head.isConnected) paint(); };
+  // a filter or sort change only rewrites the list: leave the chips, and above all
+  // leave the borrowed controls exactly where they are
+  paintMates = () => {
+    if (!head.isConnected) return;
+    if (listUl && listUl.isConnected) drawList(); else paint();
+  };
 
   paint();
   if (!matesData || matesData.pid !== pid) {
