@@ -249,6 +249,19 @@ h1 .accent { color: var(--accent); }
 #advtoggle::before { content: "▸"; font-size: .7em; transition: transform .15s; }
 #advtoggle[aria-expanded="true"]::before { transform: rotate(90deg); }
 #advtoggle:hover { border-color: var(--accent); color: var(--fg); }
+/* the panel is collapsed by default: the badge is the only sign a filter is on,
+   and the reset beside it undoes them without opening the panel to look */
+.fgrp { display: inline-flex; align-items: center; gap: .4rem; }
+#advtoggle.on { color: var(--accent); border-color: var(--accent); }
+#advcount { font-variant-numeric: tabular-nums; }
+/* id + element, or the shared "#controls button" block above wins every property */
+#controls #filtreset {
+  cursor: pointer; font-size: .8rem; color: var(--muted);
+  background: transparent; border: 1px dashed var(--line); border-radius: 999px;
+  padding: .12rem .55rem; white-space: nowrap;
+}
+#controls #filtreset:hover { border-color: var(--accent); color: var(--fg); }
+#filtreset[hidden] { display: none; }
 /* filters: label+control pairs flowing on as many per line as fit, "|"-divided */
 #advbody {
   position: relative;

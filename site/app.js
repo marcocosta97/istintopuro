@@ -5,7 +5,8 @@ const $ = (id) => document.getElementById(id);
 const search = $("search"), sugg = $("suggestions"), chips = $("chips"),
       results = $("results"), status = $("status"),
       sortSel = $("sortsel"), dirBtn = $("dirbtn"),
-      byFrom = $("byfrom"), byTo = $("byto"), noZero = $("nozero"), langSel = $("langsel");
+      byFrom = $("byfrom"), byTo = $("byto"), noZero = $("nozero"), langSel = $("langsel"),
+      advCount = $("advcount"), filtReset = $("filtreset");
 
 // autofocus is a desktop convenience; on touch, focusing the field the user
 // hasn't tapped (mode switch, first load, clear-all) pops the keyboard
@@ -46,6 +47,7 @@ const STR = {
     sort: "Ordina per", sortApps: "presenze", sortGoals: "gol", sortBirth: "nascita",
     asc: "crescente", desc: "decrescente",
     adv: "Filtri",
+    filtReset: "azzera", filtResetT: "Azzera i filtri",
     born: "Nati", from: "dal", to: "al",
     noZero: "Nascondi 0 presenze",
     noZeroHint: "Nasconde chi ha 0 presenze registrate in una delle squadre scelte. Chi ha giocato più volte nella stessa squadra e ha totalizzato almeno una presenza resta incluso.",
@@ -91,6 +93,7 @@ const STR = {
     sort: "Sort by", sortApps: "apps", sortGoals: "goals", sortBirth: "birth",
     asc: "ascending", desc: "descending",
     adv: "Filters",
+    filtReset: "reset", filtResetT: "Clear all filters",
     born: "Born", from: "from", to: "to",
     noZero: "Hide 0 apps",
     noZeroHint: "Hides players with 0 recorded appearances at one of the selected clubs. Players with multiple stints at the same club who made at least one appearance are kept.",
@@ -140,6 +143,9 @@ function applyLang() {
   [t.sortApps, t.sortGoals, t.sortBirth].forEach((s, i) => sortSel.options[i].text = s);
   dirBtn.title = sortDir < 0 ? t.desc : t.asc;
   $("l-adv").textContent = t.adv;
+  filtReset.textContent = `✕ ${t.filtReset}`;
+  filtReset.title = t.filtResetT;
+  renderFilterState();
   $("l-born").textContent = t.born;
   byFrom.placeholder = t.from; byTo.placeholder = t.to;
   $("l-nat").textContent = t.nat;
@@ -1313,7 +1319,27 @@ function renderNats() {
   $("natcount").classList.toggle("on", filtered);
   natToggle.disabled = rows.length === 0;
   if (!rows.length) natClose();
+  renderFilterState();
 }
+
+// The filter panel is collapsed by default and its settings survive every change
+// of selection, so a forgotten filter silently shrinks the result count with
+// nothing on screen to explain it. The toggle carries a badge counting the active
+// filters, and the reset sits beside it — undoing them must not require opening
+// the panel to find out they were there.
+const natFiltered = () => [...natCounts.keys()].some(cc => natOff.has(cc));
+function renderFilterState() {
+  const n = (noZero.checked ? 1 : 0) + (byFrom.value || byTo.value ? 1 : 0) + (natFiltered() ? 1 : 0);
+  advCount.textContent = n ? ` · ${n}` : "";
+  $("advtoggle").classList.toggle("on", n > 0);
+  filtReset.hidden = n === 0;
+}
+filtReset.onclick = () => {
+  natOff.clear();
+  noZero.checked = false;
+  byFrom.value = byTo.value = "";
+  solve();
+};
 
 function natClose() {
   natPanel.hidden = true;

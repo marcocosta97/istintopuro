@@ -62,7 +62,11 @@
     </div>
   </div>
   <div id="controls">
-    <button id="advtoggle" type="button" aria-controls="advbody" aria-expanded="false"><span id="l-adv">Filtri</span></button>
+    <span class="fgrp">
+      <button id="advtoggle" type="button" aria-controls="advbody" aria-expanded="false"><span
+        id="l-adv">Filtri</span><span id="advcount"></span></button>
+      <button id="filtreset" type="button" hidden></button>
+    </span>
     <span class="ctl"><label id="l-sort" for="sortsel">Ordina per</label>
       <select id="sortsel">
         <option value="apps">presenze</option>
