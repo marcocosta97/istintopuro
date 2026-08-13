@@ -246,6 +246,10 @@ function setMode(m) {
   $("mode-club").setAttribute("aria-pressed", m === "club");
   $("mode-player").setAttribute("aria-pressed", m === "player");
   browseOpen(false); suggOpen(false); search.value = "";
+  // The panel is shared by two lists that have nothing to do with each other: a
+  // nationality left ticked off on an intersection would silently thin a team-mates
+  // list built from a different question. Each view starts clean.
+  clearFilters();
   browseBtn.hidden = m === "player";
   // solve() settles this: in player mode the row belongs to the team-mates list, which
   // exists only while exactly one player is picked
@@ -1469,12 +1473,12 @@ function renderFilterState() {
   $("advtoggle").classList.toggle("on", n > 0);
   filtReset.hidden = n === 0;
 }
-filtReset.onclick = () => {
+function clearFilters() {
   natOff.clear();
   noZero.checked = false;
   byFrom.value = byTo.value = "";
-  refilter();
-};
+}
+filtReset.onclick = () => { clearFilters(); refilter(); };
 
 function natClose() {
   natPanel.hidden = true;
