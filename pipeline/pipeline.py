@@ -44,8 +44,10 @@ site/data/years/<club index>.json — lazy-loaded spell years, one entry per
 
 site/data/career/<pid % nshards>.json — lazy-loaded careers, per player:
   [QID number, spells]   QID links Wikipedia via Special:GoToLinkedPage
-  spell = [team, start, end, apps, goals(, 1)]  one per P54 statement, so
-  a loan and a later return stay separate; trailing 1 = P1642 loan flag
+  spell = [team, start, end, apps, goals(, 1)]  one per STAY, not per P54
+  statement: fold_spells() joins the statements that split one continuous
+  spell (a loan then bought, a re-signing), while a later return after a
+  move elsewhere stays separate; trailing 1 = P1642 loan flag
   (app.js also infers loans from a spell inside an earlier one's range)
 """
 import hashlib, json, os, re, sys, time, gzip
@@ -902,6 +904,55 @@ def merge_map(clubs, members):
         m.update({q: canon for q in qs if q != canon})
     return {old: canon for old, canon in m.items() if old in members and canon in members}
 
+def fold_spells(career, canon=lambda t: t, hidden=lambda t: False, prefer=lambda t: 0):
+    """Fold the statements that split ONE continuous stay — a loan made permanent, a
+    re-signing, a contract renewal filed as its own statement — into a single spell,
+    the way an infobox career reads. Barella's Inter loan and the transfer that
+    followed it were two rows whose apps did not even add up to the one number club
+    mode shows for him.
+
+    Two spells at the same club fold when the second starts no later than the first
+    ends and everything between them was a loan OUT taken during the stay — a spell
+    whose whole range sits inside the combined one (Morata: Atlético 2019-20 on loan,
+    then 2020-24 bought, with the Juventus loan in between). A return after a real
+    move elsewhere keeps its own entry, because either the years leave a gap (Pogba's
+    two United spells) or the club in between outlives the stay (Lukaku back at Inter
+    on loan from a Chelsea deal that ran past it). Apps and goals add up; the loan
+    flag survives only if every part carried it.
+
+    canon() is the club identity to compare on, so two Wikidata items for one club
+    fold like one; prefer() then picks which of them the folded spell keeps, because
+    the team it names is what places the player at that club. hidden() marks the teams
+    that never reach a career panel (national sides, unlabelled items): they are
+    transparent to the "what sits in between" test, since a national career runs
+    alongside a club one and would otherwise keep every stay it spans from folding."""
+    out = []
+    for team, s, e, a, g, ln in sorted(career, key=lambda x: (x[1] or 9999, x[2] or 9999)):
+        k = None if hidden(team) else next(
+            (i for i in range(len(out) - 1, -1, -1)
+             if not hidden(out[i][0]) and canon(out[i][0]) == canon(team)), None)
+        p = out[k] if k is not None else None
+        # a spell with no start cannot be placed against another; sorted last, it also
+        # never sits between two that could fold
+        fold = False
+        if p and s is not None and p[1] is not None and (s <= p[2] if p[2] is not None else s >= p[1]):
+            hi = None if p[2] is None or e is None else max(p[2], e)
+            # an open end leaves "inside the stay" unfalsifiable, so fold across
+            # nothing at all
+            fold = all(hidden(q[0]) or (hi is not None and q[1] is not None
+                       and q[2] is not None and p[1] <= q[1] and q[2] <= hi)
+                       for q in out[k + 1:])
+        if fold:
+            if prefer(team) > prefer(p[0]): p[0] = team
+            p[1] = min(p[1], s)
+            p[2] = hi
+            p[3] = None if p[3] is None and a is None else (p[3] or 0) + (a or 0)
+            p[4] = None if p[4] is None and g is None else (p[4] or 0) + (g or 0)
+            p[5] = 1 if p[5] and ln else 0
+        else:
+            out.append([team, s, e, a, g, ln])
+    return out
+
 def img_key(tail):
     """P18 URL tail (%-encoded) -> "hh" + underscored filename. The 2-char md5
     prefix is the Commons hashed-directory path, so the client can build the
@@ -940,6 +991,25 @@ def stage_build():
     for q in members: groups.setdefault(merged.get(q, q), []).append(q)
     for old, canon in sorted(merged.items(), key=lambda x: clubs[x[1]]["name"]):
         print(f"  merge: {clubs[old]['name']} ({old}) -> {clubs[canon]['name']} ({canon})")
+
+    club_name = {q: clubs[q]["name"] for q in clubs} | teams
+    club_name |= {old: clubs[canon]["name"] for old, canon in merged.items()}
+
+    # one continuous stay, one spell — everything below reads the folded careers, so the
+    # shards, the club apps/goals totals and the years files describe the same stays.
+    # Identity is the emitted NAME, which is what the client matches careers on and what
+    # a reader sees repeated: it folds the phoenix-merged items (club_name maps them to
+    # the canonical name) and the pairs of items that merely share a label — Le Havre AC
+    # and Legia Warsaw each have two, and neither is in the universe merge.
+    # An unlabelled team is hidden like a national side: the emit drops both, and app.js
+    # drops what reaches it nameless, so neither may block a fold.
+    hidden = lambda t: not club_name.get(t) or bool(NATIONAL.search(club_name[t]))
+    n_before = sum(map(len, careers.values()))
+    careers = {p: fold_spells(c, lambda t: club_name.get(t) or t, hidden,
+                              prefer=lambda t: t in members)  # a universe item outranks
+               for p, c in careers.items()}                   # the twin it folded with
+    print(f"  folded {n_before - sum(map(len, careers.values()))} split spells "
+          f"(loan then bought, re-signings) into the stay they belong to")
 
     # a membership counts only if the statement carries at least one qualifier
     # (start/end/apps/goals); bare P54 statements are too often wrong
@@ -1047,8 +1117,6 @@ def stage_build():
     blob = json.dumps(index, ensure_ascii=False, separators=(",", ":")).encode()
     (SITE_DATA / "index.json").write_bytes(blob)
 
-    club_name = {q: clubs[q]["name"] for q in clubs} | teams
-    club_name |= {old: clubs[canon]["name"] for old, canon in merged.items()}
     shards = [{} for _ in range(NSHARDS)]
     for q, career in careers.items():
         if q not in pid: continue  # all memberships dropped as unqualified
