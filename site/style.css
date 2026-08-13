@@ -472,13 +472,21 @@ body:not(.nohover) .player:not(.sclub):hover { border-color: var(--accent); }
 .lsep .tot { text-transform: none; letter-spacing: normal; font-size: .78rem; white-space: nowrap; }
 /* teammates: the divider doubles as the disclosure control, so it carries the count
    and the caveat the numbers need (covered leagues, whole-year overlap) */
-.mhead { cursor: pointer; }
-.mhead:hover .mtitle, .mhead:focus-visible .mtitle { color: var(--accent); }
-.mtitle b { color: var(--accent); font-size: 1.1em; }
+.mtoggle {  /* the disclosure is the title, not the caption beside it */
+  cursor: pointer; font: inherit; text-transform: inherit; letter-spacing: inherit;
+  color: var(--muted); background: transparent; border: none; padding: 0;
+  display: inline-flex; align-items: baseline; gap: .35rem;
+}
+.mtoggle:hover, .mtoggle:focus-visible { color: var(--fg); }
+.mtoggle b { color: var(--accent); font-size: 1.1em; }
 /* the caret carries the state of the whole section: at the divider's .72rem it was
    a muted speck, so it takes the accent and a size of its own */
 .marr { font-size: 1.1rem; line-height: 1; color: var(--accent); }
 .mhead .tot { color: var(--muted); opacity: .8; white-space: normal; text-align: right; }
+@media (max-width: 560px) {  /* side by side, the title wraps to three lines */
+  .mhead { flex-wrap: wrap; row-gap: .15rem; }
+  .mhead .tot { flex-basis: 100%; text-align: left; }
+}
 .mbody, .mbody ul { display: block; list-style: none; padding: 0; margin: 0; }
 .mbody[hidden] { display: none; }
 .mchips { display: flex; flex-wrap: wrap; gap: .35rem; margin: 0 0 .55rem; }

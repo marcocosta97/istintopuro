@@ -1585,7 +1585,6 @@ let matesOff = new Set();  // club indices unticked in the chip row
 async function renderMates(pid, gen) {
   const head = document.createElement("li"), body = document.createElement("li");
   head.className = "lsep mhead";
-  head.tabIndex = 0;
   body.className = "mbody";
   results.append(head, body);
   const live = () => gen === solveGen && mode === "player" && head.isConnected;
@@ -1642,26 +1641,25 @@ async function renderMates(pid, gen) {
     renderResults(ids, new Map(), new Map(), new Set(), 0, { into: ul, metaOf });
   };
 
+  // the disclosure is the title only: the note beside it is a caption, and clicking
+  // a line of explanatory text to fold the section away is not what anyone means
   const paint = () => {
     const n = matesData && matesData.pid === pid ? matesData.map.size : null;
-    head.innerHTML = `<span class="mtitle"><span class="marr">${matesOpen ? "▾" : "▸"}</span> `
-      + `${t.matesTitle}${n != null ? ` <b>${n.toLocaleString(lang)}</b>` : ""}</span>`
+    head.innerHTML = `<button type="button" class="mtoggle" aria-expanded="${matesOpen}">`
+      + `<span class="marr">${matesOpen ? "▾" : "▸"}</span> `
+      + `${t.matesTitle}${n != null ? ` <b>${n.toLocaleString(lang)}</b>` : ""}</button>`
       + `<span class="tot">${t.matesNote}</span>`;
-    head.setAttribute("aria-expanded", String(matesOpen));
+    head.querySelector(".mtoggle").onclick = () => {
+      matesOpen = !matesOpen;
+      localStorage.mates = matesOpen ? "1" : "0";
+      paint();
+    };
     body.hidden = !matesOpen;
     body.innerHTML = "";
     if (!matesOpen) return;
     if (err) body.textContent = t.matesFail;
     else if (n == null) body.textContent = t.matesLoad;
     else drawList();
-  };
-  head.onclick = () => {
-    matesOpen = !matesOpen;
-    localStorage.mates = matesOpen ? "1" : "0";
-    paint();
-  };
-  head.onkeydown = (e) => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); head.click(); }
   };
 
   paint();
