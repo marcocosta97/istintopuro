@@ -475,7 +475,9 @@ body:not(.nohover) .player:not(.sclub):hover { border-color: var(--accent); }
 .mhead { cursor: pointer; }
 .mhead:hover .mtitle, .mhead:focus-visible .mtitle { color: var(--accent); }
 .mtitle b { color: var(--accent); font-size: 1.1em; }
-.marr { display: inline-block; width: .7em; font-size: .9em; }
+/* the caret carries the state of the whole section: at the divider's .72rem it was
+   a muted speck, so it takes the accent and a size of its own */
+.marr { font-size: 1.1rem; line-height: 1; color: var(--accent); }
 .mhead .tot { color: var(--muted); opacity: .8; white-space: normal; text-align: right; }
 .mbody, .mbody ul { display: block; list-style: none; padding: 0; margin: 0; }
 .mbody[hidden] { display: none; }
