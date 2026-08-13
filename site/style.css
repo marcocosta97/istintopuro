@@ -269,23 +269,16 @@ h1 .accent { color: var(--accent); }
   background: var(--card); border: 1px solid var(--line); border-radius: 9px;
 }
 #advbody[hidden] { display: none; }
-/* every group draws a left "|"; the wrapper's negative margin pulls each
-   line's first separator out of #fclip, whose overflow clips it — wrap-safe
-   (the clip must live on a wrapper: #frows' own box moves with the margin) */
-#fclip { overflow: hidden; }
-#frows {
-  display: flex; flex-wrap: wrap; align-items: center; row-gap: .5rem;
-  margin-left: calc(-.9rem - 1px);
-}
+/* One filter per row, hairline-divided, label left and control flush right, at
+   every width. The three groups have very different widths (a dropdown, a pair of
+   year fields, a switch), so flowing them inline only ever tiled 2 + 1 with the
+   controls landing at three unrelated x positions. */
 .frow {
-  display: inline-flex; align-items: center; gap: .5rem;
-  border-left: 1px solid var(--line); padding: .1rem .9rem;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .5rem; padding: .4rem 0;
 }
-@media (max-width: 560px) {  /* phones: one filter per row, hairline-divided */
-  #frows { display: block; margin-left: 0; }
-  .frow { display: flex; border-left: none; padding: .4rem 0; }
-  .frow + .frow { border-top: 1px solid var(--line); }
-}
+.frow + .frow { border-top: 1px solid var(--line); }
+label.frow { position: relative; }  /* the ? bubble hangs off its own row, see .tip */
 .fctl, .flab { display: inline-flex; align-items: center; gap: .35rem; }
 label.frow { cursor: pointer; }
 #advbody input[type=number] {
