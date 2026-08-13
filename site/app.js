@@ -1447,11 +1447,11 @@ document.addEventListener("keydown", (e) => {
 
 // opts.into renders somewhere other than #results (the teammates list), opts.metaOf
 // replaces the combined apps/goals in the right-hand column with something else the
-// caller finds more to the point there
+// caller finds more to the point there, opts.page overrides how many rows a batch is
 function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0, opts = {}) {
-  const into = opts.into || results;
+  const into = opts.into || results, page = opts.page || PAGE;
   const frag = document.createDocumentFragment();
-  ids.slice(from, from + PAGE).forEach((pid, i) => {
+  ids.slice(from, from + page).forEach((pid, i) => {
     const li = document.createElement("li");
     li.className = "player";
     li.style.animationDelay = `${Math.min(i, 14) * 22}ms`;  // solve cascade, capped
@@ -1485,7 +1485,7 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0, opts = {}) {
     frag.appendChild(li);
   });
   into.appendChild(frag);
-  const shown = Math.min(from + PAGE, ids.length);
+  const shown = Math.min(from + page, ids.length);
   if (ids.length > shown) {
     const li = document.createElement("li");
     li.className = "more";
@@ -1582,6 +1582,9 @@ let matesOpen = localStorage.mates !== "0";
 let matesData = null;      // { pid, map } — kept so collapsing or filtering never refetches
 let matesOff = new Set();  // club indices unticked in the chip row
 
+const MPAGE = 25;  // shorter first page than the club list: this one opens by itself
+                   // under the card, and 50 rows bury everything on every pick
+
 async function renderMates(pid, gen) {
   const head = document.createElement("li"), body = document.createElement("li");
   head.className = "lsep mhead";
@@ -1638,7 +1641,7 @@ async function renderMates(pid, gen) {
         + `<span class="myrs">${runs.map(([s, e]) => yspan(s, e)).join(", ")}</span>`
         + (spans.length > 1 ? ` <span class="mplus">${t.matesMore(spans.length - 1)}</span>` : "");
     };
-    renderResults(ids, new Map(), new Map(), new Set(), 0, { into: ul, metaOf });
+    renderResults(ids, new Map(), new Map(), new Set(), 0, { into: ul, metaOf, page: MPAGE });
   };
 
   // the disclosure is the title only: the note beside it is a caption, and clicking
