@@ -71,6 +71,12 @@ const STR = {
     others: "Altre",
     back: "indietro",
     pivot: "compagni ↗", pivotT: "Apri in modalità Giocatori",
+    matesTitle: "compagni di squadra",
+    matesNote: "solo campionati coperti · sovrapposizione per anno",
+    matesLoad: "calcolo…",
+    matesNone: "Nessun compagno: nessuna delle sue squadre è nei campionati coperti.",
+    matesFail: "Compagni non disponibili.",
+    matesMore: (n) => `+${n}`,
     copyLink: "copia link", copyLinkT: "Copia il link a questa selezione", copied: "copiato ✓",
     themeDark: "Passa al tema scuro", themeLight: "Passa al tema chiaro",
   },
@@ -119,6 +125,12 @@ const STR = {
     others: "Others",
     back: "back",
     pivot: "teammates ↗", pivotT: "Open in player mode",
+    matesTitle: "teammates",
+    matesNote: "covered leagues only · overlap by year",
+    matesLoad: "working…",
+    matesNone: "No teammates: none of his clubs is in the covered leagues.",
+    matesFail: "Teammates unavailable.",
+    matesMore: (n) => `+${n}`,
     copyLink: "copy link", copyLinkT: "Copy a link to this selection", copied: "copied ✓",
     themeDark: "Switch to dark theme", themeLight: "Switch to light theme",
   },
@@ -1198,6 +1210,7 @@ async function solvePlayers() {
     status.textContent = "";
     renderResults(playerIds, new Map(), new Map(), new Set());
     toggleCareer(results.firstChild, playerIds[0]);
+    renderMates(playerIds[0], g);  // async: the section paints its own loading state
     return;
   }
   let careers;
@@ -1432,7 +1445,11 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !natPanel.hidden) natClose();
 });
 
-function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
+// opts.into renders somewhere other than #results (the teammates list), opts.metaOf
+// replaces the combined apps/goals in the right-hand column with something else the
+// caller finds more to the point there
+function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0, opts = {}) {
+  const into = opts.into || results;
   const frag = document.createDocumentFragment();
   ids.slice(from, from + PAGE).forEach((pid, i) => {
     const li = document.createElement("li");
@@ -1445,7 +1462,7 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
     // no per-row "(combined)" tag: club mode states it once in the status row,
     // player mode in the selected-players divider
     const parts = [apps ? t.combApps(apps) : "", goals || zeroGoals.has(pid) ? t.combGoals(goals || 0) : ""].filter(Boolean);
-    const meta = parts.join(" · ");
+    const meta = opts.metaOf ? opts.metaOf(pid) : parts.join(" · ");
     // rank numeral = position in the current sort; meaningless for a hand-picked selection
     const rank = mode === "club" ? `<span class="rank">${from + i + 1}</span>` : "";
     li.innerHTML = `${rank}${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.gkSet.has(pid) ? " <small>(GK)</small>" : ""}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span></div>${meta ? `<span class="pstats">${meta}</span>` : ""}<span class="expand">▸</span>`;
@@ -1467,16 +1484,16 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
     };
     frag.appendChild(li);
   });
-  results.appendChild(frag);
+  into.appendChild(frag);
   const shown = Math.min(from + PAGE, ids.length);
   if (ids.length > shown) {
     const li = document.createElement("li");
     li.className = "more";
     li.textContent = t.more(ids.length - shown);
     li.tabIndex = 0;
-    li.onclick = () => { li.remove(); renderResults(ids, appsOf, goalsOf, zeroGoals, shown); };
+    li.onclick = () => { li.remove(); renderResults(ids, appsOf, goalsOf, zeroGoals, shown, opts); };
     li.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); li.click(); } };
-    results.appendChild(li);
+    into.appendChild(li);
   }
 }
 
@@ -1556,6 +1573,108 @@ async function matesOf(pid) {
     }
   });
   return out;
+}
+
+// The section under a single player's card: a collapsible header carrying the count,
+// one filter chip per club, and the usual result rows (so they expand into careers
+// and the arrows walk them like any other list).
+let matesOpen = localStorage.mates !== "0";
+let matesData = null;      // { pid, map } — kept so collapsing or filtering never refetches
+let matesOff = new Set();  // club indices unticked in the chip row
+
+async function renderMates(pid, gen) {
+  const head = document.createElement("li"), body = document.createElement("li");
+  head.className = "lsep mhead";
+  head.tabIndex = 0;
+  body.className = "mbody";
+  results.append(head, body);
+  const live = () => gen === solveGen && mode === "player" && head.isConnected;
+  let err = false;
+
+  const drawList = () => {
+    const map = matesData.map;
+    if (!map.size) { body.textContent = t.matesNone; return; }
+    const perClub = new Map();
+    for (const spans of map.values()) for (const [ci] of spans) perClub.set(ci, (perClub.get(ci) || 0) + 1);
+    const row = document.createElement("div");
+    row.className = "mchips";
+    for (const [ci, n] of [...perClub].sort((a, b) => b[1] - a[1])) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "mchip" + (matesOff.has(ci) ? " off" : "");
+      chip.setAttribute("aria-pressed", !matesOff.has(ci));
+      chip.innerHTML = `${countryFlag(DB.clubs[ci][1])} ${esc(coreClub(DB.clubs[ci][0]))} <small>${n}</small>`;
+      chip.onclick = () => { matesOff.has(ci) ? matesOff.delete(ci) : matesOff.add(ci); paint(); };
+      row.appendChild(chip);
+    }
+    body.appendChild(row);
+    // Longest partnership first, fame breaking ties. Ordering by fame alone — the
+    // signal the search box uses — is wrong here: it leads on recency, so a player
+    // who passed through for one season outranks the ten-year team-mate, in a list
+    // whose whole subject is who someone actually played with. The right-hand column
+    // shows the span, so the order explains itself as you read down.
+    const together = new Map();
+    for (const [p, spans] of map) {
+      const yrs = spans.reduce((n, [ci, runs]) => n + (matesOff.has(ci) ? 0 : runYears(runs)), 0);
+      if (yrs) together.set(p, yrs);
+    }
+    if (!together.size) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = t.noneFilter;
+      body.appendChild(li);
+      return;
+    }
+    const ids = [...together.keys()].sort((a, b) =>
+      together.get(b) - together.get(a) || DB.fame[b] - DB.fame[a] || DB.names[a].localeCompare(DB.names[b]));
+    const ul = document.createElement("ul");
+    body.appendChild(ul);
+    // right column: where and when they were together, longest spell first — the
+    // combined apps/goals of the other rows would say nothing about the pair
+    const metaOf = (p) => {
+      const spans = map.get(p).filter(([ci]) => !matesOff.has(ci))
+        .sort((a, b) => runYears(b[1]) - runYears(a[1]));
+      const [ci, runs] = spans[0];
+      return `${esc(coreClub(DB.clubs[ci][0]))} `
+        + `<span class="myrs">${runs.map(([s, e]) => yspan(s, e)).join(", ")}</span>`
+        + (spans.length > 1 ? ` <span class="mplus">${t.matesMore(spans.length - 1)}</span>` : "");
+    };
+    renderResults(ids, new Map(), new Map(), new Set(), 0, { into: ul, metaOf });
+  };
+
+  const paint = () => {
+    const n = matesData && matesData.pid === pid ? matesData.map.size : null;
+    head.innerHTML = `<span class="mtitle"><span class="marr">${matesOpen ? "▾" : "▸"}</span> `
+      + `${t.matesTitle}${n != null ? ` <b>${n.toLocaleString(lang)}</b>` : ""}</span>`
+      + `<span class="tot">${t.matesNote}</span>`;
+    head.setAttribute("aria-expanded", String(matesOpen));
+    body.hidden = !matesOpen;
+    body.innerHTML = "";
+    if (!matesOpen) return;
+    if (err) body.textContent = t.matesFail;
+    else if (n == null) body.textContent = t.matesLoad;
+    else drawList();
+  };
+  head.onclick = () => {
+    matesOpen = !matesOpen;
+    localStorage.mates = matesOpen ? "1" : "0";
+    paint();
+  };
+  head.onkeydown = (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); head.click(); }
+  };
+
+  paint();
+  if (!matesData || matesData.pid !== pid) {
+    let map;
+    // a 404 here is the normal state until the pipeline has run once with the years
+    // stage: the section says so and everything else on the page is unaffected
+    try { map = await matesOf(pid); } catch { err = true; if (live()) paint(); return; }
+    if (!live()) return;
+    matesData = { pid, map };
+    matesOff = new Set();
+  }
+  paint();
 }
 
 // ------------------------------------------------------ keyboard: result list

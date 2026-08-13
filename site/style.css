@@ -470,6 +470,26 @@ body:not(.nohover) .player:not(.sclub):hover { border-color: var(--accent); }
   display: flex; justify-content: space-between; align-items: baseline; gap: 1rem;
 }
 .lsep .tot { text-transform: none; letter-spacing: normal; font-size: .78rem; white-space: nowrap; }
+/* teammates: the divider doubles as the disclosure control, so it carries the count
+   and the caveat the numbers need (covered leagues, whole-year overlap) */
+.mhead { cursor: pointer; }
+.mhead:hover .mtitle, .mhead:focus-visible .mtitle { color: var(--accent); }
+.mtitle b { color: var(--accent); font-size: 1.1em; }
+.marr { display: inline-block; width: .7em; font-size: .9em; }
+.mhead .tot { color: var(--muted); opacity: .8; white-space: normal; text-align: right; }
+.mbody, .mbody ul { display: block; list-style: none; padding: 0; margin: 0; }
+.mbody[hidden] { display: none; }
+.mchips { display: flex; flex-wrap: wrap; gap: .35rem; margin: 0 0 .55rem; }
+.mchip {  /* one per club: a filter, and the breakdown of where they overlapped */
+  cursor: pointer; font: inherit; font-size: .82rem; white-space: nowrap;
+  color: var(--fg); background: var(--hit); border: 1px solid var(--accent);
+  border-radius: 999px; padding: .1rem .6rem;
+}
+.mchip small { color: var(--muted); font-variant-numeric: tabular-nums; margin-left: .15rem; }
+.mchip.off { background: transparent; border-style: dashed; border-color: var(--line); color: var(--muted); }
+.mchip:hover { border-color: var(--accent); }
+.myrs { font-variant-numeric: tabular-nums; }
+.mplus { color: var(--muted); font-size: .9em; }
 .lsep .comb { opacity: .55; }
 
 footer { margin-top: 3rem; color: var(--muted); font-size: .8rem; text-align: center; }

@@ -2,7 +2,8 @@
 
 Two ways to play the game «Istinto Puro». The solver: pick clubs and
 instantly get every player who wore all of those shirts — or switch to
-player mode and go the other way: pick players, get the clubs they shared.
+player mode and go the other way: pick players, get the clubs they shared,
+or pick one and get everyone he ever lined up alongside.
 The daily quiz mode (`site/quiz.js`) turns the same index into a Wordle-style
 game: four intersections of rising difficulty, generated deterministically
 from the date, so everyone on the same dataset build plays the same puzzle.
@@ -44,7 +45,8 @@ python3 pipeline/pipeline.py build      # rebuild site/data from checkpoints
 
 A weekly GitHub Action re-runs the pipeline and deploys; the `validate`
 stage blocks a malformed or shrunken dataset, one whose apps coverage
-dropped, and one where too few squad-table seeds survived — half the careers
+dropped, one whose spell years stopped lining up with the postings they
+describe, and one where too few squad-table seeds survived — half the careers
 come from the Wikipedia overlay, and for seeded players it is their only
 source, so a broken parse degrades or empties the data without changing any
 of the counts the shrink guards watch. One list needs a human:
