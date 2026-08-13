@@ -1459,7 +1459,11 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
     li.setAttribute("aria-expanded", "false");
     li.dataset.pid = pid;
     li.onkeydown = (e) => {
-      if (e.target === li && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggleCareer(li, pid); }
+      // same as an arrow move: what it unfolds has to end up on screen
+      if (e.target === li && (e.key === "Enter" || e.key === " ")) {
+        e.preventDefault();
+        toggleCareer(li, pid).then(() => revealRow(li));
+      }
     };
     frag.appendChild(li);
   });
@@ -1485,12 +1489,25 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0) {
 // the careers one after another instead of leaving every panel open in your wake.
 const NAVSEL = "li.player:not(.sclub), li.more";
 const navRows = () => [...results.querySelectorAll(NAVSEL)];
+// Keep the whole row on screen, career and all. focus() scrolls the row's own box
+// into view and stops, but the panel is added AFTER that — so stepping onto the last
+// visible row unfolded the career below the fold, out of sight. A row taller than
+// the viewport can't fit: pin its top instead, which shows as much as there is room
+// for and puts the earliest spells (the ones the scroll would hide) first.
+const NAVPAD = 14;
+function revealRow(el) {
+  const r = el.getBoundingClientRect();
+  const dy = r.height > innerHeight - 2 * NAVPAD || r.top < NAVPAD ? r.top - NAVPAD
+           : r.bottom > innerHeight - NAVPAD ? r.bottom - innerHeight + NAVPAD : 0;
+  if (dy) scrollBy(0, dy);
+}
 let navGen = 0;
 async function navOpen(row) {
   const g = ++navGen;
   await toggleCareer(row, +row.dataset.pid);
   // a shard still in flight can land after the next arrow press: don't leave a trail
-  if (g !== navGen && row.querySelector(".career")) toggleCareer(row, +row.dataset.pid);
+  if (g !== navGen) { if (row.querySelector(".career")) toggleCareer(row, +row.dataset.pid); return; }
+  revealRow(row);  // only now is the career in the layout
 }
 results.addEventListener("keydown", (e) => {
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -1504,8 +1521,9 @@ results.addEventListener("keydown", (e) => {
   e.preventDefault();
   const open = !!from.querySelector(".career");
   if (open) toggleCareer(from, +from.dataset.pid);
-  to.focus();
+  to.focus({ preventScroll: true });  // revealRow does the scrolling, once the row is final
   if (open && to.dataset.pid) navOpen(to);
+  else revealRow(to);
 });
 
 // imgs entries are "hh" (md5 prefix, the Commons hashed-directory path) + underscored
