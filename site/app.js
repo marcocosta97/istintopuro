@@ -15,6 +15,12 @@ const search = $("search"), sugg = $("suggestions"), chips = $("chips"),
 // hasn't tapped (mode switch, first load, clear-all) pops the keyboard
 const focusSearch = () => { if (!matchMedia("(pointer: coarse)").matches) search.focus(); };
 
+// The deploy stamps every asset URL with the commit sha; app.js reads its own so what
+// it fetches is versioned too. A fresh app.js then cannot pair with a cached index
+// from an older build — which is what the no-cache revalidation below used to buy, at
+// the price of a round trip on every single load. "__V__" locally, which is stable.
+const V = new URL(document.currentScript.src).searchParams.get("v") || "0";
+
 let DB = null;               // raw index.json
 let mode = "club";           // "club" (players in common) | "player" (clubs in common)
 let clubIds = [];            // selected club indices
@@ -400,7 +406,7 @@ const stature = (ci) => {
 async function boot() {
   status.textContent = t.loading;
   try {
-    const res = await fetch("data/index.json", { cache: "no-cache" });  // revalidate: stale index + fresh app.js hides fields
+    const res = await fetch(`data/index.json?v=${V}`);  // the stamp is the freshness guarantee
     if (!res.ok) throw new Error(res.status);
     DB = await res.json();
   } catch {
