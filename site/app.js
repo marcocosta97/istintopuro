@@ -403,11 +403,26 @@ const stature = (ci) => {
 };
 
 // ---------------------------------------------------------------- data loading
+// The index is the one file fetched before a first-visit service worker can take over
+// the page, so the worker never sees it and an offline reload would find everything
+// cached except the thing without which nothing runs. Put it in the worker's own data
+// cache from here, where the response already is — no second download — and keep one
+// version of it, the way sw.js does for the shards.
+async function keepIndex(copy) {
+  if (!window.caches) return;  // http:// or an old browser: nothing to do
+  try {
+    const c = await caches.open("istintopuro-data");
+    for (const k of await c.keys())
+      if (new URL(k.url).pathname.endsWith("/data/index.json")) await c.delete(k);
+    await c.put(`data/index.json?v=${V}`, copy);
+  } catch { /* storage full or denied: the app is unaffected */ }
+}
 async function boot() {
   status.textContent = t.loading;
   try {
     const res = await fetch(`data/index.json?v=${V}`);  // the stamp is the freshness guarantee
     if (!res.ok) throw new Error(res.status);
+    keepIndex(res.clone());   // before the body is read, and before anything can throw
     DB = await res.json();
   } catch {
     status.textContent = t.loadFail + " ";
@@ -2084,3 +2099,10 @@ async function toggleCareer(li, pid) {
 
 applyLang();
 boot();
+
+// Offline shell. Registered after load so it never competes with the first paint, and
+// only where a service worker can run at all — over file:// or plain http the register
+// call throws, which is exactly the case when someone opens the folder directly.
+if ("serviceWorker" in navigator && (location.protocol === "https:"
+    || ["localhost", "127.0.0.1"].includes(location.hostname)))
+  addEventListener("load", () => navigator.serviceWorker.register(`sw.js?v=${V}`).catch(() => {}));

@@ -59,7 +59,16 @@ every August.
 python3 -m http.server -d site 8000
 ```
 
-Pushing to `master` deploys `site/` to GitHub Pages.
+Pushing to `master` deploys `site/` to GitHub Pages, stamping every asset URL
+with the commit sha.
+
+The site installs and runs offline: `site/sw.js` precaches the app itself and
+keeps the data files it has been asked for, one version of each. Nothing is
+cached unversioned — the code carries the deploy's sha, the dataset its build
+date — and the page itself is always fetched from the network first, since it is
+the file that names those versions. Should the worker ever need pulling, deploy
+one whose `install` unregisters it and clears `caches`; browsers revalidate the
+worker script on every load, so clients drop it by themselves.
 
 ## License
 

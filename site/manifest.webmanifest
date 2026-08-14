@@ -1,0 +1,17 @@
+{
+  "name": "Istinto Puro — quiz & solver",
+  "short_name": "Istinto Puro",
+  "description": "Schedina giornaliera e solver: scegli le squadre e scopri chi ha giocato per tutte.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fafaf8",
+  "theme_color": "#0a7d4f",
+  "lang": "it",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
