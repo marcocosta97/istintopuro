@@ -892,6 +892,33 @@ if (matchMedia("(pointer: coarse)").matches)
     if (document.activeElement === search) search.blur();
   }, { passive: true });
 
+// "/" is the one shortcut a keyboard user expects on a page whose whole job is a
+// search field, and there was none: the box could only be reached by clicking or by
+// tabbing past the header. Not while typing somewhere, and not in the quiz, whose
+// guess box owns the keyboard.
+addEventListener("keydown", (e) => {
+  if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (document.body.classList.contains("quiz") || search.disabled) return;
+  const a = document.activeElement;
+  if (a && (a.matches("input, select, textarea") || a.isContentEditable)) return;
+  e.preventDefault();
+  search.focus();
+  search.select();
+});
+
+// A club-QID hash arriving in a tab that is already open — a pasted link, or Back
+// after following one — used to sit there until a reload: quiz.js listens for its own
+// #quiz and nothing listened for the solver's. (Our own syncHash uses replaceState,
+// which fires nothing, so this cannot loop.)
+addEventListener("hashchange", () => {
+  if (!DB || location.hash === "#quiz" || document.body.classList.contains("quiz")) return;
+  const ids = location.hash.slice(1).split(",").map(q => DB.byQid.get(q)).filter(i => i !== undefined);
+  if (ids.join() === clubIds.join()) return;
+  clubIds = ids;
+  if (mode !== "club") setMode("club");
+  else { renderChips(); solve(); }
+});
+
 // ------------------------------------------------------- FM-style team browser
 const browse = $("browse"), browseBtn = $("browsebtn"), brBack = $("br-back");
 let brCC = null, brLG = null;  // drill-down state: country code, league index | "x" (Others)
