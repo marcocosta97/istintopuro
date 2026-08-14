@@ -1100,6 +1100,14 @@ const weighted = (rows) => {
   return rows[rows.length - 1][0];  // float drift only
 };
 
+// The anchor decides how recognisable a whole roll is, and drawing it evenly meant
+// every club and every squad number weighed the same: 468 clubs and a century each,
+// so the dice cheerfully opened with Everton's 1889 side. Draw the club by stature
+// (^4: a marquee club comes up about nine times as often as an obscure one, without
+// ever excluding it) and the first player by the fame the search box already ranks
+// by. The partner stays a matter of seasons shared — that part was right.
+const rollClubs = () => DB.rollPool ||= DB.clubs.map((c, i) => [i, stature(i) ** 4]);
+
 // Players who were at one club AT THE SAME TIME. The roll used to pair by birth year
 // (±2), a proxy for "could have played together" that never asked whether they did —
 // so it would hand you a club's 1994 side beside its 2019 one, two men who share
@@ -1107,16 +1115,17 @@ const weighted = (rows) => {
 // question, and the draw is weighted by seasons shared, so a long partnership comes
 // up more often than one overlapping season. Returns null if the years aren't there.
 async function rollMates(n) {
+  pIndex();  // the anchor is drawn by fame; player mode has built it, a stray call may not
   for (let tries = 1; tries <= 40; tries++) {
     if (tries === 20) n = 2;
-    const ci = Math.random() * DB.clubs.length | 0;
+    const ci = weighted(rollClubs());
     const arr = postings(ci);
     let y;
     try { y = await yearsOf(ci); } catch { return null; }  // caller falls back to the roster
     const cand = [];  // a photo carries the card; an undated spell can prove nothing
     for (let i = 0; i < arr.length; i++) if (y[i].length && DB.imgs[arr[i]]) cand.push(i);
     if (cand.length < n) continue;
-    const a = cand[Math.random() * cand.length | 0];
+    const a = weighted(cand.map(i => [i, DB.fame[arr[i]] + 1]));
     const mates = [];
     for (const i of cand) {
       if (i === a) continue;
