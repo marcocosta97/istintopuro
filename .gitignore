@@ -1,2 +1,11 @@
 /data/
 __pycache__/
+
+# agent and plugin scaffolding: ~7 MB of tooling that belongs to the machine,
+# not to the project, and that a single `git add -A` would otherwise commit
+/.claude/
+/.codex/
+/.impeccable/
+/.github/agents/
+/.github/hooks/
+/.github/skills/
