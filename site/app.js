@@ -65,8 +65,8 @@ const STR = {
     loadFail: "Errore nel caricamento dei dati.", retry: "riprova",
     spin: "Non sai da dove partire?",
     orSearch: "Oppure cerca una squadra…",
-    tryRandom: "🎲 casuale",
     dailyQuiz: (n) => `Schedina #${n}`, dailyPlay: "gioca →",
+    dailyDone: (n, score) => `Schedina #${n} · ${score}/4`, dailyArchive: "archivio →",
     randClubs: "squadre a caso", randPlayers: "giocatori a caso",
     noneCommon: "Nessun giocatore ha vestito tutte queste maglie — togli una squadra.",
     noneFilter: "Nessun giocatore corrisponde ai filtri.",
@@ -122,8 +122,8 @@ const STR = {
     loadFail: "Failed to load data.", retry: "retry",
     spin: "Not sure where to start?",
     orSearch: "Or search for a club…",
-    tryRandom: "🎲 random",
     dailyQuiz: (n) => `Quiz #${n}`, dailyPlay: "play →",
+    dailyDone: (n, score) => `Quiz #${n} · ${score}/4`, dailyArchive: "archive →",
     randClubs: "random clubs", randPlayers: "random players",
     noneCommon: "No player has played for all these clubs — remove one to widen the search.",
     noneFilter: "No players match the filters.",
@@ -1105,15 +1105,18 @@ function renderExamples() {
   lead.className = "examples-lead";
   lead.textContent = t.spin;
   li.appendChild(lead);
-  const quiz = document.createElement("button");
+  const quiz = document.createElement("button"), done = quizTodayResult();
   quiz.type = "button";
   quiz.className = "daily-quiz";
   const quizName = document.createElement("span"), quizGo = document.createElement("span");
-  quizName.textContent = t.dailyQuiz(quizNumberToday());
+  quizName.textContent = done ? t.dailyDone(done.num, done.cleared) : t.dailyQuiz(quizNumberToday());
   quizGo.className = "daily-quiz-go";
-  quizGo.textContent = t.dailyPlay;
+  quizGo.textContent = done ? t.dailyArchive : t.dailyPlay;
   quiz.append(quizName, quizGo);
-  quiz.onclick = () => $("mode-quiz").click();
+  quiz.onclick = () => {
+    $("mode-quiz").click();
+    if (done) qCalOpen(true);
+  };
   li.appendChild(quiz);
   const search = document.createElement("span");
   search.className = "examples-search";
@@ -1137,12 +1140,6 @@ function renderExamples() {
     };
     li.appendChild(b);
   }
-  const random = document.createElement("button");
-  random.type = "button";
-  random.className = "example-action";
-  random.textContent = t.tryRandom;
-  random.onclick = () => runRandom(mode);
-  li.appendChild(random);
   results.appendChild(li);
 }
 function clubExample() {
