@@ -62,9 +62,15 @@ self.addEventListener("fetch", (e) => {
   const isData = url.pathname.includes("/data/");
   e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => {
     if (res.ok && (url.searchParams.has("v") || /\.(woff2|png|svg|webmanifest)$/.test(url.pathname))) {
+      // waitUntil, not fire-and-forget: the response is already on its way to the page,
+      // and a browser may stop the worker the moment it has been delivered. Safari does
+      // so promptly, which loses the write and leaves the cache holding whatever it had
+      // — the page then works online and fails offline, with nothing to show for it.
+      // A full storage quota rejects the put; that is a reason to cache less, not to
+      // fail the request the page is waiting on.
       const copy = res.clone();
-      if (isData) putData(req, copy);
-      else caches.open(SHELL).then(c => c.put(req, copy));
+      e.waitUntil((isData ? putData(req, copy)
+                          : caches.open(SHELL).then(c => c.put(req, copy))).catch(() => {}));
     }
     return res;
   })));
