@@ -65,6 +65,7 @@ const STR = {
     loadFail: "Errore nel caricamento dei dati.", retry: "riprova",
     spin: "Non sai da dove partire?",
     orSearch: "Oppure cerca una squadra…",
+    tryRandom: "🎲 casuale",
     dailyQuiz: (n) => `Schedina #${n}`, dailyPlay: "gioca →",
     dailyDone: (n, score) => `Schedina #${n} · ${score}/4`, dailyArchive: "archivio →",
     randClubs: "squadre a caso", randPlayers: "giocatori a caso",
@@ -122,6 +123,7 @@ const STR = {
     loadFail: "Failed to load data.", retry: "retry",
     spin: "Not sure where to start?",
     orSearch: "Or search for a club…",
+    tryRandom: "🎲 random",
     dailyQuiz: (n) => `Quiz #${n}`, dailyPlay: "play →",
     dailyDone: (n, score) => `Quiz #${n} · ${score}/4`, dailyArchive: "archive →",
     randClubs: "random clubs", randPlayers: "random players",
@@ -879,7 +881,9 @@ function leagueNames(mask) {
   return DB.leagues.filter((_, i) => mask & (1 << i)).map(l => l[0]).join(" · ");
 }
 
-search.addEventListener("input", () => { browseOpen(false); renderSuggestions(matches(search.value), search.value); });
+search.addEventListener("input", () => {
+  browseOpen(false); syncRandomButton(); renderSuggestions(matches(search.value), search.value);
+});
 search.addEventListener("keydown", (e) => {
   const items = [...sugg.children];
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -1063,6 +1067,10 @@ function removePlayer(pid) {
   playerIds = playerIds.filter(x => x !== pid);
   renderChips(); solve();
 }
+function syncRandomButton() {
+  const sel = mode === "club" ? clubIds : playerIds;
+  $("randbtn").hidden = !sel.length && !search.value.trim();
+}
 function renderChips() {
   chips.innerHTML = "";
   const mk = (html, title, onRemove) => {
@@ -1081,6 +1089,7 @@ function renderChips() {
     mk(`${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}`,
        "", () => removePlayer(pid)));
   const sel = mode === "club" ? clubIds : playerIds;
+  syncRandomButton();
   if (sel.length >= 2) {  // clear-all rides the chip row; one chip has its own × already
     const b = document.createElement("button");
     b.type = "button";
@@ -1140,6 +1149,12 @@ function renderExamples() {
     };
     li.appendChild(b);
   }
+  const random = document.createElement("button");
+  random.type = "button";
+  random.className = "example-action";
+  random.textContent = t.tryRandom;
+  random.onclick = () => runRandom(mode);
+  li.appendChild(random);
   results.appendChild(li);
 }
 function clubExample() {
