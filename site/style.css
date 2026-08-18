@@ -620,6 +620,9 @@ body.quiz {
 }
 #qsugg li small { color: var(--muted); }
 #qsugg li.active, #qsugg li:hover { background: var(--hit); }
+/* the initials-probe refusal: a message, not a pickable row */
+#qsugg li.qnote { color: var(--muted); font-size: .88rem; cursor: default; }
+#qsugg li.qnote:hover { background: none; }
 #qbar { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-top: .6rem; }
 #qlives { color: var(--accent); letter-spacing: .18em; font-size: .95rem; }
 #qlives .off { color: var(--line); }

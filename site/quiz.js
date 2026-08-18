@@ -525,6 +525,7 @@ const QSTR = {
     qh: { nat: "di dove?", ini: "identikit", ini2: "identikit", car: "carriera" },
     qsIni: (ini, dec) => `iniziali ${ini}` + (dec ? `, nato negli anni ${dec >= 2000 ? dec : "'" + String(dec).slice(2)}` : ""),
     qsCar: (l) => `è passato anche da ${l.join(" · ")}`,
+    qsProbe: "scrivi almeno tre lettere del nome, non le iniziali",
     qsBorn: (y) => `nato nel ${y}`,
     qsAtClub: (n) => `gioca ancora in una delle ${n === 2 ? "due" : "tre"} squadre`,
     qsActive: "ancora in attività",
@@ -561,6 +562,7 @@ const QSTR = {
     qh: { nat: "from where?", ini: "identikit", ini2: "identikit", car: "career" },
     qsIni: (ini, dec) => `initials ${ini}` + (dec ? `, born in the ${dec}s` : ""),
     qsCar: (l) => `also played for ${l.join(" · ")}`,
+    qsProbe: "type at least three letters of the name, not the initials",
     qsBorn: (y) => `born in ${y}`,
     qsAtClub: (n) => `still plays for one of the ${n === 2 ? "two" : "three"} clubs`,
     qsActive: "still an active player",
@@ -629,7 +631,10 @@ function qBuild() {  // static skeleton, rendered once on first entry
     <div id="qcal"></div>`;
   $("qcal-open").onclick = () => qCalOpen(true);
   const qse = $("qsearch");
-  qse.addEventListener("input", () => qSuggest(playerMatches(qse.value, []), qse.value));
+  qse.addEventListener("input", () => {
+    const ids = qMatches(qse.value);  // the note explains an empty list, never a full one
+    qSuggest(ids, qse.value, ids.length === 0 && qInitialsProbe(qse.value));
+  });
   qse.addEventListener("keydown", (e) => {
     const items = [...$("qsugg").children];
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -639,7 +644,7 @@ function qBuild() {  // static skeleton, rendered once on first entry
       items.forEach((li, i) => li.classList.toggle("active", i === qCur));
     } else if ((e.key === "Enter" || e.key === "Tab") && qCur >= 0 && !$("qsugg").hidden) {
       e.preventDefault();
-      qPick(playerMatches(qse.value, [])[qCur]);
+      qPick(qMatches(qse.value)[qCur]);
     } else if (e.key === "Escape") $("qsugg").hidden = true;
   });
   // Not tied to keeping focus: hiding on blur meant dismissing the phone keyboard
@@ -699,13 +704,40 @@ function qResign() {
 }
 
 let qCur = -1;
+// The identikit hint spends itself to hand out initials ("Y. P.", Danish), and
+// the search box hands the answer straight back: it profiles the stage's most
+// recognisable answer, and playerMatches breaks ties by fame — so "y" and "p"
+// each put that very player on top. Blocking the "y p" form alone was not
+// enough, single letters leak the same way. Suggestions therefore need three
+// letters in some token: nobody guesses a name with fewer, and probing the
+// initials would take a trigram sweep instead of two keystrokes.
+const qInitialsProbe = (q) => {
+  const toks = norm(q).split(" ").filter(Boolean);
+  return toks.length > 0 && toks.every(w => w.length < 3);
+};
+// ...with one hole to patch: three players in the index (Jô, Li Ke, Zé Tó) have
+// no token that long, and one of them can be a stage answer. A blocked query
+// that IS somebody's whole name is a guess, not a probe — "p" still matches no
+// name outright, so the initials stay closed.
+const qMatches = (q) => {
+  if (!qInitialsProbe(q)) return playerMatches(q, []);
+  const nq = norm(q);
+  return playerMatches(q, [], false).filter(id => norm(DB.names[id]) === nq);
+};
+
 // Deliberately NOT the solver's two-line row: naming a candidate's clubs here
 // would answer the puzzle outright. Birth year only, plus the match highlight.
-function qSuggest(ids, q = "") {
+function qSuggest(ids, q = "", probe = false) {
   const ul = $("qsugg"), nq = norm(q);
   ul.innerHTML = "";
-  ul.hidden = ids.length === 0;
+  ul.hidden = ids.length === 0 && !probe;
   qCur = ids.length ? 0 : -1;
+  if (probe) {
+    const li = document.createElement("li");
+    li.className = "qnote";
+    li.textContent = QSTR[lang].qsProbe;
+    ul.appendChild(li);
+  }
   ids.forEach((pid, i) => {
     const li = document.createElement("li");
     li.innerHTML = `<span>${flag(DB.nats[pid])} ${hilite(DB.names[pid], nq)}</span><small>${DB.births[pid] || ""}</small>`;
