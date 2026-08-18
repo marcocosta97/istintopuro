@@ -40,7 +40,6 @@ const STR = {
     taglineP: "Scegli uno o più giocatori — in quali squadre hanno giocato insieme?",
     placeholder: "Aggiungi una squadra…",
     placeholderP: "Aggiungi un giocatore…",
-    modeClub: "Squadre", modePlayer: "Giocatori",
     foundClubs: (n, ms) => `${n} squadr${n === 1 ? "a" : "e"} in comune · ${ms} ms`,
     mates: (span) => `compagni ${span}`,
     noOverlap: "(mai insieme)",
@@ -64,7 +63,10 @@ const STR = {
     nat: "Nazionalità", natAll: "tutte", natNone: "nessuna", natUnknown: "sconosciuta",
     stats: (p, c) => `${p.toLocaleString("it")} giocatori · ${c} squadre`,
     loadFail: "Errore nel caricamento dei dati.", retry: "riprova",
-    spin: "Non sai da dove partire? Tira il dado 🎲",
+    spin: "Non sai da dove partire?",
+    orSearch: "Oppure cerca una squadra…",
+    tryRandom: "🎲 casuale",
+    dailyQuiz: (n) => `Schedina #${n}`, dailyPlay: "gioca →",
     randClubs: "squadre a caso", randPlayers: "giocatori a caso",
     noneCommon: "Nessun giocatore ha vestito tutte queste maglie — togli una squadra.",
     noneFilter: "Nessun giocatore corrisponde ai filtri.",
@@ -95,7 +97,6 @@ const STR = {
     taglineP: "Pick one or more players — which clubs did they share?",
     placeholder: "Add a club…",
     placeholderP: "Add a player…",
-    modeClub: "Clubs", modePlayer: "Players",
     foundClubs: (n, ms) => `${n} shared club${n === 1 ? "" : "s"} · ${ms} ms`,
     mates: (span) => `teammates ${span}`,
     noOverlap: "(never overlapped)",
@@ -119,7 +120,10 @@ const STR = {
     nat: "Nationality", natAll: "all", natNone: "none", natUnknown: "unknown",
     stats: (p, c) => `${p.toLocaleString("en")} players · ${c} clubs`,
     loadFail: "Failed to load data.", retry: "retry",
-    spin: "Not sure where to start? Roll the dice 🎲",
+    spin: "Not sure where to start?",
+    orSearch: "Or search for a club…",
+    tryRandom: "🎲 random",
+    dailyQuiz: (n) => `Quiz #${n}`, dailyPlay: "play →",
     randClubs: "random clubs", randPlayers: "random players",
     noneCommon: "No player has played for all these clubs — remove one to widen the search.",
     noneFilter: "No players match the filters.",
@@ -159,8 +163,6 @@ function applyLang() {
   $("foot").innerHTML = t.footer + (DB && DB.built ? `<div id="built">${t.built(DB.built)}</div>` : "");
   search.placeholder = mode === "club" ? t.placeholder : t.placeholderP;
   search.setAttribute("aria-label", search.placeholder);  // the placeholder is not a reliable accessible name
-  $("mode-club").textContent = t.modeClub;
-  $("mode-player").textContent = t.modePlayer;
   browseBtn.title = t.browse;
   browseBtn.setAttribute("aria-label", t.browse);
   const rl = mode === "club" ? t.randClubs : t.randPlayers;
@@ -198,7 +200,8 @@ function applyLang() {
     const sel = mode === "club" ? clubIds : playerIds;
     if (sel.length) solve();
     else {
-      clearResults(); status.textContent = t.stats(DB.names.length, DB.clubs.length);
+      clearResults(); controlsRow.hidden = true; advBody.hidden = true;
+      status.textContent = t.stats(DB.names.length, DB.clubs.length);
       renderNats(); renderExamples();
     }
   }
@@ -1093,14 +1096,73 @@ function renderChips() {
 }
 
 // ------------------------------------------------------- random demo query
-// shown whenever the current mode has no selection: one tap rolls 2–3
-// current top-division clubs, or 2–3 players who were at one club at the
-// same time (photo as the notability proxy)
-function renderExamples() {  // a nudge toward the picker dice, not a control of its own
+// shown whenever the current mode has no selection: a few useful queries invite
+// play without turning the empty state into an explanatory panel
+function renderExamples() {
   const li = document.createElement("li");
   li.className = "examples";
-  li.textContent = t.spin;
+  const lead = document.createElement("span");
+  lead.className = "examples-lead";
+  lead.textContent = t.spin;
+  li.appendChild(lead);
+  const quiz = document.createElement("button");
+  quiz.type = "button";
+  quiz.className = "daily-quiz";
+  const quizName = document.createElement("span"), quizGo = document.createElement("span");
+  quizName.textContent = t.dailyQuiz(quizNumberToday());
+  quizGo.className = "daily-quiz-go";
+  quizGo.textContent = t.dailyPlay;
+  quiz.append(quizName, quizGo);
+  quiz.onclick = () => $("mode-quiz").click();
+  li.appendChild(quiz);
+  const search = document.createElement("span");
+  search.className = "examples-search";
+  search.textContent = t.orSearch;
+  li.appendChild(search);
+  const seen = new Set();
+  for (let n = 0; n < 3; n++) {
+    const sample = mode === "club" ? clubExample() : playerExample();
+    if (!sample) continue;
+    const key = sample.join(",");
+    if (seen.has(key)) { n--; continue; }
+    seen.add(key);
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "example-action";
+    b.textContent = (mode === "club" ? sample.map(i => coreClub(DB.clubs[i][0])) : sample.map(i => DB.names[i])).join(" × ");
+    b.onclick = () => {
+      if (mode === "club") { clubIds = sample; syncHash(); }
+      else playerIds = sample;
+      renderChips(); solve(); focusSearch();
+    };
+    li.appendChild(b);
+  }
+  const random = document.createElement("button");
+  random.type = "button";
+  random.className = "example-action";
+  random.textContent = t.tryRandom;
+  random.onclick = () => runRandom(mode);
+  li.appendChild(random);
   results.appendChild(li);
+}
+function clubExample() {
+  for (let tries = 0; tries < 80; tries++) {
+    const [a, b] = draw(exampleClubs(), 2);
+    if (a !== b && intersect([postings(a), postings(b)]).length) return [a, b];
+  }
+  return null;
+}
+function playerExample() {
+  pIndex();
+  for (let tries = 0; tries < 80; tries++) {
+    const ci = weighted(exampleClubs().map(i => [i, stature(i)]));
+    const ids = [...postings(ci)].filter(pid => DB.imgs[pid]);
+    if (ids.length < 2) continue;
+    const a = weighted(ids.map(pid => [pid, DB.fame[pid] + 1]));
+    const b = weighted(ids.filter(pid => pid !== a).map(pid => [pid, DB.fame[pid] + 1]));
+    if (b !== undefined) return [a, b];
+  }
+  return null;
 }
 const draw = (pool, n) => {  // n distinct random picks
   const p = [...pool], out = [];
@@ -1123,6 +1185,10 @@ const weighted = (rows) => {
 // ever excluding it) and the first player by the fame the search box already ranks
 // by. The partner stays a matter of seasons shared — that part was right.
 const rollClubs = () => DB.rollPool ||= DB.clubs.map((c, i) => [i, stature(i) ** 4]);
+// First-use examples are stricter than a random roll: they only use the curated
+// marquee set, so the prompts introduce the product through recognisable clubs.
+const exampleClubs = () => DB.exampleClubs ||= DB.clubs.map((c, i) => i)
+  .filter(i => !DB.clubs[i][4] && MARQUEE.has(DB.clubs[i][3]));
 
 // Players who were at one club AT THE SAME TIME. The roll used to pair by birth year
 // (±2), a proxy for "could have played together" that never asked whether they did —
@@ -1222,10 +1288,12 @@ function solve() {
   syncSort();  // the row is shared with the team-mates list: take it back
   clearResults();
   if (clubIds.length === 0) {  // no nagging: the stats line + dice nudge are the empty state
+    controlsRow.hidden = true; advBody.hidden = true;
     status.textContent = t.stats(DB.names.length, DB.clubs.length);
     natCounts.clear(); renderNats(); renderExamples();
     return;
   }
+  controlsRow.hidden = false;
   const t0 = performance.now();
   const common = intersect(clubIds.map(postings));
   const commonSet = new Set(common);

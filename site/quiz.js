@@ -26,6 +26,7 @@ const qNum = (date) => {  // parse by hand: new Date(string) is a timezone trap
   const [y, m, d] = date.split("-").map(Number);
   return (Date.UTC(y, m - 1, d) - QEPOCH) / 864e5 + 1;
 };
+const quizNumberToday = () => qNum(qToday());
 const qStarted = () => qNum(qToday()) >= 1;  // false before launch day → "starts soon" screen
 const qLaunchLabel = () => {  // e.g. "lunedì 20 luglio" for the pre-launch message
   try { return new Intl.DateTimeFormat(lang, { weekday: "long", day: "numeric", month: "long" }).format(new Date(2026, 6, 20)); }
@@ -512,7 +513,7 @@ function qRecordDay() {
 const QSTR = {
   it: {
     qTag: "la schedina del giorno — quattro sfide, cinque tentativi",
-    qNum: (n) => `Schedina n. ${n}`,
+    qNum: (n) => `Schedina #${n}`,
     qStages: ["facile", "media", "difficile", "impossibile"],
     qQ: (n) => n === 2 ? "Chi ha giocato in entrambe?" : "Chi ha giocato in tutte e tre?",
     qPh: "Il tuo giocatore…",
