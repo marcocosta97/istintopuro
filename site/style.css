@@ -648,12 +648,25 @@ body.quiz {
 #qmsg { min-height: 1.5em; font-size: .9rem; margin: .45rem 0 0; font-weight: 600; }
 #qmsg.ok { color: var(--accent); }
 #qmsg.no { color: var(--bad); }
+#qconfirm {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .45rem .7rem;
+  margin-top: .5rem; padding: .45rem .55rem; background: var(--warn-bg); color: var(--fg);
+  border: 1px solid var(--warn); border-radius: 7px; font-size: .85rem;
+}
+#qconfirm[hidden] { display: none; }
+.qconfirm-actions { display: inline-flex; gap: .35rem; margin-left: auto; }
+.qconfirm-actions button {
+  cursor: pointer; background: transparent; color: var(--fg); border: 1px solid var(--warn);
+  border-radius: 6px; font: inherit; font-size: .82rem; padding: .12rem .45rem;
+}
+.qconfirm-actions button:last-child { background: var(--warn); color: #fff; }
 #qresign {  /* quiet give-up link, right-aligned under the card actions */
   display: block; margin: .5rem 0 0 auto; cursor: pointer;
   background: transparent; border: none; color: var(--muted);
   font: inherit; font-size: .78rem; text-decoration: underline; text-underline-offset: 2px;
 }
 #qresign:hover { color: var(--bad); }
+#qresign[hidden] { display: none; }
 @media (max-width: 560px) {  /* phones: hint chips get their own full-width row */
   /* left-aligned and tight so all three fit one line down to ~360px; flex-end
      used to strand the third chip on a second line with a gap beside it */
@@ -672,7 +685,9 @@ body.quiz {
   display: flex; gap: .5rem; align-items: baseline;
   padding: .18rem .2rem; border-top: 1px solid var(--line);
 }
+#qlog .qguess { display: flex; flex: 1; flex-direction: column; min-width: 0; }
 #qlog li small { margin-left: auto; color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
+#qlog .qwhy { margin: .05rem 0 0; color: var(--muted); font-size: .78rem; letter-spacing: normal; text-transform: none; }
 /* end card: centred result sheet — headline, big scoreline, stat tiles, histogram */
 #qend {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;

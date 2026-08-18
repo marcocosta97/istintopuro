@@ -470,7 +470,7 @@ function qFinish() {
 }
 
 function qHint(kind) {  // a QHINTS key — each usable once per run
-  if (!qs || qs.done || qs.hints[kind] !== null || qRolled()) return false;
+  if (!qs || qs.done || qConfirm || qs.hints[kind] !== null || qRolled()) return false;
   qs.hints[kind] = qs.stage;  // remember where it was spent, for the share text
   qSave();
   return true;
@@ -540,6 +540,7 @@ const QSTR = {
     qShare: "condividi", qCopied: "copiato negli appunti", qOpen: "apri nel solver",
     qResignBtn: "mi arrendo", qResignWarn: "Abbandonare la schedina di oggi?",
     qSkipBtn: "salta la sfida", qSkipWarn: "Saltare questa sfida? Conterà come non risolta.",
+    qConfirmNo: "annulla", qConfirmSkip: "salta", qConfirmResign: "abbandona",
     qLeaveWarn: "Se esci abbandoni la schedina di oggi. Continuare?",
     qCal: "archivio", qCalTitle: "Archivio", qCalBack: "torna a oggi",
     qCalHint: "rigioca una schedina passata",
@@ -574,6 +575,7 @@ const QSTR = {
     qShare: "share", qCopied: "copied to clipboard", qOpen: "open in solver",
     qResignBtn: "give up", qResignWarn: "Give up on today's quiz?",
     qSkipBtn: "skip this stage", qSkipWarn: "Skip this stage? It will count as unsolved.",
+    qConfirmNo: "cancel", qConfirmSkip: "skip", qConfirmResign: "give up",
     qLeaveWarn: "Leaving forfeits today's quiz. Continue?",
     qCal: "archive", qCalTitle: "Archive", qCalBack: "back to today",
     qCalHint: "replay a past quiz",
@@ -584,7 +586,7 @@ const QSTR = {
 // entered via the modebar Quiz toggle; a body.quiz class flips the page to the
 // green schedina theme and hides the solver — its state is never touched
 const qEl = $("quiz");
-let qBuilt = false;
+let qBuilt = false, qConfirm = null;
 
 function qBuild() {  // static skeleton, rendered once on first entry
   qEl.innerHTML = `
@@ -607,6 +609,10 @@ function qBuild() {  // static skeleton, rendered once on first entry
       </div>
       <div id="qhint" hidden></div>
       <div id="qmsg" aria-live="polite"></div>
+      <div id="qconfirm" aria-live="polite" hidden>
+        <span id="qconfirmtext"></span>
+        <span class="qconfirm-actions"><button id="qconfirm-no" type="button"></button><button id="qconfirm-yes" type="button"></button></span>
+      </div>
       <button id="qresign" type="button"></button>
     </div>
     <ul id="qlog"></ul>
@@ -649,15 +655,22 @@ function qBuild() {  // static skeleton, rendered once on first entry
   // stage, nothing to move on to): give up ends the whole run
   $("qresign").onclick = () => {
     if (!qs || qs.done) return;
-    const last = qs.stage === 3, q = QSTR[lang];
-    if (!confirm(last ? q.qResignWarn : q.qSkipWarn)) return;
-    if (last) qResign(); else qSkipStage();
+    qConfirm = qs.stage === 3 ? "resign" : "skip";
+    qRender();
+  };
+  $("qconfirm-no").onclick = () => { qConfirm = null; qRender(); };
+  $("qconfirm-yes").onclick = () => {
+    const action = qConfirm;
+    qConfirm = null;
+    if (action === "resign") qResign();
+    else if (action === "skip") qSkipStage();
   };
 }
 
 // skip the current (non-final) stage: counts as unsolved, run continues
 function qSkipStage() {
   if (!qs || qs.done || qRolled() || qs.stage >= 3) return;
+  qConfirm = null;
   qs.skipped.push(qs.stage);
   qs.stage++;
   qSave();
@@ -668,6 +681,7 @@ function qSkipStage() {
 // give up: end the run as a loss (reveal + stats), stay on the quiz page
 function qResign() {
   if (!qs || qs.done) return;
+  qConfirm = null;
   qs.done = true; qs.won = false;
   qFinish();
   qSave();
@@ -701,7 +715,7 @@ function qWrongMsg(pid, st) {
 }
 
 function qPick(pid) {
-  if (pid === undefined) return;
+  if (pid === undefined || qConfirm) return;
   $("qsearch").value = "";
   $("qsugg").hidden = true;
   const st = qPz.stages[qs.stage];
@@ -806,6 +820,15 @@ function qRender() {
       .map(k => qHintText(k, st));
     $("qhint").hidden = lines.length === 0;
     $("qhint").innerHTML = lines.map(l => `<div>${l}</div>`).join("");
+    const confirming = !!qConfirm;
+    $("qconfirm").hidden = !confirming;
+    $("qresign").hidden = confirming;
+    if (confirming) {
+      const resigning = qConfirm === "resign";
+      $("qconfirmtext").textContent = resigning ? q.qResignWarn : q.qSkipWarn;
+      $("qconfirm-no").textContent = q.qConfirmNo;
+      $("qconfirm-yes").textContent = resigning ? q.qConfirmResign : q.qConfirmSkip;
+    }
     $("qresign").textContent = qs.stage === 3 ? q.qResignBtn : q.qSkipBtn;
   }
   // guess history, newest first
@@ -813,8 +836,9 @@ function qRender() {
   log.innerHTML = "";
   [...qs.guesses].reverse().forEach(g => {
     const li = document.createElement("li");
+    const why = g.ok ? "" : `<small class="qwhy">${esc(qWrongMsg(g.pid, qPz.stages[g.stage]))}</small>`;
     li.innerHTML = `<span class="${g.ok ? "qv" : "qx"}">${g.ok ? "✓" : "✗"}</span>`
-      + `<span>${esc(g.name)}</span><small>${q.qStages[g.stage]}</small>`;
+      + `<span class="qguess">${esc(g.name)}${why}</span><small>${q.qStages[g.stage]}</small>`;
     log.appendChild(li);
   });
   qRenderEnd();
@@ -1114,6 +1138,7 @@ function qOpenPlayer(pid) {
 // club/player mode (even the mode===m no-op click) closes the quiz view
 function qEnter() {
   if (!DB || document.body.classList.contains("quiz")) return;
+  qConfirm = null;
   pIndex();  // guess box searches all players, like player mode
   if (!qBuilt) { qBuild(); qBuilt = true; }
   // restore the same board a club/player detour left behind: a past replay if one
@@ -1133,6 +1158,7 @@ function qEnter() {
 }
 function qExit() {
   if (!document.body.classList.contains("quiz")) return;
+  qConfirm = null;
   document.body.classList.remove("quiz");
   $("tagline").textContent = mode === "club" ? t.tagline : t.taglineP;  // restore solver tagline
   syncHash();  // drop #quiz, restore the solver's club-QID hash (or a clean URL)
