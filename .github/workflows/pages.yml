@@ -22,6 +22,11 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate quiz schedule
+        run: node scripts/quiz-schedule.js --check
       # stamp asset URLs so fresh HTML can never pair with stale cached CSS/JS
       - run: sed -i "s/__V__/$GITHUB_SHA/g" site/index.html
       - uses: actions/upload-pages-artifact@v3

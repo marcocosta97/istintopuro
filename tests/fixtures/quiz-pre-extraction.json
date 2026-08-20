@@ -1,0 +1,12 @@
+{
+  "source": "git HEAD d3e3222 site/quiz.js, captured by the legacy VM harness before extraction",
+  "built": "2026-08-17",
+  "dates": [
+    {"date":"2026-07-20","stages":[["Q1893","Q2609",58,638,"Ciro Immobile"],["Q41420","Q106394",12,435,"Matthias Ginter"],["Q2074","Q8780",4,162,"Felipe Caicedo"],["Q333838","Q101859",1,-69,"Thomas Kahlenberg"]]},
+    {"date":"2026-07-21","stages":[["Q10329","Q18741",11,667,"Frédéric Kanouté"],["Q19453","Q9616",41,429,"Danny Welbeck"],["Q10333","Q223620","Q10315",2,179,"Santiago Idígoras"],["Q162251","Q19571",1,32,"Konstantin Kerschbaumer"]]},
+    {"date":"2026-07-29","stages":[["Q8687","Q10286",62,786,"Raúl García"],["Q38245","Q101959",21,430,"Arie van Lent"],["Q289482","Q13391","Q2074",7,215,"Cosimo Francioso"],["Q2529430","Q845137",2,74,"Rayan Frikeche"]]},
+    {"date":"2026-10-17","stages":[["Q2739","Q50602",5,632,"Edin Džeko"],["Q4512","Q41420",25,483,"Serhou Guirassy"],["Q19571","Q15755",2,142,"Frank Onyeka"],["Q1570559","Q19444","Q1893",1,6,"Cheick Keita"]]},
+    {"date":"2026-10-18","stages":[["Q1543","Q1422",71,815,"Zlatan Ibrahimović"],["Q8701","Q10286",25,510,"Raúl García"],["Q19509","Q10329",7,247,"Luís Fabiano"],["Q3076567","Q760736","Q218372",1,-5,"Fabien Raddas"]]},
+    {"date":"2026-10-19","stages":[["Q32494","Q2739",2,608,"Edin Džeko"],["Q19580","Q9616",19,459,"Joe Cole"],["Q19518","Q1893",4,245,"Thijs Dallinga"],["Q1195376","Q611653","Q10499",1,-29,"Juan Ceballos"]]}
+  ]
+}

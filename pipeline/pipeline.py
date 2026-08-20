@@ -11,6 +11,7 @@ Stages (each checkpoints to data/, reruns skip completed stages):
   teams    - labels for career teams outside the club universe
   build    - emit site/data/index.json + career shards, print stats
   validate - sanity-check the emitted index; fail instead of shipping junk
+  quiz     - preserve published quizzes and generate/validate the next 14 days
 
 Usage: python3 pipeline/pipeline.py [stage ...]   (default: all)
 
@@ -50,7 +51,7 @@ site/data/career/<pid % nshards>.json — lazy-loaded careers, per player:
   move elsewhere stays separate; trailing 1 = P1642 loan flag
   (app.js also infers loans from a spell inside an earlier one's range)
 """
-import hashlib, json, os, re, sys, time, gzip
+import hashlib, json, os, re, subprocess, sys, time, gzip
 from pathlib import Path
 from urllib.parse import unquote
 import requests
@@ -731,6 +732,29 @@ def wd_metrics(spells):
     ns = sum((sp[3] is not None) + (sp[4] is not None) for sp in spells)
     return nq, ns
 
+def wp_covers_wd(wd_spells, rows):
+    """Whether resolved Wikipedia rows are safe to replace the Wikidata club career.
+
+    Aggregate richness alone misses swaps: two Wikipedia rows can replace two Wikidata
+    rows while silently exchanging one club for another, or move a known apps/goals
+    field onto the wrong club. Preserve the existing count guard, then require every
+    qualified Wikidata club and each known stat kind at that club to survive."""
+    nq, ns = wd_metrics(wd_spells)
+    wp_stat = sum((r[3] is not None) + (r[4] is not None) for r in rows)
+    if len(rows) < nq or wp_stat < ns: return False
+    covered = {}
+    for r in rows:
+        stats = covered.setdefault(r[0], [False, False])
+        stats[0] |= r[3] is not None
+        stats[1] |= r[4] is not None
+    for sp in wd_spells:
+        if bare(sp): continue
+        stats = covered.get(sp[0])
+        if not stats: return False
+        if sp[3] is not None and not stats[0]: return False
+        if sp[4] is not None and not stats[1]: return False
+    return True
+
 def national_teams(careers, clubs):
     """QIDs of the national sides sitting in Wikidata careers, by the same NATIONAL name
     test stage_build uses. The guard has to compare like with like: parse_infobox reads
@@ -765,8 +789,7 @@ def stage_wp():
     seeded = {p for ps in (load("roster") or {}).values() for p in ps}
     cand = sorted(p for p in players if careers.get(p) or p in seeded)
     nat = national_teams(careers, load("clubs"))   # compare club spells only, as the infobox does
-    wd = {p: wd_metrics([sp for sp in careers.get(p, ()) if sp[0] not in nat])
-          for p in cand}                           # pid -> (qualified spells, stat fields)
+    wd = {p: [sp for sp in careers.get(p, ()) if sp[0] not in nat] for p in cand}
     limit = int(os.environ.get("WP_LIMIT", 0))   # dry-run slice; 0 = all
     if limit: cand = cand[:limit]
     print(f"wp: {len(cand)} candidates (all players)", flush=True)
@@ -804,17 +827,16 @@ def stage_wp():
 
     # emit in the exact careers shape, dropping spells whose club title wouldn't
     # resolve. Richness guard: replace only if the infobox is at least as complete as
-    # Wikidata on BOTH axes — spell count and populated apps/goals — so a wholesale
-    # replace can never drop a club or a stat Wikidata already had. Trivially passes
-    # for thin players (Wikidata metrics 0); protects genuinely-complete careers now
-    # that the trigger is every player.
+    # Wikidata on BOTH aggregate axes — spell count and populated apps/goals — and
+    # preserves every qualified Wikidata club plus its known stat kinds. The identity
+    # check matters when equal-count rows exchange one club for another. Trivially
+    # passes for thin players (no Wikidata career); protects genuinely-complete careers
+    # now that the trigger is every player.
     wp, guarded = {}, 0
     for pid_, spells in raw:
         rows = [[t2q[t], s, e, a, g, ln] for t, s, e, a, g, ln in spells if t2q.get(t)]
         if not rows: continue
-        nq, ns = wd.get(pid_, (0, 0))
-        wp_stat = sum((r[3] is not None) + (r[4] is not None) for r in rows)
-        if len(rows) >= nq and wp_stat >= ns: wp[pid_] = rows
+        if wp_covers_wd(wd.get(pid_, ()), rows): wp[pid_] = rows
         else: guarded += 1
     save("wp", wp)
     n_sp = sum(map(len, wp.values()))
@@ -1303,15 +1325,20 @@ def stage_validate():
                      f"{np - wp_n:,} straight from Wikidata")
     (DATA / "commit-body.txt").write_text("\n".join(lines) + "\n")
 
+def stage_quiz():
+    """Preserve published quizzes and generate the next 14 days."""
+    subprocess.run(["node", str(ROOT / "scripts" / "quiz-schedule.js")], cwd=ROOT, check=True)
+
 STAGES = {"clubs": stage_clubs, "members": stage_members, "roster": stage_roster,
           "attrs": stage_attrs, "careers": stage_careers, "wp": stage_wp,
-          "teams": stage_teams, "build": stage_build, "validate": stage_validate}
+          "teams": stage_teams, "build": stage_build, "validate": stage_validate,
+          "quiz": stage_quiz}
 
 if __name__ == "__main__":
     DATA.mkdir(exist_ok=True)
     todo = sys.argv[1:] or list(STAGES)
     for s in todo:
-        if s != "build" and load(s) is not None and s not in sys.argv[1:]:
+        if s not in ("build", "quiz") and load(s) is not None and s not in sys.argv[1:]:
             print(f"{s}: checkpoint exists, skipping"); continue
         print(f"== stage {s}", flush=True)
         STAGES[s]()

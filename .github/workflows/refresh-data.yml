@@ -3,7 +3,7 @@ name: Weekly data refresh
 on:
   schedule:
     - cron: "0 2 * * 1"   # Mondays 02:00 UTC (deploys ~02:40 UTC, off-peak) — the quiz
-                          # regenerates from the live dataset, so refresh in the quiet hours
+                          # schedule extends from the refreshed dataset before deployment
   workflow_dispatch:        # manual "Run workflow" button
 
 permissions:
@@ -27,6 +27,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - run: pip install requests==2.32.3
 
       # re-runs of a failed job resume its checkpoints; keys are scoped to the
@@ -43,6 +46,11 @@ jobs:
         run: |
           git show HEAD:site/data/index.json > /tmp/index-baseline.json
           VALIDATE_BASELINE=/tmp/index-baseline.json python3 pipeline/pipeline.py
+
+      - name: Test pipeline and audit quiz schedule
+        run: |
+          python3 -m unittest discover -s tests
+          node --test --test-concurrency=1 tests/quiz-core.test.js tests/quiz-schedule.test.js
 
       - uses: actions/cache/save@v4
         if: always()   # keep partial checkpoints even when a stage failed

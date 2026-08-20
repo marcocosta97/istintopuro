@@ -5,8 +5,9 @@ instantly get every player who wore all of those shirts — or switch to
 player mode and go the other way: pick players, get the clubs they shared,
 or pick one and get everyone he ever lined up alongside.
 The daily quiz mode (`site/quiz.js`) turns the same index into a Wordle-style
-game: four intersections of rising difficulty, generated deterministically
-from the date, so everyone on the same dataset build plays the same puzzle.
+game: four intersections of rising difficulty. A versioned static schedule keeps
+published days stable across dataset refreshes and deterministically prepares the
+next fortnight, so everyone plays the same puzzle.
 
 Live at **[istintopuro.mcosta.it](https://istintopuro.mcosta.it)**.
 
@@ -28,19 +29,22 @@ docstring; heuristics and quality passes are commented where they live,
 in the pipeline and in `site/app.js`.
 
 Quiz difficulty is rated by how recognisable the answer set is, not the
-clubs; the tuning lives in one table at the top of `site/quiz.js`, and
+clubs; the tuning lives in `site/quiz-core.js`, and
 `quizDebug(30)` in the console prints the next month of puzzles to
 sanity-check after a dataset refresh. A stage is usually two clubs; the
 two hardest each toss a seeded daily coin for a three-club variant, which
 plays as a different flavour of hard rather than simply a harder one. An
 archive calendar replays past days for practice; game state persists in
-`localStorage`.
+`localStorage`. New schedules reject the same order-independent club
+combination for 30 days and any individual club for two days.
 
 ## Refreshing the data
 
 ```
 python3 pipeline/pipeline.py            # full fetch, Wikidata + Wikipedia (~80 min local, ~25 in CI)
 python3 pipeline/pipeline.py build      # rebuild site/data from checkpoints
+python3 pipeline/pipeline.py quiz       # regenerate/validate the static quiz horizon
+node scripts/quiz-schedule.js --audit   # deterministic 730-day balance audit
 ```
 
 A weekly GitHub Action re-runs the pipeline and deploys; the `validate`

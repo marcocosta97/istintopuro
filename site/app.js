@@ -423,13 +423,30 @@ async function keepIndex(copy) {
     await c.put(`data/index.json?v=${V}`, copy);
   } catch { /* storage full or denied: the app is unaffected */ }
 }
+async function keepQuizSchedule(copy) {
+  if (!window.caches) return;
+  try {
+    const c = await caches.open("istintopuro-data");
+    for (const k of await c.keys())
+      if (new URL(k.url).pathname.endsWith("/data/quiz-schedule.json")) await c.delete(k);
+    await c.put(`data/quiz-schedule.json?v=${V}`, copy);
+  } catch { /* optional offline copy; runtime generation remains available */ }
+}
 async function boot() {
   status.textContent = t.loading;
   try {
+    const schedule = fetch(`data/quiz-schedule.json?v=${V}`).then(res => {
+      if (!res.ok) return null;
+      keepQuizSchedule(res.clone());
+      return res.json();
+    }).catch(() => null);
     const res = await fetch(`data/index.json?v=${V}`);  // the stamp is the freshness guarantee
     if (!res.ok) throw new Error(res.status);
     keepIndex(res.clone());   // before the body is read, and before anything can throw
     DB = await res.json();
+    const quizSchedule = await schedule;
+    DB.quizSchedule = quizSchedule && quizSchedule.v === 1 && quizSchedule.built === DB.built
+      ? quizSchedule : null;
   } catch {
     status.textContent = t.loadFail + " ";
     const b = document.createElement("button");
@@ -1034,7 +1051,11 @@ function renderBrowse() {
   const level = brCC === null ? 0 : brLG === null ? 1 : 2;
   browse.dataset.level = level;
   brBack.hidden = level === 0;
-  brBack.textContent = `‹ ${level === 2 ? `${countryFlag(brCC)} ${countryName(brCC)}` : t.back}`;
+  // countryFlag() returns markup (including the SVG-backed historical flags), so
+  // textContent would show its <span> literally on the mobile league back row.
+  brBack.innerHTML = level === 2
+    ? `‹ ${countryFlag(brCC)} ${esc(countryName(brCC))}`
+    : `‹ ${esc(t.back)}`;
 }
 
 // ---------------------------------------------------------------- selection

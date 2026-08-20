@@ -19,7 +19,7 @@
 const V = new URL(self.location).searchParams.get("v") || "dev";
 const SHELL = `istintopuro-shell-${V}`;
 const DATA = "istintopuro-data";
-const CORE = ["./", `./app.js?v=${V}`, `./quiz.js?v=${V}`, `./style.css?v=${V}`,
+const CORE = ["./", `./app.js?v=${V}`, `./quiz-core.js?v=${V}`, `./quiz.js?v=${V}`, `./style.css?v=${V}`,
   "./fonts/barlow-semi-condensed-latin-600-normal.woff2",
   "./fonts/barlow-semi-condensed-latin-700-italic.woff2",
   "./icon-192.png", "./icon-512.png", `./manifest.webmanifest?v=${V}`];
