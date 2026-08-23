@@ -1153,11 +1153,12 @@ function renderExamples() {
   search.textContent = t.orSearch;
   li.appendChild(search);
   const seen = new Set();
-  for (let n = 0; n < 3; n++) {
-    const sample = mode === "club" ? clubExample() : playerExample();
+  const sampleSizes = [1, 2, 3];
+  for (const size of sampleSizes) {
+    const sample = mode === "club" ? clubExample(size) : playerExample(size);
     if (!sample) continue;
     const key = sample.join(",");
-    if (seen.has(key)) { n--; continue; }
+    if (seen.has(key)) continue;
     seen.add(key);
     const b = document.createElement("button");
     b.type = "button";
@@ -1178,22 +1179,26 @@ function renderExamples() {
   li.appendChild(random);
   results.appendChild(li);
 }
-function clubExample() {
+function clubExample(size) {
   for (let tries = 0; tries < 80; tries++) {
-    const [a, b] = draw(exampleClubs(), 2);
-    if (a !== b && intersect([postings(a), postings(b)]).length) return [a, b];
+    const sample = draw(exampleClubs(), size);
+    if (sample.length === size && intersect(sample.map(postings)).length) return sample;
   }
   return null;
 }
-function playerExample() {
+function playerExample(size) {
   pIndex();
   for (let tries = 0; tries < 80; tries++) {
     const ci = weighted(exampleClubs().map(i => [i, stature(i)]));
     const ids = [...postings(ci)].filter(pid => DB.imgs[pid]);
-    if (ids.length < 2) continue;
-    const a = weighted(ids.map(pid => [pid, DB.fame[pid] + 1]));
-    const b = weighted(ids.filter(pid => pid !== a).map(pid => [pid, DB.fame[pid] + 1]));
-    if (b !== undefined) return [a, b];
+    if (ids.length < size) continue;
+    const sample = [];
+    while (sample.length < size) {
+      const pid = weighted(ids.filter(pid => !sample.includes(pid)).map(pid => [pid, DB.fame[pid] + 1]));
+      if (pid === undefined) break;
+      sample.push(pid);
+    }
+    if (sample.length === size) return sample;
   }
   return null;
 }
