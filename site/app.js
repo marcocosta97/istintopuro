@@ -90,7 +90,7 @@ const STR = {
     matesNone: "Nessun compagno: nessuna delle sue squadre è nei campionati coperti.",
     matesFail: "Compagni non disponibili.",
     matesMore: (n) => `+${n}`,
-    copyLink: "copia link", copyLinkT: "Copia il link a questa selezione", copied: "copiato ✓",
+    copyLink: "copia link", copyLinkT: "Copia il link a questa selezione e ai filtri", copied: "copiato ✓",
     themeDark: "Passa al tema scuro", themeLight: "Passa al tema chiaro",
   },
   en: {
@@ -148,7 +148,7 @@ const STR = {
     matesNone: "No teammates: none of his clubs is in the covered leagues.",
     matesFail: "Teammates unavailable.",
     matesMore: (n) => `+${n}`,
-    copyLink: "copy link", copyLinkT: "Copy a link to this selection", copied: "copied ✓",
+    copyLink: "copy link", copyLinkT: "Copy a link to this selection and filters", copied: "copied ✓",
     themeDark: "Switch to dark theme", themeLight: "Switch to light theme",
   },
 };
@@ -469,6 +469,7 @@ async function boot() {
   DB.padAlias = DB.aliasNorm.map(a => a.map(pad));
   DB.byQid = new Map(DB.clubs.map((c, i) => [c[3], i]));  // hash restore + example queries
   clubIds = location.hash.slice(1).split(",").map(q => DB.byQid.get(q)).filter(i => i !== undefined);
+  restoreShareOptions();
   search.disabled = false;
   browseBtn.disabled = false;
   $("randbtn").disabled = false;
@@ -1386,6 +1387,40 @@ function solve() {
 // The club selection has always been in the URL hash (syncHash), but nothing on
 // the page said so, and on a phone copying the address bar is a chore. Sits at the
 // right of the status row, where player mode keeps its "dettagli" switch.
+const SHARE_PARAMS = ["sort", "dir", "from", "to", "nozero", "exclude"];
+const validShareYear = (value, input) => {
+  const year = Number(value);
+  return Number.isInteger(year) && year >= +input.min && year <= +input.max ? String(year) : "";
+};
+function restoreShareOptions() {
+  const params = new URLSearchParams(location.search);
+  const sharedSort = params.get("sort");
+  if (["apps", "goals", "birth"].includes(sharedSort)) sortBy = sharedSort;
+  if (params.get("dir") === "asc") sortDir = 1;
+  else if (params.get("dir") === "desc") sortDir = -1;
+  byFrom.value = validShareYear(params.get("from"), byFrom);
+  byTo.value = validShareYear(params.get("to"), byTo);
+  noZero.checked = params.get("nozero") === "1";
+  const validNats = new Set(DB.nats.flatMap(nat => nat ? nat.split(",") : [""]));
+  for (const token of (params.get("exclude") || "").split(",")) {
+    const cc = token === "unknown" ? "" : token.toUpperCase();
+    if (validNats.has(cc)) natOff.add(cc);
+  }
+}
+function solverShareUrl() {
+  const url = new URL(location.href);
+  SHARE_PARAMS.forEach(param => url.searchParams.delete(param));
+  if (sortBy !== "apps") url.searchParams.set("sort", sortBy);
+  if (sortDir > 0) url.searchParams.set("dir", "asc");
+  const from = validShareYear(byFrom.value, byFrom), to = validShareYear(byTo.value, byTo);
+  if (from) url.searchParams.set("from", from);
+  if (to) url.searchParams.set("to", to);
+  if (noZero.checked) url.searchParams.set("nozero", "1");
+  const excluded = [...natOff].filter(cc => natCounts.has(cc)).sort()
+    .map(cc => cc || "unknown");
+  if (excluded.length) url.searchParams.set("exclude", excluded.join(","));
+  return url.href;
+}
 function linkBtn() {
   const b = document.createElement("button");
   b.type = "button";
@@ -1396,7 +1431,7 @@ function linkBtn() {
   return b;
 }
 async function shareLink(btn) {
-  const url = location.href;
+  const url = solverShareUrl();
   // native sheet only on touch, like the quiz's share: on desktop navigator.share
   // exists but often no-ops, so there we always copy
   if (navigator.share && matchMedia("(pointer: coarse)").matches) {
