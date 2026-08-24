@@ -173,14 +173,13 @@ function qLoad() {
   qSave();
 }
 
-// open a past day from the calendar as a practice run. Reopening a day you've
-// touched restores its saved progress (in or finished); a first visit builds a
-// fresh board — from the stored QIDs of a day you played live (exact matchup),
-// else regenerated deterministically from the date. The state persists (keyed by
-// date), so switching between today and a past day never loses the view.
+// Open a past day from the calendar. A completed day restores its finished board;
+// an unfinished practice run restores its progress; an unplayed day starts fresh
+// from the stored QIDs (exact matchup), else deterministically from the date.
 function qStartReplay(date) {
   qReplaying = true;
-  const saved = qReplays().days[date];
+  const rec = qHistory().days[date];
+  const saved = rec?.state || qReplays().days[date];
   if (saved && (saved.v === 1 || saved.v === 2)) {
     const stages = qStagesFromQids(saved.stages, saved);
     if (stages) {
@@ -189,13 +188,15 @@ function qStartReplay(date) {
       qPz = { stages }; qSave(); return;
     }
   }
-  const rec = qHistory().days[date];
   const stages = (rec && qStagesFromQids(rec.stages)) || qGen(date).stages;
   qPz = { stages };
-  qs = { v: 2, date, num: qNum(date), built: DB.built,
-         stages: stages.map(st => st.clubs.map(ci => DB.clubs[ci][3])),
-         stage: 0, lives: 5, guesses: [], hints: Object.fromEntries(QHINTS.map(k => [k, null])),
-         hintTargets: {}, skipped: [], startedAt: Date.now(), done: false, won: false };
+  const stageQids = stages.map(st => st.clubs.map(ci => DB.clubs[ci][3]));
+  qs = rec && qCore().restoreHistoryState(rec, stages,
+    { date, num: qNum(date), built: DB.built, stageQids }, QHINTS);
+  qs ||= { v: 2, date, num: qNum(date), built: DB.built,
+           stages: stageQids, stage: 0, lives: 5, guesses: [],
+           hints: Object.fromEntries(QHINTS.map(k => [k, null])), hintTargets: {},
+           skipped: [], startedAt: Date.now(), done: false, won: false };
   qSave();
 }
 
@@ -259,8 +260,9 @@ function qGetStats() {
   return null;
 }
 
-// per-day archive for the calendar: the four stage outcomes + the club QIDs that
-// pin the matchup, so a replay restores the exact same board. Written whenever a
+// Per-day archive for the calendar: summary codes for its tile, club QIDs that pin
+// the matchup, and the finished state needed to reopen that exact board. Older
+// summary-only rows are reconstructed by restoreHistoryState. Written whenever a
 // run finishes (live or replay); replays never touch quizStats, only this.
 function qHistory() {
   try { const s = JSON.parse(localStorage.quizHistory || ""); if (s && s.v === 1) return s; } catch {}
@@ -268,7 +270,7 @@ function qHistory() {
 }
 function qRecordDay() {
   const h = qHistory();
-  h.days[qs.date] = { num: qs.num, res: qResCodes(), stages: qs.stages };
+  h.days[qs.date] = { num: qs.num, res: qResCodes(), stages: qs.stages, state: qs };
   localStorage.quizHistory = JSON.stringify(h);
 }
 
@@ -569,7 +571,7 @@ function qRender() {
   if (!qStarted()) { qRenderPre(); return; }  // before launch day
   $("qnum").textContent = q.qNum(qs.num);
   const cb = $("qcal-open");  // the archive is only worth offering once there's a past
-  cb.textContent = q.qCal; cb.setAttribute("aria-label", q.qCalTitle); cb.hidden = qs.num <= 1;
+  cb.textContent = q.qCal; cb.setAttribute("aria-label", q.qCalTitle); cb.hidden = qNum(qToday()) <= 1;
   // stage board: a stage's answer shows the moment it closes — cleared,
   // skipped, or the one that ended the run — not only once the whole game is
   // over; unreached rows stay covered until the run ends, since that's when
@@ -914,8 +916,8 @@ function qRenderCal() {
   });
 }
 
-// open a day from the archive. Today is the live persistent game; any past day
-// is an in-memory replay.
+// Open a day from the archive. Today is the live persistent game; any past day is
+// restored from its completed state or its saved practice run.
 function qCalPick(ds) {
   if (ds === qToday()) { qReplayDate = null; qReplaying = false; if (!qs || qs.date !== ds) qLoad(); }
   else { qReplayDate = ds; qStartReplay(ds); }

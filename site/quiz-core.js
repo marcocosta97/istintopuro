@@ -242,6 +242,37 @@
       return state;
     }
 
+    // Older archive rows kept only the four result codes and stage QIDs. Turn
+    // that summary back into a terminal board so opening a played day does not
+    // silently start it over. Exact guesses are available only on newer rows;
+    // representative correct answers preserve the recorded stage outcomes.
+    function restoreHistoryState(record, stages, meta = {}, hintKinds = ["nat", "ini", "ini2"]) {
+      const res = record?.res;
+      if (!Array.isArray(res) || res.length !== stages?.length
+          || res.some(code => !Number.isInteger(code) || code < 0 || code > 3)) return null;
+      let stage = res.length - 1;
+      while (stage >= 0 && res[stage] === 3) stage--;
+      if (stage < 0) return null;
+      const won = res.at(-1) < 2;
+      const hinted = res.map((code, i) => code === 1 ? i : -1).filter(i => i >= 0);
+      const hints = Object.fromEntries(hintKinds.map((kind, i) => [kind, hinted[i] ?? null]));
+      const guesses = [];
+      res.forEach((code, i) => {
+        if (code > 1) return;
+        const pid = qFace(stages[i]);
+        if (pid < 0) return;
+        guesses.push({ name: DB.names[pid], birth: DB.births[pid] || 0, nat: DB.nats[pid] || "",
+          key: playerIdentity(pid), pid, stage: i, ok: true });
+      });
+      return {
+        v: 2, date: meta.date, num: record.num ?? meta.num, built: meta.built,
+        stages: meta.stageQids || record.stages, stage: won ? res.length - 1 : stage,
+        lives: 5, guesses, hints, hintTargets: {},
+        skipped: res.map((code, i) => code === 2 && (won || i < stage) ? i : -1).filter(i => i >= 0),
+        startedAt: meta.startedAt || Date.now(), done: true, won,
+      };
+    }
+
     function qLadders(rng) {
       const hard3 = rng() < Q3ODDS, impossible3 = rng() < Q3ODDS;
       return [QEASY, QMEDIUM, hard3 ? [...QHARD3, ...QHARD] : QHARD,
@@ -445,7 +476,7 @@
       validateEntry, validateScheduleEntry: validateEntry, stagesFromQids, serializeStages, stageDiagnostics,
       qHash, qRng, qNum, qShift, qPools, qApps, qGoals, appearanceGaps, qFame, qEase,
       qEffective, effectiveAnswers: qEffective, qComboInfo, qComboKey, qRanked, rankedAnswers: qRanked,
-      qFace, face: qFace, playerIdentity, answerMatches, nextHintTarget, migrateState,
+      qFace, face: qFace, playerIdentity, answerMatches, nextHintTarget, migrateState, restoreHistoryState,
       careerCacheKey, careerViewKey, clubCountry: leagueCC,
       resetCaches: () => comboCache.clear(),
       constants: { QEPOCH, QT, QWIN, QCOMBO_DAYS, QMAX_ATTEMPTS, Q3ODDS,

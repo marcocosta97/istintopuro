@@ -162,6 +162,30 @@ test("v1 migration preserves cleared progress while backfilling state contracts"
   assert.equal(migrated.hintTargets.ini, core.face(puzzle.stages[0]));
 });
 
+test("legacy archive summaries restore as completed boards", () => {
+  const { core } = runtime();
+  const puzzle = core.generate(SERIES_START);
+  const qids = core.serializeStages(puzzle.stages);
+  const win = core.restoreHistoryState(
+    { num: 1, res: [0, 1, 2, 0], stages: qids }, puzzle.stages,
+    { date: SERIES_START, built: "test", stageQids: qids });
+  assert.equal(win.done, true);
+  assert.equal(win.won, true);
+  assert.equal(win.stage, 3);
+  assert.deepEqual(win.skipped, [2]);
+  assert.equal(win.hints.nat, 1);
+  assert.deepEqual(win.guesses.map(guess => guess.stage), [0, 1, 3]);
+
+  const loss = core.restoreHistoryState(
+    { num: 1, res: [0, 2, 3, 3], stages: qids }, puzzle.stages,
+    { date: SERIES_START, built: "test", stageQids: qids });
+  assert.equal(loss.done, true);
+  assert.equal(loss.won, false);
+  assert.equal(loss.stage, 1);
+  assert.deepEqual(loss.skipped, []);
+  assert.deepEqual(loss.guesses.map(guess => guess.stage), [0]);
+});
+
 test("career cache keys isolate stages, reuse club order, and identify stale views", () => {
   const { core } = runtime();
   assert.equal(core.careerCacheKey(12, "2026-07-20", 1, [8, 3]),
