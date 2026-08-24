@@ -9,52 +9,38 @@ PIPELINE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PIPELINE)
 
 
-class WikipediaOverlayGuardTests(unittest.TestCase):
-    def test_rejects_equal_count_overlay_missing_a_wikidata_club(self):
-        wd = [
-            ["Q1", 2000, 2001, 10, None, 0],
-            ["Q2", 2002, 2003, None, 2, 0],
-        ]
-        wp = [
-            ["Q1", 2000, 2001, 10, None, 0],
-            ["Q3", 2002, 2003, None, 2, 0],
-        ]
+class WikipediaOverlayTests(unittest.TestCase):
+    def test_infobox_excludes_youth_clubs_from_the_senior_career(self):
+        text = """{{Infobox football biography
+            | youthclubs1 = [[Udinese Calcio|Udinese]]
+            | years1 = 2000–2001 | caps1 = 24 | goals1 = 4
+            | clubs1 = [[A.S.D. Castel di Sangro Calcio|Castel di Sangro]]
+        }}"""
 
-        self.assertFalse(PIPELINE.wp_covers_wd(wd, wp))
+        self.assertEqual(PIPELINE.parse_infobox(text), [
+            ["A.S.D. Castel di Sangro Calcio", 2000, 2001, 24, 4, 0],
+        ])
 
-    def test_rejects_known_stat_moved_to_another_covered_club(self):
-        wd = [
-            ["Q1", 2000, 2001, 10, None, 0],
-            ["Q2", 2002, 2003, None, 2, 0],
-        ]
-        wp = [
-            ["Q1", 2000, 2001, None, None, 0],
-            ["Q2", 2002, 2003, 10, 2, 0],
+    def test_complete_wikipedia_career_is_kept_as_is(self):
+        spells = [
+            ["Senior One", 2000, 2001, 10, 2, 0],
+            ["Senior Two", 2002, 2003, 20, 3, 0],
         ]
 
-        self.assertFalse(PIPELINE.wp_covers_wd(wd, wp))
+        self.assertEqual(PIPELINE.resolve_wp_spells(spells, {
+            "Senior One": "Q1", "Senior Two": "Q2",
+        }), [
+            ["Q1", 2000, 2001, 10, 2, 0],
+            ["Q2", 2002, 2003, 20, 3, 0],
+        ])
 
-    def test_accepts_overlay_that_preserves_clubs_and_known_stat_kinds(self):
-        wd = [
-            ["Q1", 2000, 2001, 10, None, 0],
-            ["Q2", 2002, 2003, None, 2, 0],
-            ["Q-bare", None, None, None, None, 0],
+    def test_partial_title_resolution_keeps_wikidata_fallback(self):
+        spells = [
+            ["Senior One", 2000, 2001, 10, 2, 0],
+            ["Unresolved", 2002, 2003, 20, 3, 0],
         ]
-        wp = [
-            ["Q1", 2000, 2001, 12, 1, 0],
-            ["Q2", 2002, 2003, 5, 3, 0],
-        ]
 
-        self.assertTrue(PIPELINE.wp_covers_wd(wd, wp))
-
-    def test_keeps_aggregate_richness_guard(self):
-        wd = [
-            ["Q1", 2000, 2001, 10, None, 0],
-            ["Q1", 2004, 2005, 8, None, 0],
-        ]
-        wp = [["Q1", 2000, 2005, 18, 0, 0]]
-
-        self.assertFalse(PIPELINE.wp_covers_wd(wd, wp))
+        self.assertIsNone(PIPELINE.resolve_wp_spells(spells, {"Senior One": "Q1"}))
 
 
 class MobileBrowserBackTests(unittest.TestCase):

@@ -7,7 +7,7 @@ Stages (each checkpoints to data/, reruns skip completed stages):
   roster   - current-squad seeds from enwiki squad tables (players Wikidata has no P54 for)
   attrs    - player attributes (label, birth year, nationality, image, enwiki title)
   careers  - full P54 career statements per player (any team, with years/apps/goals)
-  wp       - Wikipedia-infobox career overlay (every player; richness-guarded replace)
+  wp       - Wikipedia-infobox career overlay (every player; authoritative when complete)
   teams    - labels for career teams outside the club universe
   build    - emit site/data/index.json + career shards, print stats
   validate - sanity-check the emitted index; fail instead of shipping junk
@@ -630,15 +630,15 @@ def stage_careers():
 # enwiki {{Infobox football biography}} for EVERY player and lays the parsed result
 # over careers. The overlay REPLACES a candidate's whole spell list (re-resolving each
 # club to a QID keeps identifier precision) rather than merging row-by-row, avoiding
-# duplicate/conflict handling; a richness guard in stage_wp only replaces when the
-# infobox is at least as complete as Wikidata (spell count AND populated stats), so a
-# correct career is never degraded. Everything downstream reads load_careers().
+# duplicate/conflict handling. A fully resolved infobox is authoritative even when it
+# is shorter: Wikidata commonly mixes youth, national or incorrect team statements
+# into P54 careers. Everything downstream reads load_careers().
 WP_API = "https://en.wikipedia.org/w/api.php"
 
 def load_careers():
     """Wikidata careers with the Wikipedia-infobox overlay laid on top. The overlay
-    holds a parsed career only where it beats Wikidata (the stage_wp richness guard),
-    so .update replaces those players wholesale and leaves the rest on raw Wikidata."""
+    holds each completely resolved parsed career, so .update replaces those players
+    wholesale and leaves players without a usable infobox on raw Wikidata."""
     careers = load("careers")
     careers.update(load("wp") or {})   # same {pid: [[team,s,e,apps,goals,loan],...]} shape
     return careers
@@ -723,73 +723,19 @@ def parse_infobox(wikitext):
                        wp_int(f.get(("goals", idx), "")), loan])
     return spells
 
-def bare(sp): return all(x is None for x in sp[1:5])   # P54 with no date/apps/goals = a gap
-
-def wd_metrics(spells):
-    """(qualified spell count, populated apps/goals field count) for a Wikidata career —
-    the two axes the replace guard protects."""
-    nq = sum(1 for sp in spells if not bare(sp))
-    ns = sum((sp[3] is not None) + (sp[4] is not None) for sp in spells)
-    return nq, ns
-
-def wp_covers_wd(wd_spells, rows):
-    """Whether resolved Wikipedia rows are safe to replace the Wikidata club career.
-
-    Aggregate richness alone misses swaps: two Wikipedia rows can replace two Wikidata
-    rows while silently exchanging one club for another, or move a known apps/goals
-    field onto the wrong club. Preserve the existing count guard, then require every
-    qualified Wikidata club and each known stat kind at that club to survive."""
-    nq, ns = wd_metrics(wd_spells)
-    wp_stat = sum((r[3] is not None) + (r[4] is not None) for r in rows)
-    if len(rows) < nq or wp_stat < ns: return False
-    covered = {}
-    for r in rows:
-        stats = covered.setdefault(r[0], [False, False])
-        stats[0] |= r[3] is not None
-        stats[1] |= r[4] is not None
-    for sp in wd_spells:
-        if bare(sp): continue
-        stats = covered.get(sp[0])
-        if not stats: return False
-        if sp[3] is not None and not stats[0]: return False
-        if sp[4] is not None and not stats[1]: return False
-    return True
-
-def national_teams(careers, clubs):
-    """QIDs of the national sides sitting in Wikidata careers, by the same NATIONAL name
-    test stage_build uses. The guard has to compare like with like: parse_infobox reads
-    SENIOR CLUB rows only, while a P54 career also carries every youth-international cap,
-    so those caps counted for Wikidata and against the overlay. Suso's 8 Spain youth
-    statements (nq 14, ns 24) outweighed a complete 7-row club career (7, 14) and cost
-    him his Sevilla and Cádiz stats; it rejected 20% of overlays measured. Universe clubs
-    never need the lookup — they are clubs by construction."""
-    cached = load("nat_teams")
-    if cached is not None: return set(cached)
-    teams = sorted({sp[0] for c in careers.values() for sp in c} - set(clubs))
-    nat = set()
-    for _, batch in batched(teams, 400):
-        vals = " ".join(f"wd:{q}" for q in batch)
-        for r in sparql(f"""SELECT ?t ?l WHERE {{ VALUES ?t {{ {vals} }}
-            ?t rdfs:label ?l FILTER(LANG(?l)="en") }}"""):
-            if NATIONAL.search(v(r, "l") or ""): nat.add(qid(v(r, "t")))
-    save("nat_teams", sorted(nat))
-    print(f"wp: {len(nat)} national sides excluded from the richness guard", flush=True)
-    return nat
+def resolve_wp_spells(spells, t2q):
+    """Resolve a complete Wikipedia career, or reject it if any club is unresolved."""
+    if any(not t2q.get(sp[0]) for sp in spells): return None
+    return [[t2q[t], s, e, a, g, ln] for t, s, e, a, g, ln in spells]
 
 def stage_wp():
     careers, members = load("careers"), load_members()
     players = {p for ps in members.values() for p in ps}
-    # trigger = every player. A Wikidata career that "looks complete" (all spells
-    # dated) is an unreliable signal: it can still miss a whole club and its stats
-    # (e.g. Biraghi's Torino), which no bare-P54 marker flags. The richness guard
-    # below keeps a genuinely-complete career untouched, so fetching is the only cost.
-    # Squad-table seeds have NO Wikidata career at all, so the "has a career worth
-    # improving" test would drop exactly the players the seeding exists for; for them
-    # the infobox is not an overlay but the whole record (wd_metrics 0, guard vacuous).
+    # Trigger every player: Wikipedia is the preferred senior-career source even when
+    # it has fewer rows than Wikidata (which often mixes in youth or incorrect teams).
+    # Squad-table seeds have no Wikidata career at all, so include those explicitly.
     seeded = {p for ps in (load("roster") or {}).values() for p in ps}
     cand = sorted(p for p in players if careers.get(p) or p in seeded)
-    nat = national_teams(careers, load("clubs"))   # compare club spells only, as the infobox does
-    wd = {p: [sp for sp in careers.get(p, ()) if sp[0] not in nat] for p in cand}
     limit = int(os.environ.get("WP_LIMIT", 0))   # dry-run slice; 0 = all
     if limit: cand = cand[:limit]
     print(f"wp: {len(cand)} candidates (all players)", flush=True)
@@ -825,24 +771,23 @@ def stage_wp():
     titles = sorted({sp[0] for _, spells in raw for sp in spells})
     t2q = titles_to_qids(titles, "wp_titles")
 
-    # emit in the exact careers shape, dropping spells whose club title wouldn't
-    # resolve. Richness guard: replace only if the infobox is at least as complete as
-    # Wikidata on BOTH aggregate axes — spell count and populated apps/goals — and
-    # preserves every qualified Wikidata club plus its known stat kinds. The identity
-    # check matters when equal-count rows exchange one club for another. Trivially
-    # passes for thin players (no Wikidata career); protects genuinely-complete careers
-    # now that the trigger is every player.
-    wp, guarded = {}, 0
+    # Wikipedia's senior infobox is authoritative when every parsed club title resolves.
+    # A shorter career is accepted: omissions commonly mean Wikidata mixed in youth,
+    # national or simply incorrect team statements. Never publish a partially-resolved
+    # infobox, though; in that case retain the complete Wikidata career as a fallback.
+    wp, unresolved_players = {}, 0
     for pid_, spells in raw:
-        rows = [[t2q[t], s, e, a, g, ln] for t, s, e, a, g, ln in spells if t2q.get(t)]
-        if not rows: continue
-        if wp_covers_wd(wd.get(pid_, ()), rows): wp[pid_] = rows
-        else: guarded += 1
+        rows = resolve_wp_spells(spells, t2q)
+        if rows is None:
+            unresolved_players += 1
+            continue
+        wp[pid_] = rows
     save("wp", wp)
     n_sp = sum(map(len, wp.values()))
     unresolved = sum(1 for t in titles if not t2q.get(t))
-    print(f"wp: enriched {len(wp)} players, {n_sp} spells; guard kept Wikidata for "
-          f"{guarded}; {unresolved}/{len(titles)} club titles unresolved")
+    print(f"wp: enriched {len(wp)} players, {n_sp} spells; kept Wikidata for "
+          f"{unresolved_players} players with unresolved clubs; "
+          f"{unresolved}/{len(titles)} club titles unresolved")
 
 # ----------------------------------------------------------------- stage: teams
 def stage_teams():
