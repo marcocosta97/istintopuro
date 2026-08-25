@@ -41,7 +41,8 @@ combination for 30 days and any individual club for two days.
 ## Refreshing the data
 
 ```
-python3 pipeline/pipeline.py            # full fetch, Wikidata + Wikipedia (~80 min local, ~25 in CI)
+python3 pipeline/pipeline.py            # full fetch first time; later runs reuse unchanged source revisions
+FULL_REFRESH=1 python3 pipeline/pipeline.py  # ignore incremental state and audit every source record
 python3 pipeline/pipeline.py build      # rebuild site/data from checkpoints
 python3 pipeline/pipeline.py quiz       # regenerate/validate the static quiz horizon
 node scripts/quiz-schedule.js --audit   # deterministic 730-day balance audit

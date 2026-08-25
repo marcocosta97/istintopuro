@@ -5,6 +5,12 @@ on:
     - cron: "0 2 * * 1"   # Mondays 02:00 UTC (deploys ~02:40 UTC, off-peak) — the quiz
                           # schedule extends from the refreshed dataset before deployment
   workflow_dispatch:        # manual "Run workflow" button
+    inputs:
+      full_refresh:
+        description: Ignore incremental state and fetch every player
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # commit the refreshed dataset
@@ -32,6 +38,14 @@ jobs:
           node-version: "22"
       - run: pip install requests==2.32.3
 
+      # Only state produced by a code-compatible, fully successful earlier run is
+      # allowed to suppress source fetches. A new pipeline hash starts cold.
+      - uses: actions/cache/restore@v4
+        with:
+          path: data/state
+          key: refresh-state-v1-${{ hashFiles('pipeline/pipeline.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: refresh-state-v1-${{ hashFiles('pipeline/pipeline.py') }}-
+
       # re-runs of a failed job resume its checkpoints; keys are scoped to the
       # run id, so a new weekly run always starts from a clean fetch
       - uses: actions/cache/restore@v4
@@ -42,7 +56,9 @@ jobs:
 
       # the validate stage aborts the job (no commit, no deploy) if the new
       # index is malformed or shrank >3% vs the currently deployed one
-      - name: Refresh dataset from Wikidata + Wikipedia (~27 min, throttled queries)
+      - name: Refresh dataset from Wikidata + Wikipedia (revision-aware after first run)
+        env:
+          FULL_REFRESH: ${{ inputs.full_refresh && '1' || '0' }}
         run: |
           git show HEAD:site/data/index.json > /tmp/index-baseline.json
           VALIDATE_BASELINE=/tmp/index-baseline.json python3 pipeline/pipeline.py
@@ -51,6 +67,11 @@ jobs:
         run: |
           python3 -m unittest discover -s tests
           node --test --test-concurrency=1 tests/quiz-core.test.js tests/quiz-schedule.test.js
+
+      - uses: actions/cache/save@v4
+        with:
+          path: data/state
+          key: refresh-state-v1-${{ hashFiles('pipeline/pipeline.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - uses: actions/cache/save@v4
         if: always()   # keep partial checkpoints even when a stage failed

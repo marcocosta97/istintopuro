@@ -58,9 +58,11 @@ import requests
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
+STATE = DATA / "state"
 SITE_DATA = ROOT / "site" / "data"
 UA = "istintopuro-pipeline/0.1 (mcosta97@proton.me)"
 WDQS = "https://query.wikidata.org/sparql"
+CACHE_VERSION = 1
 
 LEAGUES = {  # qid: (name, tier, cc)
     "Q15804":  ("Serie A", 1, "IT"),          "Q194052": ("Serie B", 2, "IT"),
@@ -346,6 +348,27 @@ def save(name, obj):
     (DATA / f"{name}.json").write_text(json.dumps(obj, ensure_ascii=False))
     (DATA / f"{name}.jsonl").unlink(missing_ok=True)  # batch log superseded by the stage checkpoint
 
+def load_state(name):
+    """Return (source revisions, parsed records) from a compatible validated run."""
+    if os.environ.get("FULL_REFRESH") == "1": return {}, {}
+    p = STATE / f"{name}.json"
+    if not p.exists(): return {}, {}
+    try: obj = json.loads(p.read_text())
+    except (OSError, json.JSONDecodeError): return {}, {}
+    if not isinstance(obj, dict) or obj.get("version") != CACHE_VERSION: return {}, {}
+    return obj.get("source", {}), obj.get("records", {})
+
+def save_state(name, source, records):
+    STATE.mkdir(parents=True, exist_ok=True)
+    (STATE / f"{name}.json").write_text(json.dumps({
+        "version": CACHE_VERSION, "source": source, "records": records,
+    }, ensure_ascii=False))
+
+def stale_records(current, old_source, old_records):
+    """Keys whose source is new/changed/unknown or whose parsed record is absent."""
+    return [k for k, token in current.items()
+            if not token or old_source.get(k) != token or k not in old_records]
+
 def batched(seq, n):
     for i in range(0, len(seq), n): yield i // n, seq[i:i + n]
 
@@ -362,7 +385,24 @@ def resumable(stage, items, batch_size, fetch_batch):
             f.flush()
             if bi % 20 == 0 or bi == len(batches) - 1:
                 print(f"  {stage}: batch {bi + 1}/{len(batches)}", flush=True)
-    return [row for line in ck.open() for row in json.loads(line)]
+    with ck.open() as f:
+        return [row for line in f for row in json.loads(line)]
+
+def current_wd_versions(players):
+    """Wikidata entity modification timestamps, shared by attrs and careers."""
+    cached = load("wd_versions")
+    if cached is not None and set(cached) == set(players): return cached
+    def fetch(batch):
+        vals = " ".join(f"wd:{q}" for q in batch)
+        rows = sparql(f"""SELECT ?p ?modified WHERE {{ VALUES ?p {{ {vals} }}
+            ?p schema:dateModified ?modified . }}""")
+        return [[qid(v(r, "p")), v(r, "modified")] for r in rows]
+    rows = resumable("wd_versions", players, 500, fetch)
+    versions = {p: None for p in players}
+    versions.update(rows)
+    save("wd_versions", versions)
+    print(f"  wikidata revisions: {sum(bool(x) for x in versions.values())}/{len(players)}", flush=True)
+    return versions
 
 # ---------------------------------------------------------------- stage: clubs
 def stage_clubs():
@@ -540,6 +580,9 @@ def pick_nat(ccs):  # a single citizenship, used only when no sport country is k
 def stage_attrs():
     members = load_members()
     players = sorted({p for ps in members.values() for p in ps})
+    versions = current_wd_versions(players)
+    old_source, old_records = load_state("attrs")
+    changed = stale_records(versions, old_source, old_records)
     def fetch(batch):
         vals = " ".join(f"wd:{q}" for q in batch)
         rows = sparql(f"""
@@ -580,14 +623,23 @@ def stage_attrs():
                         img.rsplit("/", 1)[1] if img else None, num(r, "gk"),
                         v(r, "enwiki")])  # article title = common name, see common_name()
         return out
-    rows = resumable("attrs", players, 350, fetch)
-    save("attrs", {r[0]: r[1:] for r in rows})
-    print(f"attrs: {len(rows)} players")
+    rows = resumable("attrs", changed, 350, fetch)
+    fresh = {r[0]: r[1:] for r in rows}
+    changed = set(changed)
+    records = {p: (fresh.get(p) if p in changed else old_records[p]) for p in players}
+    attrs = {p: row for p, row in records.items() if row is not None}
+    save("attrs", attrs)
+    save_state("attrs", versions, records)
+    print(f"attrs: {len(attrs)} players; reused {len(players) - len(changed)}, "
+          f"fetched {len(changed)}")
 
 # --------------------------------------------------------------- stage: careers
 def stage_careers():
     members = load_members()
     players = sorted({p for ps in members.values() for p in ps})
+    versions = current_wd_versions(players)
+    old_source, old_records = load_state("careers")
+    changed = stale_records(versions, old_source, old_records)
     def fetch(batch):
         vals = " ".join(f"wd:{q}" for q in batch)
         rows = sparql(f"""
@@ -601,7 +653,7 @@ def stage_careers():
         return [[qid(v(r, "p")), qid(v(r, "st")), qid(v(r, "team")), year(v(r, "start", "")),
                  year(v(r, "end", "")), num(r, "apps"), num(r, "goals"),
                  1 if (v(r, "loan") or "").endswith("Q2914547") else 0] for r in rows]
-    rows = resumable("careers", players, 250, fetch)
+    rows = resumable("careers", changed, 250, fetch)
     # aggregate per statement, not per team: distinct spells at the same club
     # (loan + return, re-signings) must stay separate career entries
     sts = {}
@@ -616,11 +668,16 @@ def stage_careers():
         if a is not None: cur[4] = max(cur[4] or 0, a)
         if g is not None: cur[5] = max(cur[5] or 0, g)
         if ln: cur[6] = 1
-    careers = {}
+    fresh = {}
     for p, *sp in sts.values():  # sp = [team, start, end, apps, goals, loan]
-        careers.setdefault(p, []).append(sp)
+        fresh.setdefault(p, []).append(sp)
+    changed = set(changed)
+    records = {p: (fresh.get(p, []) if p in changed else old_records[p]) for p in players}
+    careers = {p: spells for p, spells in records.items() if spells}
     save("careers", careers)
-    print(f"careers: {len(sts)} spells, {len(careers)} players")
+    save_state("careers", versions, records)
+    print(f"careers: {sum(map(len, careers.values()))} spells, {len(careers)} players; "
+          f"reused {len(players) - len(changed)}, fetched {len(changed)}")
 
 # -------------------------------------------------------------------- stage: wp
 # Wikipedia-infobox overlay. Wikidata careers are often incomplete in ways no field
@@ -728,8 +785,22 @@ def resolve_wp_spells(spells, t2q):
     if any(not t2q.get(sp[0]) for sp in spells): return None
     return [[t2q[t], s, e, a, g, ln] for t, s, e, a, g, ln in spells]
 
+def wp_batch_pages(batch, data):
+    """Pair requested [player, title] rows with normalized/redirected API pages."""
+    by_title = {t: p for p, t in batch}
+    q = (data or {}).get("query", {})
+    norm = {n["from"]: n["to"] for n in q.get("normalized", [])}
+    redir = {r["from"]: r["to"] for r in q.get("redirects", [])}
+    by_result = {redir.get(norm.get(t, t), norm.get(t, t)): p
+                 for t, p in by_title.items()}
+    return [(by_result[pg["title"]], pg) for pg in q.get("pages", [])
+            if pg["title"] in by_result]
+
+def wp_source_token(title, revid):
+    return f"{title}\0{revid}" if revid else None
+
 def stage_wp():
-    careers, members = load("careers"), load_members()
+    careers, members, attrs = load("careers"), load_members(), load("attrs")
     players = {p for ps in members.values() for p in ps}
     # Trigger every player: Wikipedia is the preferred senior-career source even when
     # it has fewer rows than Wikidata (which often mixes in youth or incorrect teams).
@@ -740,9 +811,10 @@ def stage_wp():
     if limit: cand = cand[:limit]
     print(f"wp: {len(cand)} candidates (all players)", flush=True)
 
-    # phase 1 — QID -> enwiki page title, straight off WDQS (no new API surface)
-    title = {}
-    for _, batch in batched(cand, 200):
+    # stage_attrs already reads the enwiki sitelink from the same Wikidata entity.
+    title = {p: attrs[p][5] for p in cand if p in attrs and len(attrs[p]) > 5 and attrs[p][5]}
+    legacy = [p for p in cand if p in attrs and len(attrs[p]) <= 5]
+    for _, batch in batched(legacy, 200):
         vals = " ".join(f"wd:{q}" for q in batch)
         for r in sparql(f"""SELECT ?p ?t WHERE {{ VALUES ?p {{ {vals} }}
             ?a schema:about ?p ; schema:isPartOf <https://en.wikipedia.org/> ; schema:name ?t . }}"""):
@@ -750,22 +822,62 @@ def stage_wp():
     have = [[p, title[p]] for p in cand if p in title]   # no enwiki page -> no infobox to mine
     print(f"wp: {len(have)} have an enwiki page", flush=True)
 
-    # phase 2 — fetch wikitext (50 titles/req) & parse; checkpointed, club still a TITLE
+    # A cold cache goes straight to content and learns its revision in that response.
+    # A warm cache first asks only for revision ids, then downloads the changed pages.
+    old_source, old_records = load_state("wp")
+    current, current_title = {}, {}
+    if old_source:
+        def fetch_versions(batch):
+            data = wp_get(action="query", prop="revisions", rvprop="ids", redirects=1,
+                          titles="|".join(t for _, t in batch))
+            out = []
+            for p, pg in wp_batch_pages(batch, data):
+                revs = pg.get("revisions")
+                if revs: out.append([p, pg["title"], revs[0].get("revid")])
+            return out
+        version_rows = resumable("wp_versions", have, 50, fetch_versions)
+        current = {p: wp_source_token(t, rev) for p, t, rev in version_rows}
+        current_title = {p: t for p, t, _ in version_rows}
+        save("wp_versions", {p: [current_title[p], token] for p, token in current.items()})
+        changed = stale_records(current, old_source, old_records)
+    else:
+        changed = [p for p, _ in have]
+        current_title = title
+
+    # Fetch and parse changed wikitext; the cached club value remains a page TITLE.
     # rvsection=0 = lead section only, where the infobox always sits: a quarter of the
     # bytes of the full articles (much less on long ones) for byte-identical parses, and
     # it does work with 50 titles per request despite what the API docs imply.
     def fetch(batch):
-        by_title = {t: p for p, t in batch}
-        data = wp_get(action="query", prop="revisions", rvprop="content",
-                      rvslots="main", rvsection=0, titles="|".join(t for _, t in batch))
+        data = wp_get(action="query", prop="revisions", rvprop="ids|content",
+                      rvslots="main", rvsection=0, redirects=1,
+                      titles="|".join(t for _, t in batch))
         out = []
-        for pg in (data or {}).get("query", {}).get("pages", []):
+        for p, pg in wp_batch_pages(batch, data):
             revs = pg.get("revisions")
-            if not revs or pg["title"] not in by_title: continue
+            if not revs: continue
             spells = parse_infobox(revs[0]["slots"]["main"]["content"])
-            if spells: out.append([by_title[pg["title"]], spells])
+            out.append([p, pg["title"], revs[0].get("revid"), spells])
         return out
-    raw = resumable("wp", have, 50, fetch)   # -> [[pid, [[clubTitle,...], ...]], ...]
+    changed_set = set(changed)
+    todo = [[p, current_title[p]] for p in changed if p in current_title]
+    rows = resumable("wp", todo, 50, fetch)
+    fresh_records = {p: [t, spells] for p, t, _rev, spells in rows}
+    fresh_source = {p: wp_source_token(t, rev) for p, t, rev, _spells in rows}
+    if old_source:
+        records, source = {}, {}
+        for p in current:
+            if p in changed_set:
+                if p not in fresh_records: continue
+                records[p], source[p] = fresh_records[p], fresh_source[p]
+            else:
+                records[p], source[p] = old_records[p], old_source[p]
+    else:
+        records, source = fresh_records, fresh_source
+    save_state("wp", source, records)
+    raw = [[p, rec[1]] for p, rec in records.items() if rec[1]]
+    print(f"wp: reused {len(records) - len(fresh_records)} pages, "
+          f"fetched {len(changed)}", flush=True)
 
     # phase 3 — resolve the distinct club TITLES -> QIDs
     titles = sorted({sp[0] for _, spells in raw for sp in spells})
