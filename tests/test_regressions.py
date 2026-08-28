@@ -184,6 +184,44 @@ class IncrementalCacheTests(unittest.TestCase):
             self.assertIn("?p schema:dateModified ?modified", queries[0])
 
 
+class LeaguePackTests(unittest.TestCase):
+    def test_pack_configuration_is_two_divisions_with_unique_current_clubs(self):
+        core_leagues = set(PIPELINE.CORE_LEAGUE_ORDER)
+        core_current = {q for league in core_leagues for q in PIPELINE.CURRENT[league]}
+        for pack in PIPELINE.PACKS.values():
+            self.assertEqual(len(pack["leagues"]), 2)
+            self.assertTrue(core_leagues.isdisjoint(pack["leagues"]))
+            current = [pack["current"][league] for league in pack["leagues"]]
+            self.assertEqual([len(clubs) for clubs in current], pack["expected_current"])
+            flat = [club for clubs in current for club in clubs]
+            self.assertEqual(len(flat), len(set(flat)))
+            self.assertTrue(core_current.isdisjoint(flat))
+
+    def test_pack_asset_validator_accepts_the_contract(self):
+        idx = {
+            "v": 1, "id": "pt", "leagues": [["One", 1, "PT"], ["Two", 2, "PT"]],
+            "clubs": [["A", "PT", 1, "Q10", 0, 0], ["B", "PT", 2, "Q11", 0, 1]],
+            "players": [[100, -1, "One", 1990, "PT", "", 0],
+                        [101, 3, "Two", 1991, "BR", "aaPhoto.jpg", 1]],
+            "postings": [[0, 1], [1]], "apps": [[2, 3], [4]], "goals": [[0, 1], [1]],
+        }
+
+        self.assertEqual(PIPELINE.pack_index_errors(idx, "pt", 10, [1, 1]), [])
+
+    def test_pack_asset_validator_rejects_bad_identity_and_mapping(self):
+        idx = {
+            "v": 1, "id": "be", "leagues": [["One", 1, "PT"], ["Two", 2, "PT"]],
+            "clubs": [["A", "PT", 1, "Q10", 0, 0], ["B", "PT", 2, "Q11", 0, 1]],
+            "players": [[100, 10, "One", 1990, "ZZ", "", 0]],
+            "postings": [[0], [0]], "apps": [[2], [4]], "goals": [[0], [1]],
+        }
+
+        errors = "\n".join(PIPELINE.pack_index_errors(idx, "pt", 10, [1, 1]))
+        self.assertIn("id 'be' != 'pt'", errors)
+        self.assertIn("invalid core player id", errors)
+        self.assertIn("nat codes with no flag", errors)
+
+
 class MobileBrowserBackTests(unittest.TestCase):
     def test_flag_markup_is_rendered_as_escaped_html(self):
         source = (ROOT / "site" / "app.js").read_text()

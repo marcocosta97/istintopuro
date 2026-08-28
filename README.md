@@ -13,10 +13,13 @@ Live at **[istintopuro.mcosta.it](https://istintopuro.mcosta.it)**.
 
 ## How it works
 
-Everything runs in the browser. The dataset — ~69k players and 474 clubs
+Everything runs in the browser. The core dataset — ~69k players and 474 clubs
 covering the top-5 European leagues and their second divisions, all-time —
 is extracted from Wikidata and precomputed into a static index that the
-client intersects in under a millisecond. Photos (Wikimedia Commons),
+client intersects in under a millisecond. Optional country packs add their
+top two divisions only when a user enables them; Portugal is the first pack.
+The daily quiz deliberately remains core-only, so its puzzles stay identical
+for everyone. Photos (Wikimedia Commons),
 nationalities and loan spells come from the same extraction; careers that
 Wikidata leaves incomplete are filled from the English Wikipedia infobox.
 Players are found through their Wikidata club statements, which recent
@@ -54,7 +57,9 @@ dropped, one whose spell years stopped lining up with the postings they
 describe, and one where too few squad-table seeds survived — half the careers
 come from the Wikipedia overlay, and for seeded players it is their only
 source, so a broken parse degrades or empties the data without changing any
-of the counts the shrink guards watch. One list needs a human:
+of the counts the shrink guards watch. Pack indexes, lazy career shards and
+spell-year files pass the same structural and coverage checks independently.
+One list needs a human:
 `CURRENT` in `pipeline.py` (each league's clubs this season) — refresh it
 every August.
 
@@ -68,7 +73,8 @@ Pushing to `master` deploys `site/` to GitHub Pages, stamping every asset URL
 with the commit sha.
 
 The site installs and runs offline: `site/sw.js` precaches the app itself and
-keeps the data files it has been asked for, one version of each. Nothing is
+keeps the core and enabled-pack data files it has been asked for, one version
+of each. Disabling a pack removes its entries from the app's data cache. Nothing is
 cached unversioned — the code carries the deploy's sha, the dataset its build
 date — and the page itself is always fetched from the network first, since it is
 the file that names those versions. Should the worker ever need pulling, deploy

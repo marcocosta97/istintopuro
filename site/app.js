@@ -21,7 +21,8 @@ const focusSearch = () => { if (!matchMedia("(pointer: coarse)").matches) search
 // the price of a round trip on every single load. "__V__" locally, which is stable.
 const V = new URL(document.currentScript.src).searchParams.get("v") || "0";
 
-let DB = null;               // raw index.json
+let CORE_DB = null;          // immutable index.json; the quiz always reads this
+let DB = null;               // core composed with the locally enabled league packs
 let mode = "club";           // "club" (players in common) | "player" (clubs in common)
 let clubIds = [];            // selected club indices
 let playerIds = [];          // selected player ids (player mode keeps its own selection)
@@ -29,7 +30,10 @@ let solveGen = 0;            // stale-async guard: only the newest player solve 
 let detail = localStorage.pdetail === "1";  // shared-club cards: show apps/goals + per-team totals
 let sortBy = "apps", sortDir = -1;
 const decoded = new Map();   // club index -> Int32Array of player ids
+const coreDecoded = new Map();
 const careerCache = new Map();
+const packFailures = new Map();
+let requiredPackIds = [];
 const PAGE = 50;             // result rows rendered per batch; "show more" appends the next one
 
 // ---------------------------------------------------------------- i18n
@@ -50,6 +54,12 @@ const STR = {
     built: (d) => `aggiornato al ${d}`,
     about: "Due modi di giocare con «Istinto Puro». Solver: scegli una o più squadre e scopri all'istante tutti i giocatori che hanno giocato per tutte, ordinati per presenze combinate. Schedina giornaliera: quattro sfide di difficoltà crescente, le stesse per tutti. Dati estratti da Wikidata.",
     aboutLeagues: "Campionati coperti (tutte le stagioni):",
+    packsTitle: "Campionati opzionali",
+    packsNote: "Ogni pack aggiunge le prime due divisioni al solver. La Schedina resta uguale per tutti.",
+    packOn: "attivo", packOff: "non scaricato", packLoading: "download…",
+    packRemoving: "rimozione…", packFailed: "download non riuscito", packRetry: "riprova",
+    packSize: (n) => `${n.toLocaleString("it", { maximumFractionDigits: 1 })} MB iniziali`,
+    packRequired: (names) => `Questo link usa ${names}. Attiva il pack per ripristinare tutte le squadre.`,
     disclaimer: `Nessun dato viene raccolto: tutto avviene nel tuo browser, senza server né tracciamento. Codice open source (<a href="${REPO}" target="_blank" rel="noopener">MIT su GitHub</a>). Carattere: <a href="https://github.com/jpt/barlow" target="_blank" rel="noopener">Barlow Semi Condensed</a> (SIL OFL).`,
     remove: "rimuovi", clearAll: "svuota",
     sort: "Ordina per", sortApps: "presenze", sortGoals: "gol", sortBirth: "nascita",
@@ -81,6 +91,12 @@ const STR = {
     dissolved: (y) => `squadra sciolta nel ${y}`,
     more: (n) => `… mostra altri ${n}`,
     browse: "Sfoglia per campionato",
+    settings: "Impostazioni",
+    addLeagues: "Aggiungi campionati",
+    manageLeagues: "Gestisci campionati",
+    packHint: "Vuoi più squadre?",
+    packHintOpen: "Aggiungi altri campionati →",
+    packHintDismiss: "Nascondi questo suggerimento",
     others: "Altre",
     back: "indietro",
     pivot: "compagni ↗", pivotT: "Apri in modalità Giocatori",
@@ -108,6 +124,12 @@ const STR = {
     built: (d) => `updated ${d}`,
     about: "Two ways to play “Istinto Puro”. Solver: pick one or more clubs and instantly see every player who played for them all, ranked by combined appearances. Daily quiz: four challenges of rising difficulty, the same for everyone. Data extracted from Wikidata.",
     aboutLeagues: "Leagues covered (all seasons):",
+    packsTitle: "Optional leagues",
+    packsNote: "Each pack adds its top two divisions to the solver. The daily quiz stays the same for everyone.",
+    packOn: "enabled", packOff: "not downloaded", packLoading: "downloading…",
+    packRemoving: "removing…", packFailed: "download failed", packRetry: "retry",
+    packSize: (n) => `${n.toLocaleString("en", { maximumFractionDigits: 1 })} MB initial`,
+    packRequired: (names) => `This link uses ${names}. Enable the pack to restore every club.`,
     disclaimer: `No data is collected: everything happens in your browser, with no server or tracking. Open source (<a href="${REPO}" target="_blank" rel="noopener">MIT on GitHub</a>). Typeface: <a href="https://github.com/jpt/barlow" target="_blank" rel="noopener">Barlow Semi Condensed</a> (SIL OFL).`,
     remove: "remove", clearAll: "clear",
     sort: "Sort by", sortApps: "apps", sortGoals: "goals", sortBirth: "birth",
@@ -139,6 +161,12 @@ const STR = {
     dissolved: (y) => `club dissolved in ${y}`,
     more: (n) => `… show ${n} more`,
     browse: "Browse by league",
+    settings: "Settings",
+    addLeagues: "Add leagues",
+    manageLeagues: "Manage leagues",
+    packHint: "Want more clubs?",
+    packHintOpen: "Add more leagues →",
+    packHintDismiss: "Hide this suggestion",
     others: "Others",
     back: "back",
     pivot: "teammates ↗", pivotT: "Open in player mode",
@@ -167,6 +195,8 @@ function applyLang() {
   search.setAttribute("aria-label", search.placeholder);  // the placeholder is not a reliable accessible name
   browseBtn.title = t.browse;
   browseBtn.setAttribute("aria-label", t.browse);
+  $("aboutbtn").title = t.settings;
+  $("aboutbtn").setAttribute("aria-label", t.settings);
   const rl = mode === "club" ? t.randClubs : t.randPlayers;
   $("randbtn").title = rl;
   $("randbtn").setAttribute("aria-label", rl);
@@ -187,9 +217,9 @@ function applyLang() {
   $("hint-nozero").setAttribute("aria-label", t.noZeroHint);
   $("abouttext").textContent = t.about;
   $("aboutdisclaimer").innerHTML = t.disclaimer;
-  if (DB) {  // group leagues by country: one flag + its divisions per line
+  if (CORE_DB) {  // list core leagues only; optional packs appear in their own section
     const rows = [];
-    for (const l of DB.leagues) {
+    for (const l of CORE_DB.leagues) {
       const last = rows[rows.length - 1];
       if (last && last.cc === l[2]) last.names.push(l[0]);
       else rows.push({ cc: l[2], names: [l[0]] });
@@ -197,6 +227,8 @@ function applyLang() {
     $("aboutleagues").innerHTML = t.aboutLeagues + "<br>" + rows.map(g =>
       `${countryFlag(g.cc)} ` + g.names.map(n => `<span class="lg">${n}</span>`).join(" · ")).join("<br>");
   } else $("aboutleagues").textContent = t.aboutLeagues;
+  renderPacks();
+  renderPackHint();
   if (DB) {
     renderChips();
     const sel = mode === "club" ? clubIds : playerIds;
@@ -235,6 +267,8 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if
 paintTheme();
 langSel.onchange = () => { lang = localStorage.lang = langSel.value; applyLang(); };
 $("aboutbtn").onclick = () => $("about").showModal();
+$("packhintopen").onclick = () => openLeagueSettings(true);
+$("packhintdismiss").onclick = dismissPackHint;
 $("about").onclick = (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); };
 $("advtoggle").onclick = () => {
   const open = $("advbody").hidden;
@@ -388,27 +422,179 @@ const MARQUEE = new Set([
 ]);
 // group by the club's LEAGUE country, not its nationality, so Monaco (code "MC",
 // plays in Ligue 1) counts as French rather than a country of its own
-const leagueCC = (ci) => { const c = DB.clubs[ci]; return c[5] >= 0 ? DB.leagues[c[5]][2] : c[1]; };
+const leagueCCFor = (db, ci) => { const c = db.clubs[ci]; return c[5] >= 0 ? db.leagues[c[5]][2] : c[1]; };
+const leagueCC = (ci) => leagueCCFor(DB, ci);
+const coreLeagueCC = (ci) => leagueCCFor(CORE_DB, ci);
 // how visible a club is: marquee tops the scale; everyone else is ranked by squad
 // size WITHIN their own country (so the coverage bias doesn't matter) and capped
 // below marquee — a big-for-its-league club still scores well.
-const stature = (ci) => {
-  if (!DB.stat) {
+const statureFor = (db, ci) => {
+  if (!db.stat) {
     const byC = {};
-    DB.clubs.forEach((c, i) => { if (DB.postings[i].length >= 120) (byC[leagueCC(i)] ??= []).push(i); });
-    DB.stat = new Map();
+    db.clubs.forEach((c, i) => { if (db.postings[i].length >= 120) (byC[leagueCCFor(db, i)] ??= []).push(i); });
+    db.stat = new Map();
     for (const cc in byC) {
-      const arr = byC[cc].sort((a, b) => DB.postings[a].length - DB.postings[b].length);
+      const arr = byC[cc].sort((a, b) => db.postings[a].length - db.postings[b].length);
       arr.forEach((ci, idx) => {
         const pct = arr.length > 1 ? idx / (arr.length - 1) : 1;  // 0 smallest … 1 biggest in league
-        DB.stat.set(ci, MARQUEE.has(DB.clubs[ci][3]) ? 1.15 : pct >= 0.6 ? 1 : pct >= 0.3 ? 0.82 : 0.66);
+        db.stat.set(ci, MARQUEE.has(db.clubs[ci][3]) ? 1.15 : pct >= 0.6 ? 1 : pct >= 0.3 ? 0.82 : 0.66);
       });
     }
   }
-  return DB.stat.get(ci) ?? 0.66;
+  return db.stat.get(ci) ?? 0.66;
 };
+const stature = (ci) => statureFor(DB, ci);
+const coreStature = (ci) => statureFor(CORE_DB, ci);
 
 // ---------------------------------------------------------------- data loading
+const PACK_PREF = "leaguePacks";
+const packBusy = new Set();
+function enabledPackIds() {
+  try {
+    const ids = JSON.parse(localStorage.getItem(PACK_PREF) || "[]");
+    return new Set(Array.isArray(ids) ? ids.filter(id => typeof id === "string") : []);
+  } catch { return new Set(); }
+}
+function saveEnabledPacks(ids) {
+  try { localStorage.setItem(PACK_PREF, JSON.stringify([...ids].sort())); } catch {}
+}
+function reopenPackDialog() {
+  try { sessionStorage.setItem("leaguePackDialog", "1"); } catch {}
+}
+async function keepPackIndex(id, built, copy) {
+  if (!window.caches) return;
+  try {
+    const cache = await caches.open("istintopuro-data");
+    for (const key of await cache.keys())
+      if (new URL(key.url).pathname.endsWith(`/data/packs/${id}/index.json`)) await cache.delete(key);
+    await cache.put(`data/packs/${id}/index.json?v=${built}`, copy);
+  } catch { /* storage is optional; an online pack still works */ }
+}
+async function loadPack(meta) {
+  const res = await fetch(`data/packs/${meta.id}/index.json?v=${meta.built}`);
+  if (!res.ok) throw new Error(res.status);
+  keepPackIndex(meta.id, meta.built, res.clone());
+  const pack = await res.json();
+  const checked = LeaguePacks.validatePack(pack, CORE_DB.names.length);
+  if (!checked.ok || pack.id !== meta.id)
+    throw new Error(checked.errors.join("; ") || "pack id mismatch");
+  return pack;
+}
+async function purgePack(id) {
+  if (!window.caches) return;
+  try {
+    const cache = await caches.open("istintopuro-data");
+    for (const key of await cache.keys())
+      if (new URL(key.url).pathname.includes(`/data/packs/${id}/`)) await cache.delete(key);
+  } catch { /* preference still disables the pack when storage access is denied */ }
+}
+function removePackClubsFromHash(meta) {
+  const removed = new Set(meta.clubs || []);
+  const kept = location.hash.slice(1).split(",").filter(qid => qid && !removed.has(qid));
+  history.replaceState(null, "", kept.length ? `#${kept.join(",")}` : location.pathname + location.search);
+}
+async function togglePack(meta, on) {
+  if (packBusy.has(meta.id)) return;
+  packBusy.add(meta.id); packFailures.delete(meta.id); renderPacks();
+  try {
+    const enabled = enabledPackIds();
+    if (on) {
+      await loadPack(meta);       // prove and cache it before making the preference durable
+      enabled.add(meta.id);
+    } else {
+      enabled.delete(meta.id);
+      saveEnabledPacks(enabled);  // stop using it even if cache deletion is unavailable
+      removePackClubsFromHash(meta);
+      await purgePack(meta.id);
+    }
+    saveEnabledPacks(enabled);
+    reopenPackDialog();
+    location.reload();
+  } catch (err) {
+    packFailures.set(meta.id, err);
+    packBusy.delete(meta.id);
+    renderPacks();
+  }
+}
+function renderPacks() {
+  const section = $("aboutpacks");
+  const manifests = CORE_DB?.packs || [];
+  section.hidden = manifests.length === 0;
+  if (!manifests.length) return;
+  $("packstitle").textContent = t.packsTitle;
+  $("packsnote").textContent = t.packsNote;
+  const required = $("packsrequired");
+  const needed = manifests.filter(meta => requiredPackIds.includes(meta.id));
+  required.hidden = needed.length === 0;
+  if (needed.length) required.textContent = t.packRequired(
+    needed.map(meta => countryName(meta.cc)).join(", "));
+  const enabled = enabledPackIds(), active = new Set(DB?.activePacks || []);
+  const list = $("packslist");
+  list.replaceChildren();
+  for (const meta of manifests) {
+    const row = document.createElement("div");
+    row.className = "packrow";
+    row.setAttribute("aria-busy", packBusy.has(meta.id));
+    const desc = document.createElement("div");
+    desc.className = "packdesc";
+    desc.innerHTML = `<strong>${countryFlag(meta.cc)} ${esc(countryName(meta.cc))}</strong>`
+      + `<small>${meta.leagues.map(esc).join(" · ")} · ${esc(t.packSize(meta.bytes / 1e6))}</small>`;
+    const ctl = document.createElement("div");
+    ctl.className = "packtoggle";
+    const state = document.createElement("span");
+    state.className = "packstate";
+    const failed = packFailures.has(meta.id), busy = packBusy.has(meta.id);
+    state.textContent = busy ? (enabled.has(meta.id) ? t.packRemoving : t.packLoading)
+      : failed ? t.packFailed : active.has(meta.id) ? t.packOn : t.packOff;
+    const label = document.createElement("label");
+    label.className = "dtg";
+    const input = document.createElement("input");
+    input.type = "checkbox"; input.checked = enabled.has(meta.id); input.disabled = busy;
+    input.setAttribute("aria-label", `${countryName(meta.cc)} — ${input.checked ? t.packOn : t.packOff}`);
+    input.onchange = () => togglePack(meta, input.checked);
+    const knob = document.createElement("span"); knob.className = "knob";
+    label.append(input, knob); ctl.append(state, label);
+    if (failed) {
+      const retry = document.createElement("button");
+      retry.type = "button"; retry.className = "packretry"; retry.textContent = t.packRetry;
+      retry.onclick = () => togglePack(meta, true);
+      ctl.appendChild(retry);
+    }
+    row.append(desc, ctl); list.appendChild(row);
+  }
+}
+const PACK_HINT_KEY = "leaguePackHintV1";
+function packHintDismissed() {
+  try { return localStorage.getItem(PACK_HINT_KEY) === "1"; } catch { return false; }
+}
+function dismissPackHint() {
+  try { localStorage.setItem(PACK_HINT_KEY, "1"); } catch {}
+  $("packhint").hidden = true;
+}
+function renderPackHint() {
+  const hint = $("packhint");
+  const available = (CORE_DB?.packs || []).length > 0;
+  hint.hidden = !available || enabledPackIds().size > 0 || packHintDismissed();
+  if (hint.hidden) return;
+  $("packhinttext").textContent = t.packHint;
+  $("packhintopen").textContent = t.packHintOpen;
+  $("packhintdismiss").setAttribute("aria-label", t.packHintDismiss);
+  $("packhintdismiss").title = t.packHintDismiss;
+}
+function openLeagueSettings(discovered = false) {
+  if (discovered) dismissPackHint();
+  browseOpen(false);
+  const dialog = $("about");
+  if (!dialog.open) dialog.showModal();
+  requestAnimationFrame(() => { dialog.scrollTop = Math.max(0, $("aboutpacks").offsetTop - 12); });
+}
+function missingPacksForHash() {
+  const active = new Set(DB?.activePacks || []);
+  const shared = new Set(location.hash.slice(1).split(","));
+  return (CORE_DB?.packs || []).filter(meta => !active.has(meta.id)
+    && (meta.clubs || []).some(qid => shared.has(qid))).map(meta => meta.id);
+}
+
 // The index is the one file fetched before a first-visit service worker can take over
 // the page, so the worker never sees it and an offline reload would find everything
 // cached except the thing without which nothing runs. Put it in the worker's own data
@@ -434,6 +620,7 @@ async function keepQuizSchedule(copy) {
 }
 async function boot() {
   status.textContent = t.loading;
+  packFailures.clear();
   try {
     const schedule = fetch(`data/quiz-schedule.json?v=${V}`).then(res => {
       if (!res.ok) return null;
@@ -443,10 +630,21 @@ async function boot() {
     const res = await fetch(`data/index.json?v=${V}`);  // the stamp is the freshness guarantee
     if (!res.ok) throw new Error(res.status);
     keepIndex(res.clone());   // before the body is read, and before anything can throw
-    DB = await res.json();
+    CORE_DB = await res.json();
     const quizSchedule = await schedule;
-    DB.quizSchedule = quizSchedule && quizSchedule.v === 1 && quizSchedule.built === DB.built
+    CORE_DB.quizSchedule = quizSchedule && quizSchedule.v === 1 && quizSchedule.built === CORE_DB.built
       ? quizSchedule : null;
+    const manifests = CORE_DB.packs || [], enabled = enabledPackIds();
+    const wanted = manifests.filter(meta => enabled.has(meta.id));
+    const settled = await Promise.allSettled(wanted.map(loadPack));
+    const packs = [];
+    settled.forEach((result, i) => {
+      if (result.status === "fulfilled") packs.push(result.value);
+      else packFailures.set(wanted[i].id, result.reason);
+    });
+    DB = LeaguePacks.compose(CORE_DB, packs);
+    DB.quizSchedule = CORE_DB.quizSchedule;
+    requiredPackIds = missingPacksForHash();
   } catch {
     status.textContent = t.loadFail + " ";
     const b = document.createElement("button");
@@ -475,20 +673,25 @@ async function boot() {
   $("randbtn").disabled = false;
   focusSearch();
   applyLang();  // refresh status + footer now that DB (and its built date) exist
+  let reopen = false;
+  try { reopen = sessionStorage.getItem("leaguePackDialog") === "1"; sessionStorage.removeItem("leaguePackDialog"); } catch {}
+  if ((reopen || requiredPackIds.length) && !$("about").open) $("about").showModal();
   document.dispatchEvent(new Event("dbready"));  // quiz.js waits on this (e.g. a #quiz deep link)
 }
 
-function postings(ci) {
-  let arr = decoded.get(ci);
+function postingsFor(db, cache, ci) {
+  let arr = cache.get(ci);
   if (!arr) {
-    const d = DB.postings[ci];
+    const d = db.postings[ci];
     arr = new Int32Array(d.length);
     let acc = 0;
     for (let i = 0; i < d.length; i++) arr[i] = acc += d[i];
-    decoded.set(ci, arr);
+    cache.set(ci, arr);
   }
   return arr;
 }
+const postings = (ci) => postingsFor(DB, decoded, ci);
+const corePostings = (ci) => postingsFor(CORE_DB, coreDecoded, ci);
 
 // ---------------------------------------------------------------- search
 const SUGG = 12;  // suggestion rows offered; the dropdown scrolls past ~6
@@ -732,7 +935,7 @@ function pHasWord(i, tk) {
 }
 
 let pGen = 0;
-function playerMatches(q, excl = playerIds, rescue = true) {  // quiz mode passes its own exclusions
+function playerMatches(q, excl = playerIds, rescue = true, maxId = Infinity) {  // quiz restricts to core ids
   pIndex();
   const nq = norm(q);
   if (!nq) return [];
@@ -758,7 +961,7 @@ function playerMatches(q, excl = playerIds, rescue = true) {  // quiz mode passe
   // pass 1 — any word starting with the query, which covers tiers 0 and 1
   const end = nq.length + 1;
   pScan(" " + nq, (p, i) => {
-    if (mark[i] === gen) return;
+    if (i >= maxId || mark[i] === gen) return;
     mark[i] = gen;
     const whole = p === off[i] && blob.charCodeAt(p + end) === 32 && p + end === off[i + 1];
     push(whole ? T_NAME : T_WORD, i);
@@ -773,7 +976,7 @@ function playerMatches(q, excl = playerIds, rescue = true) {  // quiz mode passe
     const ai = toks.reduce((a, b, k) => toks[a].length >= b.length ? a : k, 0);
     const rest = toks.filter((_, k) => k !== ai);
     pScan(" " + toks[ai], (p, i) => {
-      if (mark[i] === gen || !rest.every(tk => pHasWord(i, tk))) return;
+      if (i >= maxId || mark[i] === gen || !rest.every(tk => pHasWord(i, tk))) return;
       mark[i] = gen;
       push(T_ALL, i);
     });
@@ -781,7 +984,7 @@ function playerMatches(q, excl = playerIds, rescue = true) {  // quiz mode passe
   // pass 3 — anywhere inside a word ("brahim" for Ibrahimović). Skipped once the
   // list is full of better tiers, which is the common case.
   if (!full()) pScan(nq, (p, i) => {
-    if (mark[i] === gen) return;
+    if (i >= maxId || mark[i] === gen) return;
     mark[i] = gen;
     push(T_INFIX, i);
   });
@@ -790,7 +993,7 @@ function playerMatches(q, excl = playerIds, rescue = true) {  // quiz mode passe
   // that too, not just on nothing at all, and let fame order the union.
   if (rescue && (!ids.length || ranks[0] >= T_INFIX)) {
     const seen = new Set(ids);
-    for (const id of pRescue(nq, excl)) if (!seen.has(id)) ids.push(id);
+    for (const id of pRescue(nq, excl, maxId)) if (!seen.has(id)) ids.push(id);
     ids.sort((a, b) => DB.fame[b] - DB.fame[a]);
     if (ids.length > SUGG) ids.length = SUGG;
   }
@@ -826,7 +1029,7 @@ function near1(a, b) {
 // word list costs ~10ms, which is affordable precisely because it cannot happen
 // on a keystroke that found something. Results come back in fame order — with a
 // misspelling there is no match quality left to rank by.
-function pRescue(nq, excl) {
+function pRescue(nq, excl, maxId = Infinity) {
   const toks = nq.split(" ").filter(tk => tk.length > 3);  // too short to correct meaningfully
   if (!toks.length) return [];
   toks.sort((a, b) => b.length - a.length);  // the longest word carries the most signal
@@ -835,7 +1038,7 @@ function pRescue(nq, excl) {
     const alts = [];
     for (const w of words) if (w.length && w !== tk && near1(w, tk)) alts.push(w);
     for (const alt of alts.slice(0, 10)) {
-      for (const id of playerMatches(nq.replace(tk, alt), excl, false)) {
+      for (const id of playerMatches(nq.replace(tk, alt), excl, false, maxId)) {
         if (!seen.has(id)) { seen.add(id); out.push(id); }
       }
     }
@@ -959,6 +1162,9 @@ addEventListener("keydown", (e) => {
 // which fires nothing, so this cannot loop.)
 addEventListener("hashchange", () => {
   if (!DB || location.hash === "#quiz" || document.body.classList.contains("quiz")) return;
+  requiredPackIds = missingPacksForHash();
+  renderPacks();
+  if (requiredPackIds.length && !$("about").open) $("about").showModal();
   const ids = location.hash.slice(1).split(",").map(q => DB.byQid.get(q)).filter(i => i !== undefined);
   if (ids.join() === clubIds.join()) return;
   clubIds = ids;
@@ -1024,6 +1230,10 @@ function renderBrowse() {
     brItem(ulC, `<span>${countryFlag(cc)} ${esc(countryName(cc))}</span><span class="arr">›</span>`,
            cc === brCC ? "active" : "",
            () => { if (brCC !== cc) { brCC = cc; brLG = null; renderBrowse(); } }, true);
+  if ((CORE_DB?.packs || []).length) {
+    const label = enabledPackIds().size ? t.manageLeagues : t.addLeagues;
+    brItem(ulC, `<span>＋ ${esc(label)}</span>`, "packlink", () => openLeagueSettings(true));
+  }
   if (brCC !== null) {
     DB.leagues.forEach((l, i) => {
       if (l[2] !== brCC) return;
@@ -1813,16 +2023,23 @@ const YEAR0 = 1850;
 const yearsCache = new Map();
 function yearsOf(ci) {
   if (!yearsCache.has(ci))  // versioned like the career shards: same staleness trap
-    yearsCache.set(ci, fetch(`data/years/${ci}.json?v=${DB.built || 0}`)
+    yearsCache.set(ci, (() => {
+      const source = DB.clubSource?.[ci];
+      const meta = source && CORE_DB.packs.find(pack => pack.id === source.pack);
+      const url = source
+        ? `data/packs/${source.pack}/years/${source.qid}.json?v=${meta?.built || 0}`
+        : `data/years/${ci}.json?v=${DB.built || 0}`;
+      return fetch(url)
       .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
       .then(y => {
         // The file carries no player ids of its own — it is positional. If it ever
         // stops lining up with the postings it describes, every year in it belongs
         // to somebody else, and nothing downstream could tell. Refuse it instead.
         if (y.length !== postings(ci).length) throw new Error(`years/${ci}: length mismatch`);
-        return y;
+        return source ? source.order.map(position => y[position]) : y;
       })
-      .catch(err => { yearsCache.delete(ci); throw err; }));
+      .catch(err => { yearsCache.delete(ci); throw err; });
+    })());
   return yearsCache.get(ci);
 }
 
@@ -2154,14 +2371,26 @@ const avatar = (txt) => {
 
 // ---------------------------------------------------------------- career panel
 function fetchShard(shard) {
-  if (!careerCache.has(shard))  // versioned by dataset stamp: a stale cached shard would pair wrong careers with a fresh index
-    careerCache.set(shard, fetch(`data/career/${shard}.json?v=${DB.built || 0}`)
+  const key = `core:${shard}`;
+  if (!careerCache.has(key))  // versioned by dataset stamp: a stale cached shard would pair wrong careers with a fresh index
+    careerCache.set(key, fetch(`data/career/${shard}.json?v=${DB.built || 0}`)
       .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-      .catch(err => { careerCache.delete(shard); throw err; }));
-  return careerCache.get(shard);
+      .catch(err => { careerCache.delete(key); throw err; }));
+  return careerCache.get(key);
 }
-const careerOf = async (pid) =>  // [qidNumber, spells] — shard count stamped in the index by the pipeline
-  (await fetchShard(pid % (DB.nshards || 128)))[pid] || [];
+async function careerOf(pid) {  // [qidNumber, spells] — pack routes stay stable by QID
+  const source = DB.playerSource?.[pid];
+  if (!source) return (await fetchShard(pid % (DB.nshards || 128)))[pid] || [];
+  const meta = CORE_DB.packs.find(pack => pack.id === source.pack);
+  if (!meta) return [];
+  const nshards = meta.nshards || 32, shard = source.qid % nshards;
+  const key = `pack:${source.pack}:${shard}`;
+  if (!careerCache.has(key))
+    careerCache.set(key, fetch(`data/packs/${source.pack}/career/${shard}.json?v=${meta.built}`)
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .catch(err => { careerCache.delete(key); throw err; }));
+  return (await careerCache.get(key))[source.qid] || [];
+}
 
 const sitelinksCache = new Map();
 async function wikiSitelinks(qid) {

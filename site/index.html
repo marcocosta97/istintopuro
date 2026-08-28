@@ -36,7 +36,13 @@
     <h1><span>Istinto</span> <span class="accent">Puro</span></h1>
     <div class="htools">
       <button id="themebtn" type="button" aria-label="theme"></button>
-      <button id="aboutbtn" aria-label="info">?</button>
+      <button id="aboutbtn" type="button" aria-label="Impostazioni">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37a1.724 1.724 0 0 0 2.572-1.065z"></path>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+      </button>
       <select id="langsel" aria-label="Lingua / Language">
         <option value="it">IT</option><option value="en">EN</option>
       </select>
@@ -51,6 +57,11 @@
     <button id="mode-player" type="button" aria-pressed="false">Giocatori</button>
   </div>
   <section id="quiz"></section>
+  <div id="packhint" hidden>
+    <span id="packhinttext"></span>
+    <button id="packhintopen" type="button"></button>
+    <button id="packhintdismiss" type="button">×</button>
+  </div>
   <div id="picker">
     <div id="chips"></div>
     <div id="searchwrap">
@@ -112,10 +123,17 @@
   <h2>Istinto Puro — quiz & solver</h2>
   <p id="abouttext"></p>
   <p id="aboutleagues"></p>
+  <section id="aboutpacks" hidden>
+    <h3 id="packstitle"></h3>
+    <p id="packsnote"></p>
+    <p id="packsrequired" role="status" hidden></p>
+    <div id="packslist"></div>
+  </section>
   <p id="aboutdisclaimer" class="disclaimer"></p>
   <form method="dialog"><button>OK</button></form>
 </dialog>
 <footer id="foot">dati: <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a> · foto: <a href="https://commons.wikimedia.org" target="_blank" rel="noopener">Wikimedia Commons</a> · <a href="https://github.com/marcocosta97/istintopuro/blob/master/LICENSE" target="_blank" rel="noopener">MIT</a> · <a href="https://github.com/marcocosta97/istintopuro" target="_blank" rel="noopener">GitHub</a></footer>
+<script src="packs.js?v=__V__"></script>
 <script src="app.js?v=__V__"></script>
 <script src="quiz-core.js?v=__V__"></script>
 <script src="quiz.js?v=__V__"></script>

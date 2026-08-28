@@ -65,9 +65,9 @@ h1 .accent { color: var(--accent); }
   cursor: pointer; background: transparent; color: var(--muted);
   border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: .8rem; padding: .1rem .15rem;
 }
-#aboutbtn { width: 1.6rem; }
+#aboutbtn { display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; }
+#aboutbtn svg, #themebtn svg { display: block; }
 #themebtn { width: 1.9rem; display: inline-flex; align-items: center; justify-content: center; }
-#themebtn svg { display: block; }
 #langsel:hover, #aboutbtn:hover, #themebtn:hover { border-color: var(--accent); color: var(--fg); }
 
 #about {
@@ -84,6 +84,29 @@ h1 .accent { color: var(--accent); }
   font-size: 1.2rem; margin-bottom: .6rem;
 }
 #aboutleagues { color: var(--muted); margin-top: .6rem; line-height: 1.7; }
+#aboutpacks { margin-top: .8rem; padding-top: .75rem; border-top: 1px solid var(--line); }
+#aboutpacks h3 {
+  font: 600 .9rem var(--display); text-transform: uppercase; letter-spacing: .06em;
+}
+#packsnote { color: var(--muted); font-size: .8rem; margin-top: .2rem; }
+#packsrequired {
+  color: var(--fg); background: var(--hit); border: 1px solid var(--line);
+  border-radius: 7px; font-size: .8rem; margin-top: .6rem; padding: .4rem .55rem;
+}
+.packrow {
+  display: flex; align-items: center; gap: .65rem; padding: .65rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.packrow:last-child { border-bottom: 0; padding-bottom: 0; }
+.packdesc { min-width: 0; flex: 1; }
+.packdesc strong { display: block; font: 600 .95rem var(--display); }
+.packdesc small, .packstate { color: var(--muted); font-size: .76rem; }
+.packtoggle { display: flex; flex-direction: column; align-items: flex-end; gap: .2rem; }
+.packretry {
+  cursor: pointer; color: var(--accent); background: transparent; border: 0;
+  font: inherit; font-size: .76rem; text-decoration: underline;
+}
+.packrow[aria-busy="true"] { opacity: .65; }
 .disclaimer {
   margin-top: .8rem; padding-top: .7rem; border-top: 1px solid var(--line);
   color: var(--muted); font-size: .8rem;
@@ -119,6 +142,22 @@ h1 .accent { color: var(--accent); }
 #modebar button[aria-pressed="true"] {  /* lifted so the accent border wins the -1px overlap */
   background: var(--hit); color: var(--accent); border-color: var(--accent); position: relative;
 }
+#packhint {
+  display: flex; align-items: center; gap: .35rem; margin-bottom: .45rem;
+  color: var(--muted); background: var(--hit); border-radius: 7px;
+  padding: .3rem .4rem .3rem .55rem; font-size: .8rem;
+}
+#packhint[hidden] { display: none; }
+#packhinttext { white-space: nowrap; }
+#packhintopen, #packhintdismiss {
+  cursor: pointer; border: 0; background: transparent; font: inherit;
+}
+#packhintopen { color: var(--accent); padding: 0; text-align: left; }
+#packhintopen:hover { text-decoration: underline; }
+#packhintdismiss {
+  color: var(--muted); margin-left: auto; padding: 0 .2rem; font-size: 1rem; line-height: 1;
+}
+#packhintdismiss:hover { color: var(--fg); }
 #picker {
   position: relative;  /* anchors the #browse and #suggestions panels to the full picker width */
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
@@ -208,6 +247,11 @@ h1 .accent { color: var(--accent); }
 #browse li.active { background: var(--hit); color: var(--accent); }
 #browse li.sel { color: var(--muted); cursor: default; }
 #browse li.sel:hover { background: transparent; }
+#browse li.packlink {
+  color: var(--accent); border-top: 1px solid var(--line); border-radius: 0;
+  margin-top: .25rem; padding-top: .55rem;
+}
+#browse li.packlink:hover { background: var(--hit); border-radius: 7px; }
 #br-back {
   display: none; cursor: pointer; width: 100%; text-align: left;
   background: transparent; border: none; border-bottom: 1px solid var(--line);
@@ -536,7 +580,7 @@ footer a { color: inherit; }
 /* ------------- daily quiz ("schedina"): a green-tinted page of the same paper */
 #quiz { display: none; }
 body.quiz #quiz { display: block; }
-body.quiz :is(#picker, #controls, #advbody, #status, #results) { display: none; }
+body.quiz :is(#packhint, #picker, #controls, #advbody, #status, #results) { display: none; }
 body.quiz {
   --bg: #eef6f0; --card: #f6fbf7; --line: #cfe3d6; --hit: #dcefe3; --bad: #b0392f;
   --warn: #b3760a; --warn-bg: #fbf1dc;  /* cleared-with-a-hint amber */

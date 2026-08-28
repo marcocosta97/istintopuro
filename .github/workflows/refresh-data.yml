@@ -61,12 +61,17 @@ jobs:
           FULL_REFRESH: ${{ inputs.full_refresh && '1' || '0' }}
         run: |
           git show HEAD:site/data/index.json > /tmp/index-baseline.json
-          VALIDATE_BASELINE=/tmp/index-baseline.json python3 pipeline/pipeline.py
+          mkdir -p /tmp/pack-baselines
+          for pack in site/data/packs/*; do
+            [ -f "$pack/index.json" ] || continue
+            cp "$pack/index.json" "/tmp/pack-baselines/$(basename "$pack").json"
+          done
+          VALIDATE_BASELINE=/tmp/index-baseline.json VALIDATE_PACK_BASELINE_DIR=/tmp/pack-baselines python3 pipeline/pipeline.py
 
       - name: Test pipeline and audit quiz schedule
         run: |
           python3 -m unittest discover -s tests
-          node --test --test-concurrency=1 tests/quiz-core.test.js tests/quiz-schedule.test.js
+          node --test --test-concurrency=1 tests/packs.test.js tests/quiz-core.test.js tests/quiz-schedule.test.js
 
       - uses: actions/cache/save@v4
         with:

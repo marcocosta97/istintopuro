@@ -2,7 +2,7 @@
 """Istinto Puro data pipeline: Wikidata -> compact static dataset.
 
 Stages (each checkpoints to data/, reruns skip completed stages):
-  clubs    - club universe of the 10 leagues (top 5 + 2nd divisions, incl. historical items)
+  clubs    - core + optional-pack club universe (incl. historical items)
   members  - player QIDs per club (P54)
   roster   - current-squad seeds from enwiki squad tables (players Wikidata has no P54 for)
   attrs    - player attributes (label, birth year, nationality, image, enwiki title)
@@ -43,13 +43,19 @@ site/data/years/<club index>.json — lazy-loaded spell years, one entry per
   career shards can only answer by fetching all of them — they are keyed by
   player, and the question is asked about a club.
 
-site/data/career/<pid % nshards>.json — lazy-loaded careers, per player:
+site/data/career/<pid % nshards>.json — lazy-loaded core careers, per player:
   [QID number, spells]   QID links Wikipedia via Special:GoToLinkedPage
   spell = [team, start, end, apps, goals(, 1)]  one per STAY, not per P54
   statement: fold_spells() joins the statements that split one continuous
   spell (a loan then bought, a re-signing), while a later return after a
   move elsewhere stays separate; trailing 1 = P1642 loan flag
   (app.js also infers loans from a spell inside an earlier one's range)
+
+site/data/packs/<id>/index.json — optional country pack. It has the same club,
+  postings and stats columns, plus player rows keyed by Wikidata QID. A row carries
+  its immutable core player id when one exists, so the browser can append the pack
+  without duplicating people. Pack career shards are keyed by QID and pack years
+  files by club QID, keeping both routes stable when the core dataset changes.
 """
 import hashlib, json, os, re, subprocess, sys, time, gzip
 from pathlib import Path
@@ -74,8 +80,9 @@ LEAGUES = {  # qid: (name, tier, cc)
 }
 # collapse historical English divisions into their modern successors for display
 LEAGUE_ALIAS = {"Q754839": "Q9448", "Q769744": "Q19510"}
-LEAGUE_ORDER = ["Q15804", "Q194052", "Q324867", "Q35615", "Q9448", "Q19510",
-                "Q13394", "Q217374", "Q82595", "Q152665"]
+CORE_LEAGUE_ORDER = ["Q15804", "Q194052", "Q324867", "Q35615", "Q9448", "Q19510",
+                     "Q13394", "Q217374", "Q82595", "Q152665"]
+LEAGUE_ORDER = CORE_LEAGUE_ORDER.copy()
 
 # current league membership (2026–27), curated: Wikidata P118 lags promotions and
 # relegations by months. Refresh each August; reserve teams stay out (dataset scope).
@@ -298,6 +305,65 @@ CURRENT = {
     ],
 }
 
+# Optional country packs. Extraction runs over the union so shared players are
+# fetched once; stage_build keeps the original ten leagues in index.json and emits
+# each pack separately. Reserve teams are deliberately absent from CURRENT and are
+# already removed from the historical universe by EXCLUDE_CLUB below.
+PACKS = {
+    "pt": {
+        "cc": "PT",
+        "leagues": {
+            "Q182994": ("Liga Portugal", 1, "PT"),
+            "Q754488": ("Liga Portugal 2", 2, "PT"),
+        },
+        "current": {
+            "Q182994": [
+                "Q2410944",  # Académico de Viseu
+                "Q1386850",  # Alverca
+                "Q1386869",  # Arouca
+                "Q131499",   # Benfica
+                "Q75684",    # Braga
+                "Q1046440",  # Casa Pia
+                "Q634829",   # Estoril Praia
+                "Q838134",   # Estrela da Amadora
+                "Q1387105",  # Famalicão
+                "Q926438",   # Gil Vicente
+                "Q216503",   # Marítimo
+                "Q1346314",  # Moreirense
+                "Q216459",   # Nacional
+                "Q128446",   # Porto
+                "Q622432",   # Rio Ave
+                "Q740637",   # Santa Clara
+                "Q75729",    # Sporting CP
+                "Q223450",   # Vitória de Guimarães
+            ],
+            "Q754488": [
+                "Q120775987", # AVS
+                "Q243235",    # Académica
+                "Q2841205",   # Amarante
+                "Q671042",    # Feirense
+                "Q17505449",  # Felgueiras 1932
+                "Q1387471",   # Penafiel
+                "Q1387855",   # Vizela
+                "Q543467",    # Chaves
+                "Q623730",    # Leixões
+                "Q6705180",   # Lusitânia de Lourosa
+                "Q621120",    # Portimonense
+                "Q1853273",   # Torreense
+                "Q744353",    # Farense
+                "Q1023227",   # Tondela
+                "Q211401",    # União de Leiria
+            ],
+        },
+        "expected_current": [18, 15],
+    },
+}
+
+for _pack in PACKS.values():
+    LEAGUES.update(_pack["leagues"])
+    LEAGUE_ORDER.extend(_pack["leagues"])
+    CURRENT.update(_pack["current"])
+
 EXCLUDE_CLUB = re.compile(
     r"(\s(II|III|IV|B|C)|U-?\d{2}|Under-?\d{2}|[Yy]outh|Primavera|Castilla|Atl[eè]tic\b"
     r"|[Rr]eserves?|[Aa]cademy|[Ww]omen|[Ff]emen|[Ff]rauen|[Ff]éminin|[Ff]emminile)$"
@@ -397,7 +463,10 @@ def current_wd_versions(players):
         rows = sparql(f"""SELECT ?p ?modified WHERE {{ VALUES ?p {{ {vals} }}
             ?p schema:dateModified ?modified . }}""")
         return [[qid(v(r, "p")), v(r, "modified")] for r in rows]
-    rows = resumable("wd_versions", players, 500, fetch)
+    # QIDs are steadily getting longer; 500 VALUES now pushes WDQS's GET URL past
+    # its proxy header limit (HTTP 431) on the full core + pack union. At 250 the
+    # request stays comfortably below that ceiling while retaining useful batching.
+    rows = resumable("wd_versions", players, 250, fetch)
     versions = {p: None for p in players}
     versions.update(rows)
     save("wd_versions", versions)
@@ -431,6 +500,22 @@ def stage_clubs():
         # none of the club's own metadata: take the parent club's P576 (Blau-Weiß 90)
         p = year(v(r, "teamDissolved"))
         if p: c["pdissolved"] = p
+    current_league = {club: league for league, current in CURRENT.items() for club in current}
+    missing_current = sorted(set(current_league) - set(clubs))
+    for _, batch in batched(missing_current, 100):
+        vals = " ".join(f"wd:{q}" for q in batch)
+        for r in sparql(f"""SELECT ?club ?clubLabel ?cc ?dissolved ?teamDissolved WHERE {{
+          VALUES ?club {{ {vals} }}
+          OPTIONAL {{ ?club wdt:P17/wdt:P297 ?cc }}
+          OPTIONAL {{ ?club wdt:P576 ?dissolved }}
+          OPTIONAL {{ VALUES ?teamClass {{ wd:Q103229495 wd:Q15944511 }}
+                      ?club wdt:P31 ?teamClass ; wdt:P361/wdt:P576 ?teamDissolved }}
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul,it,es,de,fr". }}
+        }}"""):
+            q = qid(v(r, "club"))
+            clubs[q] = {"name": v(r, "clubLabel"), "cc": v(r, "cc"),
+                        "leagues": {current_league[q]}, "dissolved": year(v(r, "dissolved")),
+                        "pdissolved": year(v(r, "teamDissolved"))}
     for c in clubs.values():
         p = c.pop("pdissolved")
         c["dissolved"] = c["dissolved"] or p
@@ -920,6 +1005,7 @@ def stage_teams():
 
 # ----------------------------------------------------------------- stage: build
 NSHARDS = 128
+PACK_NSHARDS = 32
 # spell years ship as offsets from here: two digits instead of four, over 200k of them.
 # YEAR_MAX is the plausibility ceiling that keeps typo years out of the overlap test.
 YEAR0 = 1850
@@ -1148,64 +1234,127 @@ def stage_build():
     print(f"  dropped {n_dropped} unqualified postings, "
           f"merged {len(merged)} duplicate club items")
 
-    # display name per player, chosen once: it also orders the ids
+    # display name per player, chosen once. Core keeps its historical name ordering;
+    # packs use QID order so a rename cannot churn every pack-local id.
     disp = {q: common_name(a[0], a[5] if len(a) > 5 else None) for q, a in attrs.items()}
     renamed = sum(1 for q, a in attrs.items() if disp[q] != a[0])
-    player_qids = sorted({p for ps in kept_members.values() for p in ps},
-                         key=lambda q: (disp.get(q) or "￿", q))
-    pid = {q: i for i, q in enumerate(player_qids)}
+    def scope_members(league_order, current):
+        wanted = set(league_order)
+        # Curated CURRENT is authoritative for promotions: Wikidata's historical
+        # league statements can lag or be absent for newly promoted clubs.
+        current_clubs = {merged.get(q, q) for qs in current.values() for q in qs}
+        return {cq: ps for cq, ps in kept_members.items()
+                if cq in current_clubs
+                or any(wanted.intersection(clubs[q]["leagues"]) for q in groups[cq])}
 
-    club_qids = sorted(kept_members, key=lambda q: clubs[q]["name"])
-    lmask = {q: i for i, q in enumerate(LEAGUE_ORDER)}
-    cur_of = {merged.get(q, q): lmask[lq] for lq, qs in CURRENT.items() for q in qs}
-    stray = sorted(q for q in cur_of if q not in kept_members)
-    if stray: print(f"  WARNING: CURRENT clubs not in universe: {stray}")
-    out_clubs, postings, apps_col, goals_col, years = [], [], [], [], []
-    for cq in club_qids:
-        c = clubs[cq]
-        leagues = {l for q in groups[cq] for l in clubs[q]["leagues"]}
-        mask = sum(1 << lmask[l] for l in leagues if l in lmask)
-        ids = sorted(pid[p] for p in kept_members[cq])
-        sp = [spell(player_qids[i], groups[cq]) for i in ids]
-        deltas = [ids[0]] + [b - a for a, b in zip(ids, ids[1:])] if ids else []
-        # a merged group is "dissolved" only if the whole lineage ended (no refounded/active member)
-        diss = [clubs[q].get("dissolved") or EXTRA_DISSOLVED.get(q) for q in groups[cq]]
-        dissolved = max(diss) if diss and all(diss) else 0
-        cur = cur_of.get(cq, -1)
-        if cur >= 0: dissolved = 0  # playing a covered league now = alive (stale P576 on refounded lineages)
-        out_clubs.append([c["name"], c["cc"] or "", mask, cq, dissolved, cur])
-        postings.append(deltas)
-        apps_col.append([-1 if s[2] is None else s[2] for s in sp])  # -1 = unknown
-        goals_col.append([-1 if s[3] is None else s[3] for s in sp])
-        years.append([spells_at(player_qids[i], groups[cq]) for i in ids])
+    def scope_index(league_order, current, player_sort):
+        scoped = scope_members(league_order, current)
+        player_qids = sorted({p for ps in scoped.values() for p in ps}, key=player_sort)
+        pid = {q: i for i, q in enumerate(player_qids)}
+        club_qids = sorted(scoped, key=lambda q: clubs[q]["name"])
+        lmask = {q: i for i, q in enumerate(league_order)}
+        cur_of = {merged.get(q, q): lmask[lq] for lq, qs in current.items() for q in qs}
+        stray = sorted(q for q in cur_of if q not in scoped)
+        if stray: print(f"  WARNING: CURRENT clubs not in scope: {stray}")
+        out_clubs, postings, apps_col, goals_col, years = [], [], [], [], []
+        for cq in club_qids:
+            c = clubs[cq]
+            leagues = {l for q in groups[cq] for l in clubs[q]["leagues"]}
+            mask = sum(1 << lmask[l] for l in leagues if l in lmask)
+            ids = sorted(pid[p] for p in scoped[cq])
+            sp = [spell(player_qids[i], groups[cq]) for i in ids]
+            deltas = [ids[0]] + [b - a for a, b in zip(ids, ids[1:])] if ids else []
+            # a merged group is dissolved only if its whole lineage ended
+            diss = [clubs[q].get("dissolved") or EXTRA_DISSOLVED.get(q) for q in groups[cq]]
+            dissolved = max(diss) if diss and all(diss) else 0
+            cur = cur_of.get(cq, -1)
+            if cur >= 0: dissolved = 0
+            out_clubs.append([c["name"], c["cc"] or "", mask, cq, dissolved, cur])
+            postings.append(deltas)
+            apps_col.append([-1 if s[2] is None else s[2] for s in sp])
+            goals_col.append([-1 if s[3] is None else s[3] for s in sp])
+            years.append([spells_at(player_qids[i], groups[cq]) for i in ids])
 
-    names, births, nats, imgs, gk_pids = [], [], [], [], []
-    for i, q in enumerate(player_qids):
-        a = attrs.get(q) or [None] * 5
-        names.append(disp.get(q) or q); births.append(a[1] or 0)
-        nats.append(a[2] or ""); imgs.append(img_key(a[3]) if a[3] else "")
-        if len(a) > 4 and a[4]: gk_pids.append(i)  # P413 goalkeeper: their goal counts are unreliable
+        names, births, nats, imgs, gk_pids = [], [], [], [], []
+        for i, q in enumerate(player_qids):
+            a = attrs.get(q) or [None] * 5
+            names.append(disp.get(q) or q); births.append(a[1] or 0)
+            nats.append(a[2] or ""); imgs.append(img_key(a[3]) if a[3] else "")
+            if len(a) > 4 and a[4]: gk_pids.append(i)
+        gks = [gk_pids[0]] + [b - a for a, b in zip(gk_pids, gk_pids[1:])] if gk_pids else []
+        index = {"built": built, "leagues": [list(LEAGUES[q]) for q in league_order],
+                 "clubs": out_clubs, "postings": postings, "apps": apps_col,
+                 "goals": goals_col, "gks": gks,
+                 "names": names, "births": births, "nats": nats, "imgs": imgs}
+        return index, player_qids, pid, club_qids, years
 
-    SITE_DATA.mkdir(parents=True, exist_ok=True)
-    gks = [gk_pids[0]] + [b - a for a, b in zip(gk_pids, gk_pids[1:])] if gk_pids else []
-    index = {"built": built, "nshards": NSHARDS,  # app.js reads the shard count from here
-             "leagues": [list(LEAGUES[q]) for q in LEAGUE_ORDER],
-             "clubs": out_clubs, "postings": postings, "apps": apps_col,
-             "goals": goals_col, "gks": gks,
-             "names": names, "births": births, "nats": nats, "imgs": imgs}
-    blob = json.dumps(index, ensure_ascii=False, separators=(",", ":")).encode()
-    (SITE_DATA / "index.json").write_bytes(blob)
-
-    shards = [{} for _ in range(NSHARDS)]
-    for q, career in careers.items():
-        if q not in pid: continue  # all memberships dropped as unqualified
-        i = pid[q]
+    def career_entries(q):
+        career = careers.get(q, ())
         entries = [[club_name.get(t, ""), s, e, a, g] + ([1] if ln else [])
                    for t, s, e, a, g, ln in career
                    if any(x is not None for x in (s, e, a, g))
                    and not NATIONAL.search(club_name.get(t, ""))]
         entries.sort(key=lambda x: (x[1] or 9999, x[2] or 9999))
-        shards[i % NSHARDS][str(i)] = [int(q[1:]), entries]  # QID number -> Wikipedia via Special:GoToLinkedPage
+        return entries
+
+    core_current = {q: CURRENT[q] for q in CORE_LEAGUE_ORDER}
+    index, player_qids, pid, club_qids, years = scope_index(
+        CORE_LEAGUE_ORDER, core_current, lambda q: (disp.get(q) or "￿", q))
+    core_pid = pid
+
+    SITE_DATA.mkdir(parents=True, exist_ok=True)
+    packs_root = SITE_DATA / "packs"
+    packs_root.mkdir(exist_ok=True)
+    manifests = []
+    for pack_id, pack in PACKS.items():
+        order = list(pack["leagues"])
+        pidx, p_qids, p_pid, p_clubs, p_years = scope_index(
+            order, pack["current"], lambda q: int(q[1:]))
+        gk_set, acc = set(), 0
+        for delta in pidx.pop("gks"):
+            acc += delta; gk_set.add(acc)
+        players = []
+        for i, q in enumerate(p_qids):
+            players.append([int(q[1:]), core_pid.get(q, -1), pidx["names"][i],
+                            pidx["births"][i], pidx["nats"][i], pidx["imgs"][i],
+                            1 if i in gk_set else 0])
+        for key in ("names", "births", "nats", "imgs"):
+            del pidx[key]
+        pidx.update({"v": 1, "id": pack_id, "nshards": PACK_NSHARDS, "players": players})
+
+        root = packs_root / pack_id
+        career_dir, years_dir = root / "career", root / "years"
+        career_dir.mkdir(parents=True, exist_ok=True)
+        years_dir.mkdir(parents=True, exist_ok=True)
+        for f in years_dir.glob("*.json"): f.unlink()
+        shards = [{} for _ in range(PACK_NSHARDS)]
+        for q in p_qids:
+            qnum = int(q[1:])
+            shards[qnum % PACK_NSHARDS][str(qnum)] = [qnum, career_entries(q)]
+        for si, shard in enumerate(shards):
+            (career_dir / f"{si}.json").write_bytes(
+                json.dumps(shard, ensure_ascii=False, separators=(",", ":")).encode())
+        for cq, y in zip(p_clubs, p_years):
+            (years_dir / f"{cq}.json").write_bytes(json.dumps(y, separators=(",", ":")).encode())
+        pblob = json.dumps(pidx, ensure_ascii=False, separators=(",", ":")).encode()
+        (root / "index.json").write_bytes(pblob)
+        manifests.append({"id": pack_id, "cc": pack["cc"], "built": built,
+                          "nshards": PACK_NSHARDS,
+                          "bytes": len(gzip.compress(pblob, 6)),
+                          "leagues": [LEAGUES[q][0] for q in order],
+                          "clubs": [c[3] for c in pidx["clubs"]]})
+        print(f"pack {pack_id}: {len(pidx['clubs'])} clubs, {len(players)} players, "
+              f"{sum(map(len, pidx['postings']))} postings, {manifests[-1]['bytes']/1e3:.0f} kB gzip")
+
+    index["nshards"] = NSHARDS
+    index["packs"] = manifests
+    blob = json.dumps(index, ensure_ascii=False, separators=(",", ":")).encode()
+    (SITE_DATA / "index.json").write_bytes(blob)
+
+    shards = [{} for _ in range(NSHARDS)]
+    for q in player_qids:
+        i = pid[q]
+        shards[i % NSHARDS][str(i)] = [int(q[1:]), career_entries(q)]
     (SITE_DATA / "career").mkdir(exist_ok=True)
     shard_bytes = 0
     for si, sh in enumerate(shards):
@@ -1224,13 +1373,19 @@ def stage_build():
         (SITE_DATA / "years" / f"{ci}.json").write_bytes(b)
         years_bytes += len(b)
 
+    out_clubs, postings = index["clubs"], index["postings"]
+    apps_col, goals_col = index["apps"], index["goals"]
+    names, births, nats, imgs = (index[k] for k in ("names", "births", "nats", "imgs"))
+    gk_pids, acc = [], 0
+    for delta in index["gks"]:
+        acc += delta; gk_pids.append(acc)
     n_post = sum(map(len, postings))
     gz = len(gzip.compress(blob, 6))
     with_apps = sum(1 for col in apps_col for a in col if a >= 0)
     with_goals = sum(1 for col in goals_col for g in col if g >= 0)
-    cur_counts = [sum(1 for c in out_clubs if c[5] == i) for i in range(len(LEAGUE_ORDER))]
+    cur_counts = [sum(1 for c in out_clubs if c[5] == i) for i in range(len(CORE_LEAGUE_ORDER))]
     print("  current teams: " + ", ".join(
-        f"{LEAGUES[q][0]} {n}" for q, n in zip(LEAGUE_ORDER, cur_counts)))
+        f"{LEAGUES[q][0]} {n}" for q, n in zip(CORE_LEAGUE_ORDER, cur_counts)))
     print(f"build: {len(out_clubs)} clubs, {len(names)} players, {n_post} postings")
     print(f"  index.json {len(blob)/1e6:.2f} MB raw, {gz/1e6:.2f} MB gzip")
     print(f"  career shards total {shard_bytes/1e6:.2f} MB ({NSHARDS} files)")
@@ -1282,6 +1437,61 @@ YEARS_FLOOR = 0.95
 def apps_coverage(idx):
     tot = sum(len(c) for c in idx["apps"])
     return sum(1 for c in idx["apps"] for a in c if a >= 0) / tot if tot else 0
+
+def decode_deltas(deltas):
+    out, total = [], 0
+    for delta in deltas:
+        total += delta
+        out.append(total)
+    return out
+
+def pack_index_errors(idx, pack_id, core_players, expected_current):
+    """Validate the self-contained part of a pack index (also used by tests)."""
+    errs = []
+    def chk(ok, msg):
+        if not ok: errs.append(msg)
+    chk(idx.get("v") == 1, "unsupported format version")
+    chk(idx.get("id") == pack_id, f"id {idx.get('id')!r} != {pack_id!r}")
+    leagues = idx.get("leagues", [])
+    clubs = idx.get("clubs", [])
+    players = idx.get("players", [])
+    postings = idx.get("postings", [])
+    apps = idx.get("apps", [])
+    goals = idx.get("goals", [])
+    chk(len(leagues) == 2, f"{len(leagues)} leagues != 2")
+    chk(len(postings) == len(clubs), "postings/club count mismatch")
+    chk(len(apps) == len(clubs), "apps/club count mismatch")
+    chk(len(goals) == len(clubs), "goals/club count mismatch")
+    chk(len({c[3] for c in clubs if len(c) > 3}) == len(clubs), "duplicate club QIDs")
+    chk(all(len(c) == 6 and -1 <= c[5] < len(leagues) for c in clubs),
+        "bad club row or current-league field")
+    current = [sum(1 for c in clubs if len(c) == 6 and c[5] == i)
+               for i in range(len(leagues))]
+    chk(current == expected_current,
+        f"current clubs {current} != expected {expected_current}")
+    valid_players = [p for p in players if isinstance(p, list) and len(p) == 7]
+    qids = [p[0] for p in valid_players]
+    chk(len(valid_players) == len(players), "malformed player row")
+    chk(len(set(qids)) == len(players) and all(isinstance(q, int) and q > 0 for q in qids),
+        "duplicate or invalid player QID")
+    chk(all(isinstance(p[1], int) and -1 <= p[1] < core_players for p in valid_players),
+        "invalid core player id")
+    chk(all(p[6] in (0, 1) for p in valid_players), "invalid goalkeeper flag")
+    chk(all(not p[5] or re.fullmatch(r"[0-9a-f]{2}\S+", p[5]) for p in valid_players),
+        "image without md5 prefix or with spaces")
+    for ci, (deltas, acol, gcol) in enumerate(zip(postings, apps, goals)):
+        ids = decode_deltas(deltas)
+        chk(len(ids) == len(acol) == len(gcol), f"club {ci}: posting stats mismatch")
+        chk(all(isinstance(i, int) and 0 <= i < len(players)
+                and (pos == 0 or i > ids[pos - 1]) for pos, i in enumerate(ids)),
+            f"club {ci}: invalid postings")
+        chk(all(x >= -1 for x in acol + gcol), f"club {ci}: apps/goals below -1")
+    codes = {c for p in valid_players if p[4] for c in p[4].split(",")}
+    unrenderable = sorted(c for c in codes if c not in ISO_ALPHA2 and c not in NO_EMOJI_FLAG)
+    chk(not unrenderable, f"nat codes with no flag: {unrenderable}")
+    cov = apps_coverage(idx) if postings else 0
+    chk(cov >= APPS_FLOOR, f"apps coverage {cov:.1%} below floor {APPS_FLOOR:.0%}")
+    return errs
 
 def stage_validate():
     """Exit non-zero rather than ship a malformed index. VALIDATE_BASELINE=
@@ -1341,12 +1551,16 @@ def stage_validate():
     codes = {c for n in idx["nats"] if n for c in n.split(",")}
     unrenderable = sorted(c for c in codes if c not in ISO_ALPHA2 and c not in NO_EMOJI_FLAG)
     chk(not unrenderable, f"nat codes with no flag: {unrenderable}")
-    seeds = {int(p[1:]) for ps in (load("roster") or {}).values() for p in ps}
-    if seeds and not missing:
-        shipped = set()
+    roster = load("roster") or {}
+    core_current_clubs = {q for lq in CORE_LEAGUE_ORDER for q in CURRENT[lq]}
+    seeds = {int(p[1:]) for club, ps in roster.items() if club in core_current_clubs for p in ps}
+    shipped, core_qid_pid = set(), {}
+    if not missing:
         for i in range(NSHARDS):
-            shipped |= {e[0] for e in
-                        json.loads((SITE_DATA / "career" / f"{i}.json").read_bytes()).values()}
+            rows = json.loads((SITE_DATA / "career" / f"{i}.json").read_bytes())
+            for pid_s, entry in rows.items():
+                shipped.add(entry[0]); core_qid_pid[entry[0]] = int(pid_s)
+    if seeds and not missing:
         kept = len(seeds & shipped) / len(seeds)
         chk(kept >= ROSTER_FLOOR,
             f"roster seeds in index {kept:.1%} below floor {ROSTER_FLOOR:.0%}")
@@ -1360,6 +1574,94 @@ def stage_validate():
         chk(cov >= ov - 0.02, f"apps coverage shrank {ov:.1%} -> {cov:.1%}")
         print(f"  vs baseline: clubs {oc} -> {nc}, players {op} -> {np}, "
               f"apps {ov:.1%} -> {cov:.1%}")
+
+    # Optional packs are release units of their own: validate both their compact
+    # index and every lazy route before exposing them through the core manifest.
+    manifests = idx.get("packs", [])
+    by_id = {m.get("id"): m for m in manifests}
+    chk(len(by_id) == len(manifests), "duplicate pack manifest ids")
+    chk(set(by_id) == set(PACKS),
+        f"pack manifest ids {sorted(by_id)} != configured {sorted(PACKS)}")
+    pack_baseline_dir = os.environ.get("VALIDATE_PACK_BASELINE_DIR")
+    for pack_id, config in PACKS.items():
+        root = SITE_DATA / "packs" / pack_id
+        pf = root / "index.json"
+        if not pf.exists():
+            chk(False, f"pack {pack_id}: index missing")
+            continue
+        pidx = json.loads(pf.read_bytes())
+        for err in pack_index_errors(pidx, pack_id, np, config["expected_current"]):
+            chk(False, f"pack {pack_id}: {err}")
+        chk(all(row[1] == core_qid_pid.get(row[0], -1)
+                for row in pidx.get("players", []) if isinstance(row, list) and len(row) == 7),
+            f"pack {pack_id}: core player id/QID mismatch")
+        manifest = by_id.get(pack_id, {})
+        chk(manifest.get("cc") == config["cc"], f"pack {pack_id}: bad manifest country")
+        chk(manifest.get("built") == pidx.get("built"), f"pack {pack_id}: manifest build mismatch")
+        chk(manifest.get("nshards") == pidx.get("nshards"),
+            f"pack {pack_id}: manifest shard count mismatch")
+        chk(manifest.get("bytes") == len(gzip.compress(pf.read_bytes(), 6)),
+            f"pack {pack_id}: manifest byte size mismatch")
+        chk(manifest.get("leagues") == [x[0] for x in pidx.get("leagues", [])],
+            f"pack {pack_id}: manifest leagues mismatch")
+        pack_club_qids = [c[3] for c in pidx.get("clubs", [])]
+        chk(manifest.get("clubs") == pack_club_qids,
+            f"pack {pack_id}: manifest clubs mismatch")
+
+        pshards = pidx.get("nshards", 0)
+        pmissing = [i for i in range(pshards)
+                    if not (root / "career" / f"{i}.json").exists()]
+        chk(not pmissing, f"pack {pack_id}: missing career shards {pmissing[:5]}")
+        pshipped = set()
+        if not pmissing:
+            for i in range(pshards):
+                rows = json.loads((root / "career" / f"{i}.json").read_bytes())
+                pshipped |= {row[0] for row in rows.values()}
+            expected_qids = {p[0] for p in pidx.get("players", [])}
+            chk(pshipped == expected_qids,
+                f"pack {pack_id}: career QIDs differ from player rows")
+
+        pydir = root / "years"
+        stray_years = sorted(f.stem for f in pydir.glob("*.json")
+                             if f.stem not in set(pack_club_qids)) if pydir.is_dir() else []
+        chk(not stray_years, f"pack {pack_id}: stale years files {stray_years[:5]}")
+        py_dated = py_total = 0
+        for club, deltas in zip(pidx.get("clubs", []), pidx.get("postings", [])):
+            yf = pydir / f"{club[3]}.json"
+            if not yf.exists():
+                chk(False, f"pack {pack_id}: {club[3]} years missing")
+                continue
+            values = json.loads(yf.read_bytes())
+            chk(len(values) == len(deltas),
+                f"pack {pack_id}: {club[3]} years/postings mismatch")
+            chk(all(len(sp) % 2 == 0 and all(x >= 0 for x in sp)
+                    and all(sp[k] <= sp[k + 1] for k in range(0, len(sp), 2))
+                    for sp in values), f"pack {pack_id}: {club[3]} malformed years")
+            py_total += len(values); py_dated += sum(bool(sp) for sp in values)
+        pycov = py_dated / py_total if py_total else 0
+        chk(pycov >= YEARS_FLOOR,
+            f"pack {pack_id}: dated postings {pycov:.1%} below floor {YEARS_FLOOR:.0%}")
+
+        pack_current_clubs = {q for qs in config["current"].values() for q in qs}
+        pseeds = {int(p[1:]) for club, ps in roster.items()
+                  if club in pack_current_clubs for p in ps}
+        if pseeds and not pmissing:
+            pkept = len(pseeds & pshipped) / len(pseeds)
+            chk(pkept >= ROSTER_FLOOR,
+                f"pack {pack_id}: roster seeds {pkept:.1%} below floor {ROSTER_FLOOR:.0%}")
+        pcov = apps_coverage(pidx)
+        if pack_baseline_dir:
+            old_path = Path(pack_baseline_dir) / f"{pack_id}.json"
+            if old_path.exists():
+                old = json.loads(old_path.read_bytes())
+                chk(len(pidx["clubs"]) >= .97 * len(old["clubs"]),
+                    f"pack {pack_id}: clubs shrank {len(old['clubs'])} -> {len(pidx['clubs'])}")
+                chk(len(pidx["players"]) >= .97 * len(old["players"]),
+                    f"pack {pack_id}: players shrank {len(old['players'])} -> {len(pidx['players'])}")
+                chk(pcov >= apps_coverage(old) - .02,
+                    f"pack {pack_id}: apps coverage shrank too far")
+        print(f"  pack {pack_id}: {len(pidx.get('clubs', []))} clubs, "
+              f"{len(pidx.get('players', []))} players, apps {pcov:.1%}, years {pycov:.1%}")
     if errs:
         sys.exit("validate FAILED:\n  " + "\n  ".join(errs[:20]))
     print(f"validate: OK ({nc} clubs, {np} players, {ycov:.1%} of postings dated)")
@@ -1371,7 +1673,7 @@ def stage_validate():
         d = new - old
         return "" if not d else (f" ({d:+.1f}pt)" if pct else f" ({d:+,})")
     gcov = sum(1 for c in idx["goals"] for g in c if g >= 0) / max(sum(map(len, idx["goals"])), 1)
-    wp_n = len(load("wp") or {})
+    wp_n = len(set(load("wp") or {}) & shipped) if shipped else 0
     lines = [f"{nc:,} clubs, {np:,} players{delta(np, op) if base else ''}, "
              f"{sum(map(len, idx['postings'])):,} postings",
              f"apps {cov:.1%}{delta(cov * 100, ov * 100, True) if base else ''}, goals {gcov:.1%}"

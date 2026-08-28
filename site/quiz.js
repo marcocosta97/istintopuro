@@ -7,7 +7,8 @@
 // tooling. It is initialized lazily because app.js loads the dataset async.
 let qCoreApi = null;
 const qCore = () => qCoreApi ||= QuizCore.createQuizCore({
-  DB, postings, intersect, stature, marquee: MARQUEE, leagueCC, coreClub,
+  DB: CORE_DB, postings: corePostings, intersect, stature: coreStature,
+  marquee: MARQUEE, leagueCC: coreLeagueCC, coreClub,
 });
 const qFmt = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -60,7 +61,7 @@ function qStagesFor(date) {
   for (let i = first; i <= num; i++) {
     if (qChain[i]) continue;
     const here = qShift(date, i - num);
-    const scheduled = DB.quizSchedule?.days?.[here];
+    const scheduled = CORE_DB.quizSchedule?.days?.[here];
     if (scheduled) {
       const checked = qCore().validateEntry(scheduled, { requireOrder: false });
       if (checked.ok) {
@@ -485,9 +486,9 @@ const qInitialsProbe = (q) => {
 // that IS somebody's whole name is a guess, not a probe — "p" still matches no
 // name outright, so the initials stay closed.
 const qMatches = (q) => {
-  if (!qInitialsProbe(q)) return playerMatches(q, []);
+  if (!qInitialsProbe(q)) return playerMatches(q, [], true, CORE_DB.names.length);
   const nq = norm(q);
-  return playerMatches(q, [], false).filter(id => norm(DB.names[id]) === nq);
+  return playerMatches(q, [], false, CORE_DB.names.length).filter(id => norm(DB.names[id]) === nq);
 };
 
 // Deliberately NOT the solver's two-line row: naming a candidate's clubs here
