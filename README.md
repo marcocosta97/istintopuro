@@ -1,7 +1,7 @@
 # Istinto Puro — quiz & solver
 
-Two ways to play the game «Istinto Puro». The solver: pick clubs and
-instantly get every player who wore all of those shirts — or switch to
+Two ways to play the game «Istinto Puro». The solver: pick clubs, leagues or
+countries and instantly get every matching player — or switch to
 player mode and go the other way: pick players, get the clubs they shared,
 or pick one and get everyone he ever lined up alongside.
 The daily quiz mode (`site/quiz.js`) turns the same index into a Wordle-style

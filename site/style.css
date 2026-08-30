@@ -177,6 +177,16 @@ h1 .accent { color: var(--accent); }
    The quiz's chips are read-only, so without this they sit visibly off-centre. */
 .chip:not(:has(button)) { padding-right: .6rem; }
 .chip button:hover { color: var(--fg); }
+.chip.league-chip {
+  background: transparent;
+  border-style: dashed;
+  font-weight: 600;
+}
+.chip.country-chip {
+  background: transparent;
+  border-style: dotted;
+  font-weight: 600;
+}
 .clearchip {  /* ghost chip at the end of the row: clears the whole selection */
   cursor: pointer; font: inherit; font-size: .8rem; color: var(--muted);
   background: transparent; border: 1px dashed var(--line); border-radius: 999px;
@@ -214,6 +224,10 @@ h1 .accent { color: var(--accent); }
 #suggestions li small { color: var(--muted); text-align: right; }
 .defunct { color: var(--muted); font-size: .82em; white-space: nowrap; }
 #suggestions li.active, #suggestions li:hover { background: var(--hit); }
+#suggestions li.league-suggestion { color: var(--accent); }
+#suggestions li.league-suggestion small { color: var(--muted); }
+#suggestions li.country-suggestion { color: var(--accent); }
+#suggestions li.country-suggestion small { color: var(--muted); }
 /* two-line player row: name + birth year, then the clubs that place the name */
 #suggestions li.two { flex-direction: column; align-items: stretch; gap: .05rem; }
 .s-row { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; }
@@ -243,13 +257,33 @@ h1 .accent { color: var(--accent); }
 }
 #browse li > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #browse li .arr { color: var(--muted); flex-shrink: 0; }
+#browse li.br-split { padding: 0; gap: 0; align-items: stretch; cursor: default; }
+#browse .br-main, #browse .br-add {
+  cursor: pointer; color: inherit; background: transparent; border: 0; font: inherit;
+}
+#browse .br-main {
+  min-width: 0; flex: 1; padding: .45rem .55rem; text-align: left;
+  display: flex; justify-content: space-between; align-items: center; gap: .5rem;
+  border-radius: 7px 0 0 7px;
+}
+#browse .br-main > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#browse .br-add {
+  width: 2.75rem; min-height: 2.75rem; flex: 0 0 2.75rem;
+  color: var(--accent); border-left: 1px solid var(--line); border-radius: 0 7px 7px 0;
+  font-weight: 600;
+}
+#browse .br-main:hover, #browse .br-main.active, #browse .br-add:hover { background: var(--hit); }
+#browse .br-main.active { color: var(--accent); }
+#browse .br-add:disabled { cursor: default; color: var(--muted); }
 #browse li:hover { background: var(--hit); }
+#browse li.br-split:hover { background: transparent; }
 #browse li.active { background: var(--hit); color: var(--accent); }
 #browse li.sel { color: var(--muted); cursor: default; }
 #browse li.sel:hover { background: transparent; }
 #browse li.packlink {
   color: var(--accent); border-top: 1px solid var(--line); border-radius: 0;
   margin-top: .25rem; padding-top: .55rem;
+  position: sticky; bottom: 0; z-index: 1; background: var(--card);
 }
 #browse li.packlink:hover { background: var(--hit); border-radius: 7px; }
 #br-back {

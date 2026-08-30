@@ -25,12 +25,18 @@ let CORE_DB = null;          // immutable index.json; the quiz always reads this
 let DB = null;               // core composed with the locally enabled league packs
 let mode = "club";           // "club" (players in common) | "player" (clubs in common)
 let clubIds = [];            // selected club indices
+let leagueIds = [];          // selected league indices (a league means current clubs in it)
+let countryIds = [];         // selected country codes (a country means its clubs)
 let playerIds = [];          // selected player ids (player mode keeps its own selection)
 let solveGen = 0;            // stale-async guard: only the newest player solve may render
 let detail = localStorage.pdetail === "1";  // shared-club cards: show apps/goals + per-team totals
 let sortBy = "apps", sortDir = -1;
 const decoded = new Map();   // club index -> Int32Array of player ids
 const coreDecoded = new Map();
+const leagueDecoded = new Map(); // league index -> union of the players at its clubs
+const leagueClubsCache = new Map();
+const countryDecoded = new Map(); // country code -> union of the players at its clubs
+const countryClubsCache = new Map();
 const careerCache = new Map();
 const packFailures = new Map();
 let requiredPackIds = [];
@@ -40,9 +46,9 @@ const PAGE = 50;             // result rows rendered per batch; "show more" appe
 const REPO = "https://github.com/marcocosta97/istintopuro";
 const STR = {
   it: {
-    tagline: "Scegli una o più squadre — chi ha giocato per tutte?",
+    tagline: "Scegli squadre, campionati o paesi — chi li unisce?",
     taglineP: "Scegli uno o più giocatori — in quali squadre hanno giocato insieme?",
-    placeholder: "Aggiungi una squadra…",
+    placeholder: "Aggiungi squadra, campionato o paese…",
     placeholderP: "Aggiungi un giocatore…",
     foundClubs: (n, ms) => `${n} squadr${n === 1 ? "a" : "e"} in comune · ${ms} ms`,
     mates: (span) => `compagni ${span}`,
@@ -52,7 +58,7 @@ const STR = {
     loading: "Caricamento dati…",
     footer: `dati: <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a> · foto: <a href="https://commons.wikimedia.org" target="_blank" rel="noopener">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE" target="_blank" rel="noopener">MIT</a> · <a href="${REPO}" target="_blank" rel="noopener">GitHub</a>`,
     built: (d) => `aggiornato al ${d}`,
-    about: "Due modi di giocare con «Istinto Puro». Solver: scegli una o più squadre e scopri all'istante tutti i giocatori che hanno giocato per tutte, ordinati per presenze combinate. Schedina giornaliera: quattro sfide di difficoltà crescente, le stesse per tutti. Dati estratti da Wikidata.",
+    about: "Due modi di giocare con «Istinto Puro». Solver: scegli squadre, campionati o paesi e scopri chi li unisce. Schedina giornaliera: quattro sfide di difficoltà crescente, le stesse per tutti. Dati estratti da Wikidata.",
     aboutLeagues: "Campionati coperti (tutte le stagioni):",
     packsTitle: "Campionati opzionali",
     packsNote: "Ogni pack aggiunge le prime due divisioni al solver. La Schedina resta uguale per tutti.",
@@ -69,17 +75,17 @@ const STR = {
     filtReset: "azzera", filtResetT: "Azzera i filtri",
     born: "Nati", from: "dal", to: "al",
     noZero: "Nascondi 0 presenze",
-    noZeroHint: "Nasconde chi ha 0 presenze registrate in una delle squadre scelte. Chi ha giocato più volte nella stessa squadra e ha totalizzato almeno una presenza resta incluso.",
+    noZeroHint: "Nasconde chi ha 0 presenze in un vincolo selezionato.",
     nat: "Nazionalità", natAll: "tutte", natNone: "nessuna", natUnknown: "sconosciuta",
     stats: (p, c) => `${p.toLocaleString("it")} giocatori · ${c} squadre`,
     loadFail: "Errore nel caricamento dei dati.", retry: "riprova",
     spin: "Non sai da dove partire?",
-    orSearch: "Oppure cerca una squadra…",
+    orSearch: "Oppure cerca…",
     tryRandom: "🎲 casuale",
     dailyQuiz: (n) => `Schedina #${n}`, dailyPlay: "gioca →",
     dailyDone: (n, score) => `Schedina #${n} · ${score}/4`, dailyArchive: "archivio →",
     randClubs: "squadre a caso", randPlayers: "giocatori a caso",
-    noneCommon: "Nessun giocatore ha vestito tutte queste maglie — togli una squadra.",
+    noneCommon: "Nessun giocatore soddisfa tutti i vincoli — rimuovine uno.",
     noneFilter: "Nessun giocatore corrisponde ai filtri.",
     combNote: "presenze e gol combinati",
     found: (n, ms) => `${n} giocator${n === 1 ? "e" : "i"} · ${ms} ms`,
@@ -91,8 +97,12 @@ const STR = {
     dissolved: (y) => `squadra sciolta nel ${y}`,
     more: (n) => `… mostra altri ${n}`,
     browse: "Sfoglia per campionato",
+    league: "campionato",
+    addLeague: "aggiungi campionato",
+    country: "paese",
+    addCountry: "aggiungi paese",
     settings: "Impostazioni",
-    addLeagues: "Aggiungi campionati",
+    addLeagues: "Altri campionati…",
     manageLeagues: "Gestisci campionati",
     packHint: "Vuoi più squadre?",
     packHintOpen: "Aggiungi altri campionati →",
@@ -110,9 +120,9 @@ const STR = {
     themeDark: "Passa al tema scuro", themeLight: "Passa al tema chiaro",
   },
   en: {
-    tagline: "Pick one or more clubs — who played for them all?",
+    tagline: "Pick clubs, leagues or countries — who connects them?",
     taglineP: "Pick one or more players — which clubs did they share?",
-    placeholder: "Add a club…",
+    placeholder: "Add a club, league, or country…",
     placeholderP: "Add a player…",
     foundClubs: (n, ms) => `${n} shared club${n === 1 ? "" : "s"} · ${ms} ms`,
     mates: (span) => `teammates ${span}`,
@@ -122,7 +132,7 @@ const STR = {
     loading: "Loading data…",
     footer: `data: <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a> · photos: <a href="https://commons.wikimedia.org" target="_blank" rel="noopener">Wikimedia Commons</a> · <a href="${REPO}/blob/master/LICENSE" target="_blank" rel="noopener">MIT</a> · <a href="${REPO}" target="_blank" rel="noopener">GitHub</a>`,
     built: (d) => `updated ${d}`,
-    about: "Two ways to play “Istinto Puro”. Solver: pick one or more clubs and instantly see every player who played for them all, ranked by combined appearances. Daily quiz: four challenges of rising difficulty, the same for everyone. Data extracted from Wikidata.",
+    about: "Two ways to play “Istinto Puro”. Solver: pick clubs, leagues, or countries and see who connects them. Daily quiz: four challenges of rising difficulty, the same for everyone. Data extracted from Wikidata.",
     aboutLeagues: "Leagues covered (all seasons):",
     packsTitle: "Optional leagues",
     packsNote: "Each pack adds its top two divisions to the solver. The daily quiz stays the same for everyone.",
@@ -139,17 +149,17 @@ const STR = {
     filtReset: "reset", filtResetT: "Clear all filters",
     born: "Born", from: "from", to: "to",
     noZero: "Hide 0 apps",
-    noZeroHint: "Hides players with 0 recorded appearances at one of the selected clubs. Players with multiple stints at the same club who made at least one appearance are kept.",
+    noZeroHint: "Hides players with 0 appearances in a selected constraint.",
     nat: "Nationality", natAll: "all", natNone: "none", natUnknown: "unknown",
     stats: (p, c) => `${p.toLocaleString("en")} players · ${c} clubs`,
     loadFail: "Failed to load data.", retry: "retry",
     spin: "Not sure where to start?",
-    orSearch: "Or search for a club…",
+    orSearch: "Or search…",
     tryRandom: "🎲 random",
     dailyQuiz: (n) => `Quiz #${n}`, dailyPlay: "play →",
     dailyDone: (n, score) => `Quiz #${n} · ${score}/4`, dailyArchive: "archive →",
     randClubs: "random clubs", randPlayers: "random players",
-    noneCommon: "No player has played for all these clubs — remove one to widen the search.",
+    noneCommon: "No player matches every constraint — remove one to widen the search.",
     noneFilter: "No players match the filters.",
     combNote: "combined apps and goals",
     found: (n, ms) => `${n} player${n === 1 ? "" : "s"} · ${ms} ms`,
@@ -161,8 +171,12 @@ const STR = {
     dissolved: (y) => `club dissolved in ${y}`,
     more: (n) => `… show ${n} more`,
     browse: "Browse by league",
+    league: "league",
+    addLeague: "add league",
+    country: "country",
+    addCountry: "add country",
     settings: "Settings",
-    addLeagues: "Add leagues",
+    addLeagues: "More leagues…",
     manageLeagues: "Manage leagues",
     packHint: "Want more clubs?",
     packHintOpen: "Add more leagues →",
@@ -231,7 +245,7 @@ function applyLang() {
   renderPackHint();
   if (DB) {
     renderChips();
-    const sel = mode === "club" ? clubIds : playerIds;
+    const sel = mode === "club" ? clubIds.concat(leagueIds, countryIds) : playerIds;
     if (sel.length) solve();
     else {
       clearResults(); controlsRow.hidden = true; advBody.hidden = true;
@@ -490,7 +504,14 @@ async function purgePack(id) {
 }
 function removePackClubsFromHash(meta) {
   const removed = new Set(meta.clubs || []);
-  const kept = location.hash.slice(1).split(",").filter(qid => qid && !removed.has(qid));
+  const packLeagues = new Set((meta.leagues || []).map(norm));
+  const kept = location.hash.slice(1).split(",").filter(token => {
+    if (!token || removed.has(token)) return false;
+    if (token.startsWith("C:") && token.slice(2).toUpperCase() === meta.cc) return false;
+    if (!token.startsWith("L:")) return true;
+    try { return !packLeagues.has(norm(decodeURIComponent(token.slice(2)).split("|")[0] || "")); }
+    catch { return true; }
+  });
   history.replaceState(null, "", kept.length ? `#${kept.join(",")}` : location.pathname + location.search);
 }
 async function togglePack(meta, on) {
@@ -591,8 +612,14 @@ function openLeagueSettings(discovered = false) {
 function missingPacksForHash() {
   const active = new Set(DB?.activePacks || []);
   const shared = new Set(location.hash.slice(1).split(","));
+  const countryCodes = [...shared].filter(token => token.startsWith("C:")).map(token => token.slice(2).toUpperCase());
+  const leagueNames = [...shared].filter(token => token.startsWith("L:")).map(token => {
+    try { return norm(decodeURIComponent(token.slice(2)).split("|")[0] || ""); } catch { return ""; }
+  });
   return (CORE_DB?.packs || []).filter(meta => !active.has(meta.id)
-    && (meta.clubs || []).some(qid => shared.has(qid))).map(meta => meta.id);
+    && ((meta.clubs || []).some(qid => shared.has(qid))
+      || (meta.leagues || []).some(name => leagueNames.includes(norm(name)))
+      || countryCodes.includes(meta.cc))).map(meta => meta.id);
 }
 
 // The index is the one file fetched before a first-visit service worker can take over
@@ -666,7 +693,7 @@ async function boot() {
   DB.padSort = DB.sortNames.map(pad);
   DB.padAlias = DB.aliasNorm.map(a => a.map(pad));
   DB.byQid = new Map(DB.clubs.map((c, i) => [c[3], i]));  // hash restore + example queries
-  clubIds = location.hash.slice(1).split(",").map(q => DB.byQid.get(q)).filter(i => i !== undefined);
+  ({ clubs: clubIds, leagues: leagueIds, countries: countryIds } = parseSelectionHash());
   restoreShareOptions();
   search.disabled = false;
   browseBtn.disabled = false;
@@ -693,9 +720,64 @@ function postingsFor(db, cache, ci) {
 const postings = (ci) => postingsFor(DB, decoded, ci);
 const corePostings = (ci) => postingsFor(CORE_DB, coreDecoded, ci);
 
+// League rows are part of the same picker as clubs. A negative token keeps the
+// existing numeric suggestion plumbing intact while making it impossible to
+// confuse a league index with a club index.
+const leagueToken = (li) => -li - 1;
+const isLeagueToken = (id) => id < 0;
+const leagueIdFromToken = (token) => -token - 1;
+const countryToken = (cc) => `C:${cc}`;
+const isCountryToken = (id) => typeof id === "string" && id.startsWith("C:");
+const countryFromToken = (token) => token.slice(2).toUpperCase();
+
+function leagueClubs(li) {
+  let ids = leagueClubsCache.get(li);
+  if (ids) return ids;
+  ids = [];
+  // c[5] is the curated current-league assignment. The historical mask c[2]
+  // cannot tell whether a player's spell overlapped the club's league stint.
+  DB.clubs.forEach((c, ci) => { if (c[5] === li) ids.push(ci); });
+  leagueClubsCache.set(li, ids);
+  return ids;
+}
+
+// A league constraint means "played for at least one club currently in this
+// league". The union is built lazily because most sessions only ever ask for clubs.
+function leaguePostings(li) {
+  let arr = leagueDecoded.get(li);
+  if (arr) return arr;
+  const all = new Set();
+  for (const ci of leagueClubs(li)) for (const pid of postings(ci)) all.add(pid);
+  arr = Int32Array.from(all).sort();
+  leagueDecoded.set(li, arr);
+  return arr;
+}
+
+function countryClubs(cc) {
+  let ids = countryClubsCache.get(cc);
+  if (ids) return ids;
+  ids = [];
+  DB.clubs.forEach((c, ci) => { if (c[1] === cc) ids.push(ci); });
+  countryClubsCache.set(cc, ids);
+  return ids;
+}
+
+// A country constraint means "played for at least one club in this country".
+// Countries are stable club metadata, so unlike league matching this includes
+// every matching club present in the loaded dataset (including historical clubs).
+function countryPostings(cc) {
+  let arr = countryDecoded.get(cc);
+  if (arr) return arr;
+  const all = new Set();
+  for (const ci of countryClubs(cc)) for (const pid of postings(ci)) all.add(pid);
+  arr = Int32Array.from(all).sort();
+  countryDecoded.set(cc, arr);
+  return arr;
+}
+
 // ---------------------------------------------------------------- search
 const SUGG = 12;  // suggestion rows offered; the dropdown scrolls past ~6
-const matches = (q) => mode === "club" ? clubMatches(q) : playerMatches(q);
+const matches = (q) => mode === "club" ? pickerMatches(q) : playerMatches(q);
 
 // Where `nq` lands in one candidate string, on the ladder the player search uses
 // (T_NAME … T_INFIX). 474 clubs is small enough that plain string tests beat any
@@ -752,6 +834,48 @@ function clubMatches(q, rescue = true) {
                  .slice(0, SUGG).map(x => x[2]);
   if (!rescue || (ids.length && out.some(x => x[0] < T_INFIX))) return ids;
   return cRescue(nq, ids);  // "bayren", "dortmond" — same one-edit retry as the names
+}
+
+// League names share the club picker so a query such as "bundes" offers the
+// league itself alongside clubs. Keep this ladder deliberately small and exact:
+// unlike club names, league labels are curated and do not need typo rescue.
+function leagueMatches(q) {
+  const nq = norm(q);
+  if (!nq) return [];
+  const word = " " + nq;
+  const out = [];
+  DB.leagues.forEach((l, i) => {
+    if (leagueIds.includes(i)) return;
+    const n = norm(l[0]), pad = " " + n + " ";
+    const rank = n === nq ? T_NAME : pad.includes(word) ? T_WORD : n.includes(nq) ? T_INFIX : 99;
+    if (rank <= T_INFIX) out.push([rank, n, i]);
+  });
+  return out.sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1])).map(x => leagueToken(x[2]));
+}
+
+function countryMatches(q) {
+  const nq = norm(q);
+  if (!nq) return [];
+  const word = " " + nq;
+  const out = [];
+  const ccs = [...new Set(DB.clubs.map(c => c[1]).filter(Boolean))];
+  ccs.forEach(cc => {
+    if (countryIds.includes(cc)) return;
+    const n = norm(countryName(cc)), pad = " " + n + " ", code = norm(cc);
+    const rank = n === nq || code === nq ? T_NAME
+      : pad.includes(word) ? T_WORD
+      : n.includes(nq) || code.includes(nq) ? T_INFIX : 99;
+    if (rank <= T_INFIX) out.push([rank, n, cc]);
+  });
+  return out.sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]))
+    .map(x => countryToken(x[2]));
+}
+
+function pickerMatches(q) {
+  // Higher-level constraints come first; retaining a few rows per type leaves
+  // room for familiar club suggestions below.
+  return [...countryMatches(q).slice(0, 3), ...leagueMatches(q).slice(0, 4), ...clubMatches(q)]
+    .slice(0, SUGG);
 }
 
 // the distinct words a club answers to, for the typo rescue (~900 of them)
@@ -1085,8 +1209,18 @@ function renderSuggestions(ids, q = "") {
     li.id = "sg" + i;
     li.setAttribute("role", "option");
     if (mode === "club") {
-      const c = DB.clubs[id];
-      li.innerHTML = `<span>${countryFlag(c[1])} ${hilite(c[0], nq)}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
+      if (isCountryToken(id)) {
+        const cc = countryFromToken(id);
+        li.classList.add("country-suggestion");
+        li.innerHTML = `<span>${countryFlag(cc)} ${hilite(countryName(cc), nq)}</span><small>${esc(t.country)}</small>`;
+      } else if (isLeagueToken(id)) {
+        const l = DB.leagues[leagueIdFromToken(id)];
+        li.classList.add("league-suggestion");
+        li.innerHTML = `<span>${countryFlag(l[2])} ${hilite(l[0], nq)}</span><small>${esc(t.league)}</small>`;
+      } else {
+        const c = DB.clubs[id];
+        li.innerHTML = `<span>${countryFlag(c[1])} ${hilite(c[0], nq)}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
+      }
     } else {
       li.innerHTML = playerRow(id, nq);
       li.classList.add("two");
@@ -1096,7 +1230,10 @@ function renderSuggestions(ids, q = "") {
   });
   if (ids.length) moveCursor([...sugg.children], 0);
 }
-const addSel = (id) => mode === "club" ? addClub(id) : addPlayer(id);
+const addSel = (id) => mode === "club"
+  ? (isCountryToken(id) ? addCountry(countryFromToken(id))
+    : isLeagueToken(id) ? addLeague(leagueIdFromToken(id)) : addClub(id))
+  : addPlayer(id);
 
 function leagueNames(mask) {
   return DB.leagues.filter((_, i) => mask & (1 << i)).map(l => l[0]).join(" · ");
@@ -1120,7 +1257,11 @@ search.addEventListener("keydown", (e) => {
     e.preventDefault();  // Tab confirms like Enter instead of leaving the field
     addSel(suggIds[cursor]);  // the rendered list, not a second run of the search
   } else if (e.key === "Backspace" && !search.value) {
-    if (mode === "club" && clubIds.length) removeClub(clubIds[clubIds.length - 1]);
+    if (mode === "club" && (clubIds.length || leagueIds.length || countryIds.length)) {
+      if (countryIds.length) removeCountry(countryIds[countryIds.length - 1]);
+      else if (leagueIds.length) removeLeague(leagueIds[leagueIds.length - 1]);
+      else removeClub(clubIds[clubIds.length - 1]);
+    }
     else if (mode === "player" && playerIds.length) removePlayer(playerIds[playerIds.length - 1]);
   } else if (e.key === "Escape") { suggOpen(false); }
 });
@@ -1156,18 +1297,19 @@ addEventListener("keydown", (e) => {
   search.select();
 });
 
-// A club-QID hash arriving in a tab that is already open — a pasted link, or Back
+// A solver selection hash arriving in a tab that is already open — a pasted link, or Back
 // after following one — used to sit there until a reload: quiz.js listens for its own
-// #quiz and nothing listened for the solver's. (Our own syncHash uses replaceState,
+// #quiz and nothing listened for the solver's selection hash. (Our own syncHash uses replaceState,
 // which fires nothing, so this cannot loop.)
 addEventListener("hashchange", () => {
   if (!DB || location.hash === "#quiz" || document.body.classList.contains("quiz")) return;
   requiredPackIds = missingPacksForHash();
   renderPacks();
   if (requiredPackIds.length && !$("about").open) $("about").showModal();
-  const ids = location.hash.slice(1).split(",").map(q => DB.byQid.get(q)).filter(i => i !== undefined);
-  if (ids.join() === clubIds.join()) return;
-  clubIds = ids;
+  const parsed = parseSelectionHash();
+  if (parsed.clubs.join() === clubIds.join() && parsed.leagues.join() === leagueIds.join()
+      && parsed.countries.join() === countryIds.join()) return;
+  clubIds = parsed.clubs; leagueIds = parsed.leagues; countryIds = parsed.countries;
   if (mode !== "club") setMode("club");
   else { renderChips(); solve(); }
 });
@@ -1220,26 +1362,52 @@ function brItem(ul, html, cls, pick, hoverToo) {
     if (hoverToo && canHover) el.onmouseenter = pick;
   }
   ul.appendChild(el);
+  return el;
+}
+
+function brSplitItem(ul, html, active, pick, added, addLabel, add) {
+  const li = document.createElement("li");
+  li.className = "br-split";
+  const main = document.createElement("button");
+  main.type = "button";
+  main.className = `br-main${active ? " active" : ""}`;
+  main.innerHTML = html;
+  main.onclick = (e) => { e.stopPropagation(); pick(); };
+  const choose = document.createElement("button");
+  choose.type = "button";
+  choose.className = "br-add";
+  choose.textContent = added ? "✓" : "+";
+  choose.setAttribute("aria-label", addLabel);
+  choose.title = addLabel;
+  choose.disabled = added;
+  choose.onclick = (e) => { e.stopPropagation(); add(); };
+  li.append(main, choose);
+  ul.appendChild(li);
 }
 
 function renderBrowse() {
   const [ulC, ulL, ulT] = browse.querySelectorAll("ul");
   ulC.innerHTML = ulL.innerHTML = ulT.innerHTML = "";
   const ccs = [...new Set(DB.leagues.map(l => l[2]))];
-  for (const cc of ccs)
-    brItem(ulC, `<span>${countryFlag(cc)} ${esc(countryName(cc))}</span><span class="arr">›</span>`,
-           cc === brCC ? "active" : "",
-           () => { if (brCC !== cc) { brCC = cc; brLG = null; renderBrowse(); } }, true);
+  for (const cc of ccs) {
+    const added = countryIds.includes(cc), name = countryName(cc);
+    brSplitItem(ulC, `<span>${countryFlag(cc)} ${esc(name)}</span><span class="arr">›</span>`,
+      cc === brCC, () => { if (brCC !== cc) { brCC = cc; brLG = null; renderBrowse(); } },
+      added, added ? `${t.country}: ${name}` : `${t.addCountry}: ${name}`,
+      () => { addCountry(cc); browseOpen(false); });
+  }
   if ((CORE_DB?.packs || []).length) {
     const label = enabledPackIds().size ? t.manageLeagues : t.addLeagues;
-    brItem(ulC, `<span>＋ ${esc(label)}</span>`, "packlink", () => openLeagueSettings(true));
+    brItem(ulC, `<span>${esc(label)}</span>`, "packlink", () => openLeagueSettings(true));
   }
   if (brCC !== null) {
     DB.leagues.forEach((l, i) => {
       if (l[2] !== brCC) return;
-      brItem(ulL, `<span>${esc(l[0])}</span><span class="arr">›</span>`,
-             i === brLG ? "active" : "",
-             () => { if (brLG !== i) { brLG = i; renderBrowse(); } }, true);
+      const added = leagueIds.includes(i);
+      brSplitItem(ulL, `<span>${esc(l[0])}</span><span class="arr">›</span>`,
+        i === brLG, () => { if (brLG !== i) { brLG = i; renderBrowse(); } },
+        added, added ? `${t.league}: ${l[0]}` : `${t.addLeague}: ${l[0]}`,
+        () => { addLeague(i); browseOpen(false); });
     });
     brItem(ulL, `<span>${t.others}</span><span class="arr">›</span>`,
            brLG === "x" ? "active" : "",
@@ -1270,10 +1438,43 @@ function renderBrowse() {
 }
 
 // ---------------------------------------------------------------- selection
-// the selection is shareable: club QIDs in the URL hash (stable across dataset rebuilds)
+// The selection is shareable. Clubs use their stable QIDs; leagues use a
+// human-readable, URL-safe key because their array index can move when packs
+// are enabled.
+function leagueHashToken(li) {
+  const l = DB.leagues[li];
+  return "L:" + encodeURIComponent(`${l[0]}|${l[1]}|${l[2]}`);
+}
+function leagueFromHashToken(token) {
+  if (!token.startsWith("L:")) return undefined;
+  let key;
+  try { key = decodeURIComponent(token.slice(2)); } catch { return undefined; }
+  const [name, div, cc] = key.split("|");
+  const n = norm(name || "");
+  return DB.leagues.findIndex(l => norm(l[0]) === n && String(l[1]) === div && l[2] === cc);
+}
+function parseSelectionHash() {
+  const clubs = [], leagues = [], countries = [];
+  const validCountries = new Set(DB.clubs.map(c => c[1]).filter(Boolean));
+  for (const token of location.hash.slice(1).split(",")) {
+    if (!token) continue;
+    if (token.startsWith("L:")) {
+      const li = leagueFromHashToken(token);
+      if (li !== undefined && li >= 0 && !leagues.includes(li)) leagues.push(li);
+    } else if (token.startsWith("C:")) {
+      const cc = countryFromToken(token);
+      if (validCountries.has(cc) && !countries.includes(cc)) countries.push(cc);
+    } else {
+      const ci = DB.byQid.get(token);
+      if (ci !== undefined && !clubs.includes(ci)) clubs.push(ci);
+    }
+  }
+  return { clubs, leagues, countries };
+}
 function syncHash() {
-  const h = clubIds.map(ci => DB.clubs[ci][3]).join(",");
-  history.replaceState(null, "", h ? "#" + h : location.pathname + location.search);
+  const tokens = clubIds.map(ci => DB.clubs[ci][3])
+    .concat(leagueIds.map(leagueHashToken), countryIds.map(countryToken));
+  history.replaceState(null, "", tokens.length ? "#" + tokens.join(",") : location.pathname + location.search);
 }
 function addClub(ci) {
   if (ci === undefined || clubIds.includes(ci)) return;
@@ -1282,8 +1483,30 @@ function addClub(ci) {
   renderChips(); solve(); syncHash();
   focusSearch();   // desktop keeps typing; on touch the keyboard stays down to read the result
 }
+function addLeague(li) {
+  if (li === undefined || li < 0 || leagueIds.includes(li)) return;
+  leagueIds.push(li);
+  search.value = ""; suggOpen(false);
+  renderChips(); solve(); syncHash();
+  focusSearch();
+}
+function addCountry(cc) {
+  if (!cc || countryIds.includes(cc)) return;
+  countryIds.push(cc);
+  search.value = ""; suggOpen(false);
+  renderChips(); solve(); syncHash();
+  focusSearch();
+}
 function removeClub(ci) {
   clubIds = clubIds.filter(x => x !== ci);
+  renderChips(); solve(); syncHash();
+}
+function removeLeague(li) {
+  leagueIds = leagueIds.filter(x => x !== li);
+  renderChips(); solve(); syncHash();
+}
+function removeCountry(cc) {
+  countryIds = countryIds.filter(x => x !== cc);
   renderChips(); solve(); syncHash();
 }
 // player selections aren't hash-synced: player QIDs aren't in the index,
@@ -1300,27 +1523,39 @@ function removePlayer(pid) {
   renderChips(); solve();
 }
 function syncRandomButton() {
-  const sel = mode === "club" ? clubIds : playerIds;
-  $("randbtn").hidden = !sel.length && !search.value.trim();
+  const sel = mode === "club" ? clubIds.length + leagueIds.length + countryIds.length : playerIds.length;
+  $("randbtn").hidden = !sel && !search.value.trim();
 }
 function renderChips() {
   chips.innerHTML = "";
-  const mk = (html, title, onRemove) => {
+  const mk = (html, title, onRemove, kind = "", ariaLabel = "") => {
     const el = document.createElement("span");
-    el.className = "chip";
+    el.className = `chip${kind ? ` ${kind}` : ""}`;
     if (title) el.title = title;
+    if (ariaLabel) { el.setAttribute("role", "group"); el.setAttribute("aria-label", ariaLabel); }
     el.innerHTML = `${html} <button aria-label="${t.remove}">×</button>`;
     el.querySelector("button").onclick = onRemove;
     chips.appendChild(el);
   };
-  if (mode === "club") clubIds.forEach(ci => {
-    const c = DB.clubs[ci];  // chips show the short FM-style name; full name in search + careers
-    mk(`${countryFlag(c[1])} ${esc(coreClub(c[0]))}${defunct(c)}`, c[0], () => removeClub(ci));
-  });
+  if (mode === "club") {
+    clubIds.forEach(ci => {
+      const c = DB.clubs[ci];  // chips show the short FM-style name; full name in search + careers
+      mk(`${countryFlag(c[1])} ${esc(coreClub(c[0]))}${defunct(c)}`, c[0], () => removeClub(ci));
+    });
+    leagueIds.forEach(li => {
+      const l = DB.leagues[li];
+      mk(`${countryFlag(l[2])} ${esc(l[0])}`, `${t.league}: ${l[0]}`, () => removeLeague(li),
+         "league-chip", `${t.league}: ${l[0]}`);
+    });
+    countryIds.forEach(cc => {
+      mk(`${countryFlag(cc)} ${esc(countryName(cc))}`, `${t.country}: ${countryName(cc)}`,
+         () => removeCountry(cc), "country-chip", `${t.country}: ${countryName(cc)}`);
+    });
+  }
   else playerIds.forEach(pid =>  // birth year confirms which homonym was picked
     mk(`${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}`,
        "", () => removePlayer(pid)));
-  const sel = mode === "club" ? clubIds : playerIds;
+  const sel = mode === "club" ? clubIds.concat(leagueIds, countryIds) : playerIds;
   syncRandomButton();
   if (sel.length >= 2) {  // clear-all rides the chip row; one chip has its own × already
     const b = document.createElement("button");
@@ -1328,7 +1563,7 @@ function renderChips() {
     b.className = "clearchip";
     b.textContent = `✕ ${t.clearAll}`;
     b.onclick = () => {
-      if (mode === "club") { clubIds = []; syncHash(); } else playerIds = [];
+      if (mode === "club") { clubIds = []; leagueIds = []; countryIds = []; syncHash(); } else playerIds = [];
       renderChips(); solve();
       focusSearch();
     };
@@ -1376,7 +1611,7 @@ function renderExamples() {
     b.className = "example-action";
     b.textContent = (mode === "club" ? sample.map(i => coreClub(DB.clubs[i][0])) : sample.map(i => DB.names[i])).join(" × ");
     b.onclick = () => {
-      if (mode === "club") { clubIds = sample; syncHash(); }
+      if (mode === "club") { clubIds = sample; leagueIds = []; countryIds = []; syncHash(); }
       else playerIds = sample;
       renderChips(); solve(); focusSearch();
     };
@@ -1503,6 +1738,8 @@ async function runRandom(m) {
       pick = draw(pool, n);
     }
     clubIds = pick;
+    leagueIds = [];
+    countryIds = [];
     syncHash();
   } else {
     const g = ++rollGen;
@@ -1536,7 +1773,10 @@ function solve() {
   if (mode === "player") return solvePlayers();
   syncSort();  // the row is shared with the team-mates list: take it back
   clearResults();
-  if (clubIds.length === 0) {  // no nagging: the stats line + dice nudge are the empty state
+  const constraintClubs = clubIds.map(ci => [ci])
+    .concat(leagueIds.map(leagueClubs), countryIds.map(countryClubs));
+  const constraints = clubIds.map(postings).concat(leagueIds.map(leaguePostings), countryIds.map(countryPostings));
+  if (constraints.length === 0) {  // no nagging: the stats line + dice nudge are the empty state
     controlsRow.hidden = true; advBody.hidden = true;
     status.textContent = t.stats(DB.names.length, DB.clubs.length);
     natCounts.clear(); renderNats(); renderExamples();
@@ -1544,27 +1784,46 @@ function solve() {
   }
   controlsRow.hidden = false;
   const t0 = performance.now();
-  const common = intersect(clubIds.map(postings));
+  const common = intersect(constraints);
   const commonSet = new Set(common);
-  // combined apps/goals across the selected clubs (-1 in DB = unknown; absent from map = all unknown)
-  const appsOf = new Map(), goalsOf = new Map(), zero = new Set(), gKnown = new Map();
-  for (const ci of clubIds) {
+  // A league contributes every club currently assigned to it. Dedupe clubs when
+  // a selected club is also covered by a selected league.
+  const statClubs = new Set(constraintClubs.flat());
+  const constraintsByClub = new Map();
+  constraintClubs.forEach((clubs, k) => clubs.forEach(ci => {
+    const owners = constraintsByClub.get(ci) || [];
+    owners.push(k); constraintsByClub.set(ci, owners);
+  }));
+  // combined apps/goals across the selected constraints (-1 in DB = unknown;
+  // absent from map = all unknown)
+  const appsOf = new Map(), goalsOf = new Map();
+  const constraintApps = constraintClubs.map(() => new Map());
+  const constraintGoals = constraintClubs.map(() => new Map());
+  const unknownGoals = constraintClubs.map(() => new Set());
+  for (const ci of statClubs) {
     const arr = postings(ci), apps = DB.apps[ci], goals = DB.goals?.[ci] || [];
+    const owners = constraintsByClub.get(ci);
     for (let i = 0; i < arr.length; i++) {
       const p = arr[i];
       if (!commonSet.has(p)) continue;
-      if (apps[i] >= 0) appsOf.set(p, (appsOf.get(p) || 0) + apps[i]);
-      if (apps[i] === 0) zero.add(p);
+      if (apps[i] >= 0) {
+        appsOf.set(p, (appsOf.get(p) || 0) + apps[i]);
+        for (const k of owners) constraintApps[k].set(p, (constraintApps[k].get(p) || 0) + apps[i]);
+      }
       if (goals[i] >= 0 && !DB.gkSet.has(p)) {
         goalsOf.set(p, (goalsOf.get(p) || 0) + goals[i]);
-        gKnown.set(p, (gKnown.get(p) || 0) + 1);
-      }
+        for (const k of owners) constraintGoals[k].set(p, (constraintGoals[k].get(p) || 0) + goals[i]);
+      } else if (!DB.gkSet.has(p)) for (const k of owners) unknownGoals[k].add(p);
     }
   }
-  // 0 goals is only shown when known at every selected club
-  const zeroGoals = new Set([...gKnown].filter(([p, k]) => k === clubIds.length && !goalsOf.get(p)).map(([p]) => p));
+  const zero = new Set();
+  for (const known of constraintApps)
+    for (const [p, apps] of known) if (apps === 0) zero.add(p);
+  // Show zero goals only when every posting relevant to every constraint is known.
+  const zeroGoals = new Set(common.filter(p => !DB.gkSet.has(p) && !goalsOf.get(p)
+    && constraintGoals.every((known, k) => known.has(p) && !unknownGoals[k].has(p))));
   let ids = common;
-  if (noZero.checked) ids = ids.filter(p => !zero.has(p));  // known 0 apps at a selected club
+  if (noZero.checked) ids = ids.filter(p => !zero.has(p));  // known 0 apps in a selected constraint
   const yf = +byFrom.value || 0, yt = +byTo.value || 0;
   if (yf || yt)  // a set bound excludes unknown birth years
     ids = ids.filter(p => { const b = DB.births[p]; return b && (!yf || b >= yf) && (!yt || b <= yt); });
@@ -1582,19 +1841,19 @@ function solve() {
   ids.sort((a, b) => sortDir * (key(a) - key(b)) || DB.names[a].localeCompare(DB.names[b]));
   const ms = performance.now() - t0;
   status.innerHTML = t.found(ids.length, ms.toFixed(1))
-    + (ids.length && clubIds.length > 1 ? ` <span class="comb">(${t.combNote})</span>` : "");
+    + (ids.length && constraints.length > 1 ? ` <span class="comb">(${t.combNote})</span>` : "");
   status.appendChild(linkBtn());
   if (ids.length === 0) {  // a dead end still deserves a way forward
     const li = document.createElement("li");
     li.className = "empty";
-    li.textContent = clubIds.length > 1 && common.length === 0 ? t.noneCommon : t.noneFilter;
+    li.textContent = constraints.length > 1 && common.length === 0 ? t.noneCommon : t.noneFilter;
     results.appendChild(li);
   }
   renderResults(ids, appsOf, goalsOf, zeroGoals);
 }
 
 // ---------------------------------------------------------------- share
-// The club selection has always been in the URL hash (syncHash), but nothing on
+// The solver selection has always been in the URL hash (syncHash), but nothing on
 // the page said so, and on a phone copying the address bar is a chore. Sits at the
 // right of the status row, where player mode keeps its "dettagli" switch.
 const SHARE_PARAMS = ["sort", "dir", "from", "to", "nozero", "exclude"];
@@ -1777,7 +2036,7 @@ async function solvePlayers() {
       if (st) li.innerHTML += `<div class="crow tcrow"><span class="cteam"><small class="cst">(${t.comb(a != null)}) ${st}</small></span></div>`;
     }
     if (c)  // covered club: click through to club mode, showing its full roster
-      li.querySelector(".cname").onclick = () => { clubIds = [ci]; syncHash(); setMode("club"); };
+      li.querySelector(".cname").onclick = () => { clubIds = [ci]; leagueIds = []; countryIds = []; syncHash(); setMode("club"); };
     frag.appendChild(li);
   }
   results.appendChild(frag);
@@ -2429,8 +2688,9 @@ async function toggleCareer(li, pid) {
   // club mode highlights the selected clubs, player mode the shared ones — and a row
   // that carries its own set (a team-mate, whose common ground is with the player
   // above rather than with the selection) highlights that
-  const selNames = li.hitNames
-    || (mode === "club" ? new Set(clubIds.map(ci => DB.clubs[ci][0])) : sharedNames);
+  const selNames = li.hitNames || (mode === "club"
+    ? new Set(clubIds.concat(leagueIds.flatMap(leagueClubs), countryIds.flatMap(countryClubs)).map(ci => DB.clubs[ci][0]))
+    : sharedNames);
   const gk = DB.gkSet.has(pid);  // goalkeeper goal counts are unreliable, show apps only
   const div = document.createElement("div");
   div.className = "career";

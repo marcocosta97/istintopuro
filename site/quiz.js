@@ -929,6 +929,8 @@ function qCalPick(ds) {
 // end-screen click-through: load the matchup in club mode, quiz stays finished
 function qOpenSolver(clubs) {
   clubIds = clubs.slice();
+  leagueIds = [];
+  countryIds = [];
   syncHash();
   qExit();
   if (mode !== "club") setMode("club");  // setMode re-renders for the new selection
@@ -970,11 +972,11 @@ function qExit() {
   qConfirm = null; qLeaveMode = null;
   document.body.classList.remove("quiz");
   $("tagline").textContent = mode === "club" ? t.tagline : t.taglineP;  // restore solver tagline
-  syncHash();  // drop #quiz, restore the solver's club-QID hash (or a clean URL)
+  syncHash();  // drop #quiz, restore the solver's selection hash (or a clean URL)
   $("mode-quiz").setAttribute("aria-pressed", "false");
   $("mode-club").setAttribute("aria-pressed", mode === "club");
   $("mode-player").setAttribute("aria-pressed", mode === "player");
-  if ((mode === "club" ? clubIds : playerIds).length === 0) solve();
+  if ((mode === "club" ? clubIds.length + leagueIds.length + countryIds.length : playerIds.length) === 0) solve();
 }
 // a run in progress (some guess or hint spent) is worth confirming before a
 // switch abandons it; a fresh or finished board leaves freely. Capture phase
@@ -1023,9 +1025,9 @@ document.addEventListener("dbready", () => {
 addEventListener("hashchange", () => {
   if (location.hash === "#quiz") { qEnter(); return; }        // qEnter no-ops before DB is ready
   if (!document.body.classList.contains("quiz")) return;      // a hash change unrelated to the quiz
-  // left #quiz for a club-QID hash (or none): adopt that selection, then qExit's
+  // left #quiz for a solver selection hash (or none): adopt that selection, then qExit's
   // syncHash writes it straight back instead of clobbering it with the old clubs
-  clubIds = location.hash.slice(1).split(",").map(q => DB.byQid.get(q)).filter(i => i !== undefined);
+  ({ clubs: clubIds, leagues: leagueIds, countries: countryIds } = parseSelectionHash());
   qExit();
   if (mode === "club") { renderChips(); solve(); }
 });
