@@ -104,9 +104,10 @@ jobs:
             git push origin HEAD:master
           fi
 
-      # code assets are unchanged by a data refresh, so reuse the trigger SHA
+      # A refresh commit changes the positional index and shards together. Stamp the
+      # deployed HEAD so an older cached index can never address the refreshed shards.
       - name: Stamp asset version
-        run: sed -i "s/__V__/${GITHUB_SHA}/g" site/index.html
+        run: sed -i "s/__V__/$(git rev-parse HEAD)/g" site/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
