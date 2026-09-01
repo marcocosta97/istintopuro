@@ -812,7 +812,7 @@ function qRenderEnd() {
     <div class="qmeta">${esc(line)}</div>`;
   if (!qs.won) {  // reveal the stage that ended the run, most recognisable first
     const stg = qPz.stages[qs.stage];
-    const byFame = [...stg.answers].sort((a, b) => qFame(b, stg.clubs) - qFame(a, stg.clubs));
+    const byFame = qRanked(stg);
     html += `<div class="qreveal"><b>${q.qReveal(stg.answers.length)}</b>`
       + byFame.slice(0, 10).map(p => `<button type="button" class="qrp" data-p="${p}">${esc(DB.names[p])}</button>`).join(", ")
       + (byFame.length > 10 ? ` <button type="button" class="qrmore" data-s="${qs.stage}">${q.qOthers(byFame.length - 10)}</button>` : "")

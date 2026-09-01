@@ -21,6 +21,12 @@
   const QCOMBO_DAYS = 30;
   const QMAX_ATTEMPTS = 64;
   const Q3ODDS = 0.5;
+  const QBRIDGE_FULL_APPS = 25;
+  const QBRIDGE_FLOOR = 0.5;
+  const QBREADTH_MIN_FAME = 150;
+  const QBREADTH_FULL_FAME = 350;
+  const QFACE_GUARD_DAYS = 14;
+  const QCLUB_SOFT_DAYS = 7;
   const QEASY = [
     { p: ["star", "field"], size: [2, 1e9], ease: [545, 1e9] },
     { p: ["star", "field"], size: [2, 1e9], ease: [505, 1e9] },
@@ -150,19 +156,42 @@
         if (g > 0) { goals += weight * g; if (mq) mGoals -= weight * g; }
       }
       const birth = DB.births[pid], age = birth ? DB.qYear - birth : 99;
+      const appWeight = DB.gkSet.has(pid) ? 1 : 0.75;
       const rec = qRecBonus(age) * Math.min(1, (apps || 12) / 25);
-      const career = 0.75 * Math.min(Math.max(mApps, 0), 260) + 3 * Math.min(Math.max(mGoals, 0), 70);
-      return rec + qEra(birth) * (0.75 * Math.min(apps, 260) + 3 * Math.min(goals, 70) + 0.4 * career)
+      const career = appWeight * Math.min(Math.max(mApps, 0), 260) + 3 * Math.min(Math.max(mGoals, 0), 70);
+      return rec + qEra(birth) * (appWeight * Math.min(apps, 260) + 3 * Math.min(goals, 70) + 0.4 * career)
         + (DB.imgs[pid] ? 20 : 0);
     }
+    // General fame does not make a short, forgotten spell easy to recall. Scale it
+    // by the weakest documented link in the intersection; unknown historical totals
+    // stay neutral because missing statistics are not evidence of a cameo.
+    function qBridgeFame(pid, clubs) {
+      const knownApps = clubs.map(ci => qApps(ci, pid)).filter(n => n >= 0);
+      if (!knownApps.length) return qFame(pid, clubs);
+      const weakest = Math.min(...knownApps);
+      const confidence = QBRIDGE_FLOOR + (1 - QBRIDGE_FLOOR)
+        * Math.sqrt(Math.min(weakest, QBRIDGE_FULL_APPS) / QBRIDGE_FULL_APPS);
+      return qFame(pid, clubs) * confidence;
+    }
+    const qRecognitionWeight = (fame) => Math.max(0,
+      Math.min((fame - QBREADTH_MIN_FAME) / (QBREADTH_FULL_FAME - QBREADTH_MIN_FAME), 1));
+    const qUsableName = (pid) => {
+      const name = DB.names[pid] || "";
+      return !!name && !/^[a-z][a-z0-9_.-]{2,}$/.test(name);
+    };
+    const qRecognisableBreadth = (clubs, answers) => answers.reduce((sum, pid) =>
+      sum + (qUsableName(pid) ? qRecognitionWeight(qBridgeFame(pid, clubs)) : 0), 0);
     const qLeagueEase = (ci) => {
       const cc = leagueCC(ci);
       return cc === "DE" || cc === "FR" ? 0.93 : 1;
     };
     function qEase(clubs, answers) {
       const top = [0, 0, 0, 0];
+      let breadth = 0;
       for (const pid of answers) {
-        let fame = qFame(pid, clubs);
+        if (!qUsableName(pid)) continue;
+        let fame = qBridgeFame(pid, clubs);
+        breadth += qRecognitionWeight(fame);
         for (let k = 0; k < 4 && fame; k++) if (fame > top[k]) {
           const old = top[k]; top[k] = fame; fame = old;
         }
@@ -170,7 +199,7 @@
       const support = (fame) => Math.max(fame - 250, 0);
       const f0 = top[0], f1 = top[1];
       let ease = f0 + 0.3 * support(f1) + 0.18 * support(top[2]) + 0.1 * support(top[3])
-        + Math.min(answers.length, 25) * 2;
+        + breadth * 2;
       const ratio = clubs.filter(ci => marquee.has(DB.clubs[ci][3])).length / clubs.length;
       if (ratio < 1 && f1 < 430)
         ease -= Math.min((430 - f1) * 1.5, 150) * Math.min((1 - ratio) * 2, 1);
@@ -196,14 +225,17 @@
       let info = comboCache.get(key);
       if (!info) {
         const effective = qEffective(clubs, intersect(clubs.map(postings)));
-        info = { n: effective.length, ease: qEase(clubs, effective), b: !!(effective.length && DB.births[effective[0]]) };
+        const face = qRanked({ clubs, answers: effective, effective })[0] ?? -1;
+        info = { n: effective.length, ease: qEase(clubs, effective), face,
+          b: face >= 0 && !!DB.births[face], named: face >= 0 && qUsableName(face) };
         comboCache.set(key, info);
       }
       return info;
     }
     function qRanked(stage) {
       const answers = stage.effective || stage.answers;
-      return answers.slice().sort((a, b) => qFame(b, stage.clubs) - qFame(a, stage.clubs) || a - b);
+      return answers.slice().sort((a, b) => Number(qUsableName(b)) - Number(qUsableName(a))
+        || qBridgeFame(b, stage.clubs) - qBridgeFame(a, stage.clubs) || a - b);
     }
     const qFace = (stage) => qRanked(stage)[0] ?? -1;
     const answerMatches = (pid, answers) => {
@@ -292,29 +324,32 @@
       }
       return countries.at(-1);
     }
-    function chooseCountryFirst(candidates, rng, used) {
-      const byCountry = {};
-      for (const candidate of candidates.values()) {
-        const country = countryStratum(candidate.clubs[0]);
-        const club = candidate.clubs[0];
-        ((byCountry[country] ??= {})[club] ??= []).push(candidate);
-      }
-      const allCountries = Object.keys(byCountry).sort();
-      const countries = allCountries.some(country => country !== "other")
-        ? allCountries.filter(country => country !== "other") : allCountries;
-      if (!countries.length) return null;
-      const country = chooseWeightedCountry(countries, key => Object.keys(byCountry[key]).length, rng);
-      const clubs = Object.keys(byCountry[country]).map(Number).sort((a, b) => a - b);
-      const club = clubs[rng() * clubs.length | 0];
-      const choices = byCountry[country][club].sort((a, b) => {
+    function chooseBalanced(candidates, rng, used, usedFaces, clubUse, countryUse) {
+      const choices = [...candidates.values()].sort((a, b) => {
         for (let i = 0; i < Math.max(a.clubs.length, b.clubs.length); i++) {
           const d = (a.clubs[i] ?? -1) - (b.clubs[i] ?? -1);
           if (d) return d;
         }
         return 0;
       });
-      const chosen = choices[rng() * choices.length | 0];
-      chosen.clubs.forEach(ci => used.add(ci));
+      const weights = choices.map(candidate => {
+        const clubPressure = candidate.clubs.reduce((sum, ci) => sum + (clubUse.get(ci) || 0), 0);
+        const countryPressure = candidate.clubs.reduce((sum, ci) =>
+          sum + (countryUse.get(countryStratum(ci)) || 0), 0) / candidate.clubs.length;
+        return 1 / ((1 + 2 * clubPressure) * Math.pow(1 + countryPressure, 2));
+      });
+      const total = weights.reduce((sum, weight) => sum + weight, 0);
+      let draw = rng() * total, chosen = choices.at(-1);
+      for (let i = 0; i < choices.length; i++) {
+        draw -= weights[i];
+        if (draw < 0) { chosen = choices[i]; break; }
+      }
+      chosen.clubs.forEach(ci => {
+        used.add(ci);
+        const country = countryStratum(ci);
+        countryUse.set(country, (countryUse.get(country) || 0) + 1);
+      });
+      usedFaces.add(chosen.face);
       return chosen;
     }
     function drawClubCountryFirst(pool, rng) {
@@ -330,7 +365,7 @@
       const clubs = byCountry[country].sort((a, b) => a - b);
       return clubs[rng() * clubs.length | 0];
     }
-    function buildStage(rng, ladder, used, banned, allowFallback) {
+    function buildStage(rng, ladder, used, usedFaces, banned, clubUse, countryUse, allowFallback) {
       const pools = qPools();
       for (let tierIndex = 0; tierIndex < ladder.length; tierIndex++) {
         const tier = ladder[tierIndex];
@@ -343,13 +378,14 @@
           const key = qComboKey(clubs);
           if (banned.has(key)) continue;
           const info = qComboInfo(clubs);
+          if (!info.named || usedFaces.has(info.face)) continue;
           if (info.n < tier.size[0] || info.n > tier.size[1]) continue;
           if (tier.birth && !info.b) continue;
           if (tier.ease && (info.ease < tier.ease[0] || info.ease >= tier.ease[1])) continue;
-          candidates.set(key, { clubs, tier: tierIndex });
+          candidates.set(key, { clubs, tier: tierIndex, face: info.face });
         }
         if (candidates.size) {
-          const stage = chooseCountryFirst(candidates, rng, used);
+          const stage = chooseBalanced(candidates, rng, used, usedFaces, clubUse, countryUse);
           const effective = qEffective(stage.clubs, intersect(stage.clubs.map(postings)));
           return { ...stage, answers: effective, effective, ease: qEase(stage.clubs, effective), fallback: false };
         }
@@ -368,7 +404,14 @@
       for (const clubs of pairs) {
         const effective = qEffective(clubs, intersect(clubs.map(postings)));
         if (!effective.length) continue;
-        clubs.forEach(ci => used.add(ci));
+        const face = qFace({ clubs, answers: effective, effective });
+        if (!qUsableName(face) || usedFaces.has(face)) continue;
+        clubs.forEach(ci => {
+          used.add(ci);
+          const country = countryStratum(ci);
+          countryUse.set(country, (countryUse.get(country) || 0) + 1);
+        });
+        usedFaces.add(face);
         return { clubs, answers: effective, effective, ease: qEase(clubs, effective), tier: -1, fallback: true };
       }
       return null;
@@ -387,23 +430,36 @@
       })).sort((a, b) => a.date.localeCompare(b.date));
     }
     function guardsFor(date, previousDays) {
-      const banned = new Set(), recentClubs = new Set();
+      const banned = new Set(), recentClubs = new Set(), recentFaces = new Set();
+      const clubUse = new Map(), countryUse = new Map();
       for (const day of normalizePrevious(previousDays)) {
         const age = qNum(date) - qNum(day.date);
         if (age < 1 || age > QCOMBO_DAYS) continue;
         for (const clubs of day.stages) {
           banned.add(qComboKey(clubs));
-          if (age <= 2) clubs.forEach(ci => recentClubs.add(ci));
+          for (const ci of clubs) {
+            if (age <= 2) recentClubs.add(ci);
+            if (age <= QCLUB_SOFT_DAYS)
+              clubUse.set(ci, (clubUse.get(ci) || 0) + QCLUB_SOFT_DAYS - age + 1);
+            const country = countryStratum(ci);
+            countryUse.set(country, (countryUse.get(country) || 0) + 1);
+          }
+          if (age <= QFACE_GUARD_DAYS) {
+            const face = qComboInfo(clubs).face;
+            if (face >= 0) recentFaces.add(face);
+          }
         }
       }
-      return { banned, recentClubs };
+      return { banned, recentClubs, recentFaces, clubUse, countryUse };
     }
     const ordered = (stages) => stages.every((stage, i) => !i || stages[i - 1].ease > stage.ease);
     function attemptSlate(date, attempt, previousDays, allowFallback) {
       const rng = qRng(qHash(`${date}:${attempt}`));
-      const { banned, recentClubs } = guardsFor(date, previousDays);
+      const { banned, recentClubs, recentFaces, clubUse, countryUse } = guardsFor(date, previousDays);
       const used = new Set(recentClubs);
-      const stages = qLadders(rng).map(ladder => buildStage(rng, ladder, used, banned, allowFallback));
+      const usedFaces = new Set(recentFaces);
+      const stages = qLadders(rng).map(ladder =>
+        buildStage(rng, ladder, used, usedFaces, banned, clubUse, countryUse, allowFallback));
       return stages.every(Boolean) ? stages : null;
     }
     function generate(date, options = {}) {
@@ -443,8 +499,10 @@
         clubs: stage.clubs.slice(),
         qids: stage.clubs.map(ci => DB.clubs[ci][3]),
         country: leagueCC(stage.clubs[0]),
+        countries: stage.clubs.map(countryStratum),
         effectiveAnswers: effectiveAnswers.slice(),
         effectiveCount: effectiveAnswers.length,
+        recognisableBreadth: qRecognisableBreadth(stage.clubs, effectiveAnswers),
         ease: stage.ease ?? qEase(stage.clubs, effectiveAnswers),
         face: qFace({ clubs: stage.clubs, answers: effectiveAnswers, effective: effectiveAnswers }),
         tier: stage.tier ?? null,
@@ -460,11 +518,14 @@
         if (options.requireOrder !== false && !ordered(stages)) errors.push("stage ease is not strictly descending");
         const date = options.date;
         if (date) {
-          const { banned, recentClubs } = guardsFor(date, options.previousDays || options.previous || []);
+          const { banned, recentClubs, recentFaces } = guardsFor(date, options.previousDays || options.previous || []);
           for (const stage of stages) {
             if (banned.has(qComboKey(stage.clubs)))
               errors.push(`combination repeats within ${QCOMBO_DAYS} days: ${qComboKey(stage.clubs)}`);
             if (stage.clubs.some(ci => recentClubs.has(ci))) errors.push("club repeats within 2 days");
+            const face = qFace(stage);
+            if (!qUsableName(face)) errors.push("representative answer has an unusable player name");
+            if (recentFaces.has(face)) errors.push(`representative answer repeats within ${QFACE_GUARD_DAYS} days`);
           }
         }
       }
@@ -474,13 +535,15 @@
     return {
       generate, qGen: generate, generateSlate: generate,
       validateEntry, validateScheduleEntry: validateEntry, stagesFromQids, serializeStages, stageDiagnostics,
-      qHash, qRng, qNum, qShift, qPools, qApps, qGoals, appearanceGaps, qFame, qEase,
+      qHash, qRng, qNum, qShift, qPools, qApps, qGoals, appearanceGaps, qFame, qBridgeFame,
+      qRecognitionWeight, qRecognisableBreadth, qUsableName, qEase,
       qEffective, effectiveAnswers: qEffective, qComboInfo, qComboKey, qRanked, rankedAnswers: qRanked,
       qFace, face: qFace, playerIdentity, answerMatches, nextHintTarget, migrateState, restoreHistoryState,
       careerCacheKey, careerViewKey, clubCountry: leagueCC,
       resetCaches: () => comboCache.clear(),
       constants: { QEPOCH, QT, QWIN, QCOMBO_DAYS, QMAX_ATTEMPTS, Q3ODDS,
-        QEASY, QMEDIUM, QHARD, QIMPOSSIBLE, QHARD3, QIMP3 },
+        QBRIDGE_FULL_APPS, QBRIDGE_FLOOR, QBREADTH_MIN_FAME, QBREADTH_FULL_FAME,
+        QFACE_GUARD_DAYS, QCLUB_SOFT_DAYS, QEASY, QMEDIUM, QHARD, QIMPOSSIBLE, QHARD3, QIMP3 },
     };
   }
 

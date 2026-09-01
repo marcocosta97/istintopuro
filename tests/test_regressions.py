@@ -13,6 +13,10 @@ SPEC.loader.exec_module(PIPELINE)
 
 
 class WikipediaOverlayTests(unittest.TestCase):
+    def test_common_name_replaces_handle_like_wikidata_vandalism(self):
+        self.assertEqual(PIPELINE.common_name("elpisha", "Joaquín (footballer, born 1981)"), "Joaquín")
+        self.assertEqual(PIPELINE.common_name("Nolito", "Nolito"), "Nolito")
+
     def test_infobox_excludes_youth_clubs_from_the_senior_career(self):
         text = """{{Infobox football biography
             | youthclubs1 = [[Udinese Calcio|Udinese]]

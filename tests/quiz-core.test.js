@@ -82,6 +82,54 @@ test("effective answers remove every known zero-appearance registration", () => 
   assert.equal(core.appearanceGaps(registeredOnly, stage.clubs).zero.length > 0, true);
 });
 
+test("bridge recognisability penalizes cameos without penalizing unknown historical totals", () => {
+  const { DB, core } = runtime();
+  const [dortmundSociedad] = core.stagesFromQids([["Q41420", "Q10315"]]);
+  const weakestLinks = dortmundSociedad.answers.map(pid =>
+    Math.min(...dortmundSociedad.clubs.map(ci => core.qApps(ci, pid))));
+  assert.equal(Math.max(...weakestLinks), 8);
+  assert.equal(dortmundSociedad.ease >= 390 && dortmundSociedad.ease < 425, true);
+  assert.equal(dortmundSociedad.ease < core.constants.QEASY[0].ease[0], true);
+  const isak = dortmundSociedad.answers.find(pid => DB.names[pid] === "Alexander Isak");
+  assert.equal(core.qBridgeFame(isak, dortmundSociedad.clubs) < core.qFame(isak, dortmundSociedad.clubs), true);
+
+  const [celtaSevilla] = core.stagesFromQids([["Q8749", "Q10329"]]);
+  const balbino = celtaSevilla.answers.find(pid => DB.names[pid] === "Balbino Clemente");
+  assert.equal(celtaSevilla.clubs.every(ci => core.qApps(ci, balbino) < 0), true);
+  assert.equal(core.qBridgeFame(balbino, celtaSevilla.clubs), core.qFame(balbino, celtaSevilla.clubs));
+});
+
+test("large intersections earn ease from recognisable breadth rather than raw answer count", () => {
+  const { core } = runtime();
+  const [atalantaJuventus] = core.stagesFromQids([["Q1886", "Q1422"]]);
+  const breadth = core.qRecognisableBreadth(atalantaJuventus.clubs, atalantaJuventus.answers);
+  assert.equal(atalantaJuventus.answers.length, 90);
+  assert.equal(breadth < 15, true);
+  assert.equal(atalantaJuventus.ease >= core.constants.QEASY[0].ease[0], true);
+});
+
+test("handle-like labels cannot become representative answers", () => {
+  const { DB, core } = runtime();
+  const handle = 0, original = DB.names[handle];
+  const named = DB.names.findIndex((name, pid) => pid !== handle && core.qUsableName(pid));
+  try {
+    DB.names[handle] = "elpisha";
+    assert.equal(core.qUsableName(handle), false);
+    assert.equal(core.qRanked({ clubs: [], answers: [handle, named] })[0], named);
+  } finally {
+    DB.names[handle] = original;
+  }
+});
+
+test("combo metadata validates the actual representative", () => {
+  const { DB, core } = runtime();
+  const [stage] = core.stagesFromQids([["Q2052", "Q10333"]]);
+  const info = core.qComboInfo(stage.clubs);
+  assert.equal(info.face, core.qFace(stage));
+  assert.equal(info.b, !!DB.births[info.face]);
+  assert.equal(info.named, core.qUsableName(info.face));
+});
+
 test("guess identity treats indistinguishable PIDs as the same answer", () => {
   const { DB, core } = runtime();
   const seen = new Map();
@@ -108,6 +156,22 @@ test("generation is deterministic, ordered, effective, and honors QID prior cont
   assert.equal(next.stages.every(stage => stage.clubs.every(ci => !yesterday.has(ci))), true);
 });
 
+test("representative answers do not repeat inside the rolling cooldown", () => {
+  const { core } = runtime();
+  const previousDays = [], lastSeen = new Map();
+  for (let day = 0; day < 30; day++) {
+    const date = new Date(Date.UTC(2026, 7, 21 + day)).toISOString().slice(0, 10);
+    const result = core.generate(date, { previousDays: previousDays.slice(-core.constants.QCOMBO_DAYS) });
+    for (const stage of result.stages) {
+      const face = core.qFace(stage), previous = lastSeen.get(face);
+      assert.equal(core.qUsableName(face), true);
+      if (previous !== undefined) assert.equal(day - previous > core.constants.QFACE_GUARD_DAYS, true);
+      lastSeen.set(face, day);
+    }
+    previousDays.push({ date, stages: core.serializeStages(result.stages) });
+  }
+});
+
 test("validation rejects unresolved and repeated clubs", () => {
   const { core } = runtime();
   assert.equal(core.validateEntry([["Q-nope"]]).ok, false);
@@ -125,6 +189,8 @@ test("combination guard treats permutations as equal for 30 days", () => {
   const previousDays = [{ date: SERIES_START, stages: rows }];
   assert.equal(core.constants.QCOMBO_DAYS, 30);
   assert.equal(core.validateEntry(reversed, { date: "2026-09-20", previousDays }).ok, false);
+  const faceGuarded = core.validateEntry(reversed, { date: "2026-08-22", previousDays });
+  assert.equal(faceGuarded.errors.some(error => error.includes("representative answer repeats")), true);
   assert.equal(core.validateEntry(reversed, { date: "2026-09-21", previousDays }).ok, true);
 });
 

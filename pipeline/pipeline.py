@@ -1127,6 +1127,7 @@ def img_key(tail):
     return hashlib.md5(f.encode()).hexdigest()[:2] + f
 
 DISAMB = re.compile(r"\s*\([^()]*\)\s*$")   # "Dodô (footballer, born 1998)"
+HANDLE_NAME = re.compile(r"^[a-z][a-z0-9_.-]{2,}$")
 
 def common_name(label, page):
     """Display name: a Wikidata label is often the LEGAL name where football uses
@@ -1140,6 +1141,7 @@ def common_name(label, page):
     short = DISAMB.sub("", page).strip()
     if not short: return label
     if not label: return short
+    if HANDLE_NAME.fullmatch(label): return short
     return short if len(short.split()) < len(label.split()) else label
 
 def stage_build():
