@@ -29,34 +29,38 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
-      - run: pip install requests==2.32.3
+      - run: python3 -m pip install --retries 10 --timeout 30 requests==2.32.3
 
-      # Only state produced by a code-compatible, fully successful earlier run is
-      # allowed to suppress source fetches. A new pipeline hash starts cold.
-      - uses: actions/cache/restore@v4
+      # Only state produced by a schema-compatible, fully successful earlier run is
+      # allowed to suppress source fetches. Bump v1 with pipeline.CACHE_VERSION.
+      - uses: actions/cache/restore@v6
+        continue-on-error: true
         with:
           path: data/state
-          key: refresh-state-v1-${{ hashFiles('pipeline/pipeline.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: refresh-state-v1-${{ hashFiles('pipeline/pipeline.py') }}-
+          key: refresh-state-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: refresh-state-v1-
 
       # re-runs of a failed job resume its checkpoints; keys are scoped to the
       # run id, so a new weekly run always starts from a clean fetch
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
+        continue-on-error: true
         with:
           path: data
           key: checkpoints-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: checkpoints-${{ github.run_id }}-
 
-      # the validate stage aborts the job (no commit, no deploy) if the new
-      # index is malformed or shrank >3% vs the currently deployed one
+      # the validate stage rejects the candidate if the new index is malformed or
+      # shrank >3% vs the deployed one; the recovery step below retains the baseline
       - name: Refresh dataset from Wikidata + Wikipedia (revision-aware after first run)
+        id: refresh
+        continue-on-error: true
         env:
           FULL_REFRESH: ${{ inputs.full_refresh && '1' || '0' }}
         run: |
@@ -68,18 +72,33 @@ jobs:
           done
           VALIDATE_BASELINE=/tmp/index-baseline.json VALIDATE_PACK_BASELINE_DIR=/tmp/pack-baselines python3 pipeline/pipeline.py
 
+      # Remote APIs and community-edited source data can fail independently of this
+      # repository. Keep the last validated dataset in that case, while leaving the
+      # failed refresh step and a job summary as visible diagnostics.
+      - name: Keep the last validated dataset after a refresh failure
+        if: steps.refresh.outcome == 'failure'
+        run: |
+          git restore --source=HEAD --staged --worktree site/data
+          git clean -fd -- site/data
+          echo "### Weekly data refresh warning" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "The refresh or validation failed. The last validated dataset was retained and deployed; inspect the refresh step log for the upstream error." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Test pipeline and audit quiz schedule
         run: |
           python3 -m unittest discover -s tests
           node --test --test-concurrency=1 tests/packs.test.js tests/quiz-core.test.js tests/quiz-schedule.test.js
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
+        if: steps.refresh.outcome == 'success'
+        continue-on-error: true
         with:
           path: data/state
-          key: refresh-state-v1-${{ hashFiles('pipeline/pipeline.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: refresh-state-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: always()   # keep partial checkpoints even when a stage failed
+        continue-on-error: true
         with:
           path: data
           key: checkpoints-${{ github.run_id }}-${{ github.run_attempt }}
@@ -108,8 +127,8 @@ jobs:
       # deployed HEAD so an older cached index can never address the refreshed shards.
       - name: Stamp asset version
         run: sed -i "s/__V__/$(git rev-parse HEAD)/g" site/index.html
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

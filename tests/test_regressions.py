@@ -12,7 +12,84 @@ PIPELINE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PIPELINE)
 
 
+class ExternalApiTests(unittest.TestCase):
+    class Response:
+        status_code = 200
+        headers = {}
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def test_malformed_retry_after_uses_the_fallback(self):
+        response = self.Response({})
+        response.headers = {"Retry-After": "not a delay"}
+
+        self.assertEqual(PIPELINE.retry_delay(response, 10), 10)
+
+    def test_wikipedia_api_error_is_retried(self):
+        responses = [
+            self.Response({"error": {"code": "maxlag", "info": "Waiting for replicas"}}),
+            self.Response({"query": {"pages": []}}),
+        ]
+        with patch.object(PIPELINE._session, "get", side_effect=responses) as get, \
+                patch.object(PIPELINE.time, "sleep"):
+            result = PIPELINE.wp_get(action="query")
+
+        self.assertEqual(result, {"query": {"pages": []}})
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(get.call_args.kwargs["params"]["maxlag"], 5)
+
+    def test_malformed_wikidata_payload_is_retried(self):
+        responses = [
+            self.Response({"not-results": {}}),
+            self.Response({"results": {"bindings": [{"ok": True}]}}),
+        ]
+        with patch.object(PIPELINE._session, "get", side_effect=responses) as get, \
+                patch.object(PIPELINE.time, "sleep"):
+            result = PIPELINE.sparql("SELECT * WHERE {}")
+
+        self.assertEqual(result, [{"ok": True}])
+        self.assertEqual(get.call_count, 2)
+
+
 class WikipediaOverlayTests(unittest.TestCase):
+    def test_source_year_issue_identifies_future_and_inverted_ranges(self):
+        self.assertEqual(
+            PIPELINE.career_year_issue([["Q1", 2027, None, 0, 0, 0]], 2026),
+            "Q1 has future open spell 2027–",
+        )
+        self.assertEqual(
+            PIPELINE.career_year_issue([["Q1", 2025, 2024, 0, 0, 0]], 2026),
+            "Q1 has 2025–2024",
+        )
+        self.assertIsNone(
+            PIPELINE.career_year_issue([["Q1", 2025, None, 0, 0, 0]], 2026),
+        )
+
+    def test_future_open_spell_is_represented_by_its_start_year(self):
+        self.assertEqual(
+            PIPELINE.spell_end(2027, None, [], built_year=2026, playing=True),
+            (2027, True),
+        )
+
+    def test_invalid_closed_spell_is_collapsed_to_its_start_year(self):
+        self.assertEqual(
+            PIPELINE.spell_end(2025, 2024, [], built_year=2026, playing=True),
+            (2025, True),
+        )
+
+    def test_valid_open_spell_runs_through_the_build_year(self):
+        self.assertEqual(
+            PIPELINE.spell_end(2025, None, [], built_year=2026, playing=True),
+            (2026, False),
+        )
+
     def test_common_name_replaces_handle_like_wikidata_vandalism(self):
         self.assertEqual(PIPELINE.common_name("elpisha", "Joaquín (footballer, born 1981)"), "Joaquín")
         self.assertEqual(PIPELINE.common_name("Nolito", "Nolito"), "Nolito")
@@ -115,6 +192,7 @@ class IncrementalCacheTests(unittest.TestCase):
 
             revisions = {"Player One": 10, "Player Two": 20}
             content_calls = []
+            future_titles = set()
             def fake_wp_get(**params):
                 titles = params["titles"].split("|")
                 pages = []
@@ -123,7 +201,8 @@ class IncrementalCacheTests(unittest.TestCase):
                     if "content" in params["rvprop"]:
                         content_calls.append(title)
                         rev["slots"] = {"main": {"content":
-                            "{{Infobox football biography|years1=2000–2001"
+                            f"{{{{Infobox football biography|years1="
+                            f"{'2027–' if title in future_titles else '2000–2001'}"
                             "|clubs1=[[Club One]]|caps1=1|goals1=0}}"}}
                     pages.append({"title": title, "revisions": [rev]})
                 return {"query": {"pages": pages}}
@@ -139,8 +218,17 @@ class IncrementalCacheTests(unittest.TestCase):
                 revisions["Player Two"] = 21
                 PIPELINE.stage_wp()
 
+                content_calls.clear()
+                future_titles.add("Player Two")
+                revisions["Player Two"] = 22
+                PIPELINE.stage_wp()
+
             self.assertEqual(content_calls, ["Player Two"])
-            self.assertEqual(set(json.loads((data_dir / "wp.json").read_text())), {"Q1", "Q2"})
+            wp = json.loads((data_dir / "wp.json").read_text())
+            state = json.loads((state_dir / "wp.json").read_text())
+            self.assertEqual(set(wp), {"Q1", "Q2"})
+            self.assertEqual(wp["Q2"], [["QC", 2000, 2001, 1, 0, 0]])
+            self.assertEqual(state["source"]["Q2"], "Player Two\0" + "21")
 
     def test_wikidata_warm_run_fetches_only_changed_attributes(self):
         with tempfile.TemporaryDirectory() as td:

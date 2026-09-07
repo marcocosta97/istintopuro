@@ -58,6 +58,7 @@ site/data/packs/<id>/index.json — optional country pack. It has the same club,
   files by club QID, keeping both routes stable when the core dataset changes.
 """
 import hashlib, json, os, re, subprocess, sys, time, gzip
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import unquote
 import requests
@@ -378,18 +379,35 @@ BLOCKLIST = {
 _session = requests.Session()
 _session.headers.update({"User-Agent": UA, "Accept": "application/sparql-results+json"})
 
+def retry_delay(response, fallback):
+    """Parse Retry-After without letting a malformed upstream header abort a run."""
+    value = response.headers.get("Retry-After")
+    try:
+        delay = int(value)
+    except (TypeError, ValueError):
+        try:
+            delay = parsedate_to_datetime(value).timestamp() - time.time()
+        except (TypeError, ValueError, OverflowError):
+            delay = fallback
+    return max(1, min(int(delay), 120))
+
 def sparql(query, tries=5):
     for i in range(tries):
         try:
             r = _session.get(WDQS, params={"query": query}, timeout=90)
             if r.status_code == 429:
-                wait = int(r.headers.get("Retry-After", 10))
-                time.sleep(wait); continue
+                time.sleep(retry_delay(r, 10)); continue
             r.raise_for_status()
+            data = r.json()
+            rows = data.get("results", {}).get("bindings")
+            if not isinstance(rows, list):
+                raise ValueError("Wikidata response has no result bindings")
             time.sleep(0.3)  # politeness
-            return r.json()["results"]["bindings"]
-        except (requests.RequestException, ValueError) as e:
+            return rows
+        except (requests.RequestException, ValueError, TypeError) as e:
             if i == tries - 1: raise
+            print(f"  WARNING: Wikidata request failed (attempt {i + 1}/{tries}): {e}",
+                  flush=True)
             time.sleep(5 * (i + 1))
 
 def v(row, key, default=None):
@@ -434,6 +452,16 @@ def stale_records(current, old_source, old_records):
     """Keys whose source is new/changed/unknown or whose parsed record is absent."""
     return [k for k, token in current.items()
             if not token or old_source.get(k) != token or k not in old_records]
+
+def career_year_issue(spells, current_year):
+    """Describe a source range that would create an inverted emitted year pair."""
+    for team, start, end, *_ in spells:
+        if start is None: continue
+        if end is not None and end < start:
+            return f"{team} has {start}–{end}"
+        if end is None and start > current_year:
+            return f"{team} has future open spell {start}–"
+    return None
 
 def batched(seq, n):
     for i in range(0, len(seq), n): yield i // n, seq[i:i + n]
@@ -757,10 +785,25 @@ def stage_careers():
     for p, *sp in sts.values():  # sp = [team, start, end, apps, goals, loan]
         fresh.setdefault(p, []).append(sp)
     changed = set(changed)
-    records = {p: (fresh.get(p, []) if p in changed else old_records[p]) for p in players}
+    accepted_source = dict(versions)
+    records = {}
+    current_year = time.localtime().tm_year
+    for p in players:
+        if p not in changed:
+            records[p] = old_records[p]
+            continue
+        candidate = fresh.get(p, [])
+        issue = career_year_issue(candidate, current_year)
+        previous = old_records.get(p)
+        if issue and previous is not None and not career_year_issue(previous, current_year):
+            records[p] = previous
+            accepted_source[p] = old_source.get(p)
+            source_warning(f"kept last validated Wikidata career for {p}: {issue}")
+        else:
+            records[p] = candidate
     careers = {p: spells for p, spells in records.items() if spells}
     save("careers", careers)
-    save_state("careers", versions, records)
+    save_state("careers", accepted_source, records)
     print(f"careers: {sum(map(len, careers.values()))} spells, {len(careers)} players; "
           f"reused {len(players) - len(changed)}, fetched {len(changed)}")
 
@@ -787,15 +830,21 @@ def load_careers():
 
 def wp_get(**params):
     params.setdefault("format", "json"); params.setdefault("formatversion", 2)
+    params.setdefault("maxlag", 5)
     for i in range(5):
         try:
             r = _session.get(WP_API, params=params, timeout=90)
             if r.status_code == 429:
-                time.sleep(int(r.headers.get("Retry-After", 10))); continue
+                time.sleep(retry_delay(r, 10)); continue
             r.raise_for_status(); time.sleep(0.2)
-            return r.json()
-        except (requests.RequestException, ValueError):
+            data = r.json()
+            if not isinstance(data, dict) or data.get("error"):
+                raise ValueError(f"Wikipedia API error: {data.get('error') if isinstance(data, dict) else data!r}")
+            return data
+        except (requests.RequestException, ValueError, TypeError) as e:
             if i == 4: raise
+            print(f"  WARNING: Wikipedia request failed (attempt {i + 1}/5): {e}",
+                  flush=True)
             time.sleep(5 * (i + 1))
 
 def titles_to_qids(titles, cache):
@@ -954,11 +1003,27 @@ def stage_wp():
         for p in current:
             if p in changed_set:
                 if p not in fresh_records: continue
-                records[p], source[p] = fresh_records[p], fresh_source[p]
+                candidate = fresh_records[p]
+                issue = career_year_issue(candidate[1], time.localtime().tm_year)
+                previous = old_records.get(p)
+                if issue and previous is not None and not career_year_issue(
+                        previous[1], time.localtime().tm_year):
+                    records[p], source[p] = previous, old_source.get(p)
+                    source_warning(f"kept last validated Wikipedia career for {p}: {issue}")
+                elif issue:
+                    source_warning(f"ignored malformed Wikipedia career for {p}: {issue}")
+                else:
+                    records[p], source[p] = candidate, fresh_source[p]
             else:
                 records[p], source[p] = old_records[p], old_source[p]
     else:
-        records, source = fresh_records, fresh_source
+        records, source = {}, {}
+        for p, candidate in fresh_records.items():
+            issue = career_year_issue(candidate[1], time.localtime().tm_year)
+            if issue:
+                source_warning(f"ignored malformed Wikipedia career for {p}: {issue}")
+                continue
+            records[p], source[p] = candidate, fresh_source[p]
     save_state("wp", source, records)
     raw = [[p, rec[1]] for p, rec in records.items() if rec[1]]
     print(f"wp: reused {len(records) - len(fresh_records)} pages, "
@@ -1011,6 +1076,20 @@ PACK_NSHARDS = 32
 YEAR0 = 1850
 YEAR_MAX = 2100
 END_AGE = 42  # past this nobody is still under contract, whatever an unclosed spell says
+SOURCE_WARNINGS = set()
+
+def source_warning(message):
+    if message not in SOURCE_WARNINGS:
+        SOURCE_WARNINGS.add(message)
+        print(f"  WARNING: {message}", flush=True)
+
+def spell_end(start, end, moves, built_year, playing):
+    """Return a safe end year and whether an upstream range needed repair."""
+    if end is None:
+        end = next((move for move in moves if move > start), None)
+        end = end or (built_year if playing else start)
+    repaired = not start <= end <= YEAR_MAX
+    return (start if repaired else end), repaired
 
 # national sides (senior/under-NN/Olympic/women's, any sport) — not clubs, keep out of careers
 NATIONAL = re.compile(r"\bnational\b.*\bteam\b|nationalmannschaft"
@@ -1207,15 +1286,16 @@ def stage_build():
         out = []
         for team, s, e, _a, _g, _ln in career:
             if team not in qs or not s or not YEAR0 <= s <= YEAR_MAX: continue
-            if e is None:
-                e = next((m for m in moves if m > s), None) or (built_year if playing else s)
-            elif not s <= e <= YEAR_MAX:
+            original_end = e
+            e, repaired = spell_end(s, e, moves, built_year, playing)
+            if repaired:
                 # Wikidata noise — an end before the start, a 4-digit typo (14 spells in
                 # 225k). An impossible range is worse than a missing one here: 1299-9999
                 # would make that player a teammate of everyone the club ever had. Keep
                 # the start, which is the qualifier the pipeline already sorts on, and
                 # claim nothing beyond that season.
-                e = s
+                source_warning(f"normalized {p} at {team} from {s}–"
+                               f"{original_end if original_end is not None else 'open'} to {s}–{s}")
             out.append((s, e))
         return [x - YEAR0 for s, e in sorted(out) for x in (s, e)]
 
@@ -1695,11 +1775,22 @@ STAGES = {"clubs": stage_clubs, "members": stage_members, "roster": stage_roster
           "teams": stage_teams, "build": stage_build, "validate": stage_validate,
           "quiz": stage_quiz}
 
+def publish_source_warnings():
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary or not SOURCE_WARNINGS: return
+    with open(summary, "a") as f:
+        f.write(f"### Source data warnings ({len(SOURCE_WARNINGS)})\n\n")
+        for message in sorted(SOURCE_WARNINGS):
+            f.write(f"- {message}\n")
+
 if __name__ == "__main__":
     DATA.mkdir(exist_ok=True)
-    todo = sys.argv[1:] or list(STAGES)
-    for s in todo:
-        if s not in ("build", "quiz") and load(s) is not None and s not in sys.argv[1:]:
-            print(f"{s}: checkpoint exists, skipping"); continue
-        print(f"== stage {s}", flush=True)
-        STAGES[s]()
+    try:
+        todo = sys.argv[1:] or list(STAGES)
+        for s in todo:
+            if s not in ("build", "quiz") and load(s) is not None and s not in sys.argv[1:]:
+                print(f"{s}: checkpoint exists, skipping"); continue
+            print(f"== stage {s}", flush=True)
+            STAGES[s]()
+    finally:
+        publish_source_warnings()
