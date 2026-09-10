@@ -59,6 +59,21 @@ class ExternalApiTests(unittest.TestCase):
 
 
 class WikipediaOverlayTests(unittest.TestCase):
+    def test_statistics_preserve_thousands_and_reject_ambiguous_values(self):
+        for text, expected in [("1,234", 1234), ("{{0}}7<ref>source</ref>", 7),
+                               ("<!-- updated 2026 --> 12", 12), ("0", 0),
+                               ("-5", None), ("unknown (2026)", None),
+                               ("12,34", None), ("10–12", None), ("", None)]:
+            with self.subTest(text=text):
+                self.assertEqual(PIPELINE.wp_int(text), expected)
+
+    def test_commented_out_fields_cannot_overwrite_a_career(self):
+        text = """{{Infobox football biography
+        | years1 = 2000–2001 | clubs1 = [[Club One]] | caps1 = 12
+        <!-- | clubs1 = [[Wrong Club]] | caps1 = 999 -->
+        }}"""
+        self.assertEqual(PIPELINE.parse_infobox(text), [["Club One", 2000, 2001, 12, None, 0]])
+
     def test_source_year_issue_identifies_future_and_inverted_ranges(self):
         self.assertEqual(
             PIPELINE.career_year_issue([["Q1", 2027, None, 0, 0, 0]], 2026),
@@ -228,7 +243,7 @@ class IncrementalCacheTests(unittest.TestCase):
             state = json.loads((state_dir / "wp.json").read_text())
             self.assertEqual(set(wp), {"Q1", "Q2"})
             self.assertEqual(wp["Q2"], [["QC", 2000, 2001, 1, 0, 0]])
-            self.assertEqual(state["source"]["Q2"], "Player Two\0" + "21")
+            self.assertEqual(state["source"]["Q2"], PIPELINE.wp_source_token("Player Two", 21))
 
     def test_wikidata_warm_run_fetches_only_changed_attributes(self):
         with tempfile.TemporaryDirectory() as td:

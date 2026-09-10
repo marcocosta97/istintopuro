@@ -70,6 +70,7 @@ SITE_DATA = ROOT / "site" / "data"
 UA = "istintopuro-pipeline/0.1 (mcosta97@proton.me)"
 WDQS = "https://query.wikidata.org/sparql"
 CACHE_VERSION = 1
+WP_PARSER_VERSION = 2
 
 LEAGUES = {  # qid: (name, tier, cc)
     "Q15804":  ("Serie A", 1, "IT"),          "Q194052": ("Serie B", 2, "IT"),
@@ -896,13 +897,15 @@ def wp_club(s):
     return (m.group(1).strip() if m else None), loan
 
 def wp_int(s):
-    s = re.sub(r"\{\{[^}]*\}\}", "", s).split("<")[0]   # drop {{0}} alignment padding & <ref>…
-    m = re.search(r"\d+", s)
-    return int(m.group()) if m else None
+    s = re.sub(r"<!--.*?-->", "", s, flags=re.S)
+    s = re.sub(r"\{\{[^}]*\}\}", "", s).split("<")[0].strip().rstrip("}").strip()
+    match = re.fullmatch(r"(?:\d{1,3}(?:,\d{3})+|\d+)", s)
+    return int(match.group().replace(",", "")) if match else None
 
 def parse_infobox(wikitext):
     """-> [[clubTitle, start, end, apps, goals, loan], ...]  (club still a page TITLE)."""
     f = {}
+    wikitext = re.sub(r"<!--.*?-->", "", wikitext, flags=re.S)
     for kind, idx, val in FIELD.findall(wikitext):
         f[(kind, int(idx))] = val
     spells = []
@@ -931,7 +934,7 @@ def wp_batch_pages(batch, data):
             if pg["title"] in by_result]
 
 def wp_source_token(title, revid):
-    return f"{title}\0{revid}" if revid else None
+    return f"v{WP_PARSER_VERSION}:{title}\0{revid}" if revid else None
 
 def stage_wp():
     careers, members, attrs = load("careers"), load_members(), load("attrs")
@@ -1527,6 +1530,39 @@ def decode_deltas(deltas):
         out.append(total)
     return out
 
+def valid_spell_years(values):
+    return isinstance(values, list) and all(
+        isinstance(spell, list) and len(spell) % 2 == 0
+        and all(type(value) is int and 0 <= value <= YEAR_MAX - YEAR0 for value in spell)
+        and all(spell[pos] <= spell[pos + 1] for pos in range(0, len(spell), 2))
+        for spell in values)
+
+def career_shard_errors(rows, shard, nshards, expected_ids, keyed_by_qid=False):
+    if not isinstance(rows, dict): return ["career shard must be an object"]
+    errors = []
+    for key, entry in rows.items():
+        if not re.fullmatch(r"0|[1-9]\d*", key):
+            errors.append(f"invalid career key {key!r}")
+            continue
+        identity = int(key)
+        if identity not in expected_ids or identity % nshards != shard:
+            errors.append(f"career {key}: unexpected id or wrong shard")
+        if (not isinstance(entry, list) or len(entry) != 2
+                or type(entry[0]) is not int or entry[0] <= 0
+                or not isinstance(entry[1], list)):
+            errors.append(f"career {key}: malformed entry")
+            continue
+        if keyed_by_qid and entry[0] != identity:
+            errors.append(f"career {key}: QID mismatch")
+        for spell in entry[1]:
+            if (not isinstance(spell, list) or len(spell) not in (5, 6)
+                    or not isinstance(spell[0], str)
+                    or any(value is not None and (type(value) is not int or value < 0)
+                           for value in spell[1:5])
+                    or (len(spell) == 6 and (type(spell[5]) is not int or spell[5] != 1))):
+                errors.append(f"career {key}: malformed spell")
+    return errors
+
 def pack_index_errors(idx, pack_id, core_players, expected_current):
     """Validate the self-contained part of a pack index (also used by tests)."""
     errs = []
@@ -1567,7 +1603,7 @@ def pack_index_errors(idx, pack_id, core_players, expected_current):
         chk(all(isinstance(i, int) and 0 <= i < len(players)
                 and (pos == 0 or i > ids[pos - 1]) for pos, i in enumerate(ids)),
             f"club {ci}: invalid postings")
-        chk(all(x >= -1 for x in acol + gcol), f"club {ci}: apps/goals below -1")
+        chk(all(type(x) is int and x >= -1 for x in acol + gcol), f"club {ci}: invalid apps/goals")
     codes = {c for p in valid_players if p[4] for c in p[4].split(",")}
     unrenderable = sorted(c for c in codes if c not in ISO_ALPHA2 and c not in NO_EMOJI_FLAG)
     chk(not unrenderable, f"nat codes with no flag: {unrenderable}")
@@ -1600,9 +1636,10 @@ def stage_validate():
         chk(17 <= n <= 24, f"league {idx['leagues'][i][0]}: {n} current clubs")
     for c, (d, a, g) in enumerate(zip(idx["postings"], idx["apps"], idx["goals"])):
         chk(len(d) == len(a) == len(g), f"club {c}: postings/apps/goals length mismatch")
-        chk(not d or (d[0] >= 0 and all(x > 0 for x in d[1:]) and sum(d) < np),
+        chk(all(type(value) is int for value in d)
+            and (not d or (d[0] >= 0 and all(x > 0 for x in d[1:]) and sum(d) < np)),
             f"club {c}: bad posting deltas")
-        chk(all(x >= -1 for x in a + g), f"club {c}: apps/goals below -1")
+        chk(all(type(x) is int and x >= -1 for x in a + g), f"club {c}: invalid apps/goals")
     gk = idx.get("gks")
     chk(isinstance(gk, list) and (not gk or (gk[0] >= 0 and all(x > 0 for x in gk[1:])
         and sum(gk) < np)), "bad gks list")
@@ -1618,8 +1655,7 @@ def stage_validate():
         y = json.loads(f.read_bytes())
         chk(len(y) == len(idx["postings"][c]),
             f"club {c}: years {len(y)} != postings {len(idx['postings'][c])}")
-        chk(all(len(sp) % 2 == 0 and all(x >= 0 for x in sp)
-                and all(sp[k] <= sp[k + 1] for k in range(0, len(sp), 2)) for sp in y),
+        chk(valid_spell_years(y),
             f"club {c}: malformed spell years")
         y_tot += len(y); y_dated += sum(1 for sp in y if sp)
     ycov = y_dated / y_tot if y_tot else 0
@@ -1633,15 +1669,23 @@ def stage_validate():
     codes = {c for n in idx["nats"] if n for c in n.split(",")}
     unrenderable = sorted(c for c in codes if c not in ISO_ALPHA2 and c not in NO_EMOJI_FLAG)
     chk(not unrenderable, f"nat codes with no flag: {unrenderable}")
-    roster = load("roster") or {}
+    published_only = os.environ.get("VALIDATE_PUBLISHED_ONLY") == "1"
+    roster = {} if published_only else load("roster") or {}
     core_current_clubs = {q for lq in CORE_LEAGUE_ORDER for q in CURRENT[lq]}
     seeds = {int(p[1:]) for club, ps in roster.items() if club in core_current_clubs for p in ps}
-    shipped, core_qid_pid = set(), {}
+    shipped, core_qid_pid, shipped_pids = set(), {}, set()
+    chk(idx.get("nshards") == NSHARDS, "core shard count mismatch")
     if not missing:
         for i in range(NSHARDS):
             rows = json.loads((SITE_DATA / "career" / f"{i}.json").read_bytes())
+            shard_errors = career_shard_errors(rows, i, NSHARDS, range(np))
+            for error in shard_errors: chk(False, f"shard {i}: {error}")
+            if shard_errors: continue
             for pid_s, entry in rows.items():
+                chk(entry[0] not in shipped, f"duplicate core player QID {entry[0]}")
+                shipped_pids.add(int(pid_s))
                 shipped.add(entry[0]); core_qid_pid[entry[0]] = int(pid_s)
+        chk(shipped_pids == set(range(np)), "core career ids differ from index players")
     if seeds and not missing:
         kept = len(seeds & shipped) / len(seeds)
         chk(kept >= ROSTER_FLOOR,
@@ -1691,15 +1735,19 @@ def stage_validate():
             f"pack {pack_id}: manifest clubs mismatch")
 
         pshards = pidx.get("nshards", 0)
+        chk(pshards == PACK_NSHARDS, f"pack {pack_id}: invalid shard count")
         pmissing = [i for i in range(pshards)
                     if not (root / "career" / f"{i}.json").exists()]
         chk(not pmissing, f"pack {pack_id}: missing career shards {pmissing[:5]}")
         pshipped = set()
+        expected_qids = {p[0] for p in pidx.get("players", [])}
         if not pmissing:
             for i in range(pshards):
                 rows = json.loads((root / "career" / f"{i}.json").read_bytes())
+                shard_errors = career_shard_errors(rows, i, pshards, expected_qids, keyed_by_qid=True)
+                for error in shard_errors: chk(False, f"pack {pack_id} shard {i}: {error}")
+                if shard_errors: continue
                 pshipped |= {row[0] for row in rows.values()}
-            expected_qids = {p[0] for p in pidx.get("players", [])}
             chk(pshipped == expected_qids,
                 f"pack {pack_id}: career QIDs differ from player rows")
 
@@ -1716,9 +1764,7 @@ def stage_validate():
             values = json.loads(yf.read_bytes())
             chk(len(values) == len(deltas),
                 f"pack {pack_id}: {club[3]} years/postings mismatch")
-            chk(all(len(sp) % 2 == 0 and all(x >= 0 for x in sp)
-                    and all(sp[k] <= sp[k + 1] for k in range(0, len(sp), 2))
-                    for sp in values), f"pack {pack_id}: {club[3]} malformed years")
+            chk(valid_spell_years(values), f"pack {pack_id}: {club[3]} malformed years")
             py_total += len(values); py_dated += sum(bool(sp) for sp in values)
         pycov = py_dated / py_total if py_total else 0
         chk(pycov >= YEARS_FLOOR,
@@ -1747,6 +1793,7 @@ def stage_validate():
     if errs:
         sys.exit("validate FAILED:\n  " + "\n  ".join(errs[:20]))
     print(f"validate: OK ({nc} clubs, {np} players, {ycov:.1%} of postings dated)")
+    if published_only: return
 
     # Body for the refresh commit. The diff is one line of minified JSON, so none of
     # this is readable from it — which is the only reason it earns the three lines the
@@ -1755,7 +1802,7 @@ def stage_validate():
         d = new - old
         return "" if not d else (f" ({d:+.1f}pt)" if pct else f" ({d:+,})")
     gcov = sum(1 for c in idx["goals"] for g in c if g >= 0) / max(sum(map(len, idx["goals"])), 1)
-    wp_n = len(set(load("wp") or {}) & shipped) if shipped else 0
+    wp_n = len({int(qid[1:]) for qid in (load("wp") or {})} & shipped)
     lines = [f"{nc:,} clubs, {np:,} players{delta(np, op) if base else ''}, "
              f"{sum(map(len, idx['postings'])):,} postings",
              f"apps {cov:.1%}{delta(cov * 100, ov * 100, True) if base else ''}, goals {gcov:.1%}"
