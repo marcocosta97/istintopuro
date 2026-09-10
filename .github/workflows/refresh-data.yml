@@ -85,9 +85,7 @@ jobs:
           echo "The refresh or validation failed. The last validated dataset was retained and deployed; inspect the refresh step log for the upstream error." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Test pipeline and audit quiz schedule
-        run: |
-          python3 -m unittest discover -s tests
-          node --test --test-concurrency=1 tests/packs.test.js tests/quiz-core.test.js tests/quiz-schedule.test.js
+        run: sh scripts/check.sh
 
       - uses: actions/cache/save@v6
         if: steps.refresh.outcome == 'success'

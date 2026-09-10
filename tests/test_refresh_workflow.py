@@ -8,6 +8,14 @@ PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "pages.yml"
 
 
 class RefreshWorkflowTests(unittest.TestCase):
+    def test_all_release_paths_run_the_shared_checks(self):
+        for workflow in (WORKFLOW, PAGES_WORKFLOW, ROOT / ".github/workflows/test.yml"):
+            with self.subTest(workflow=workflow.name):
+                self.assertIn("sh scripts/check.sh", workflow.read_text())
+        checks = (ROOT / "scripts/check.sh").read_text()
+        self.assertIn("VALIDATE_PUBLISHED_ONLY=1", checks)
+        self.assertIn("tests/*.test.js", checks)
+
     def test_schedule_runs_monday_at_0200_utc(self):
         text = WORKFLOW.read_text()
 
