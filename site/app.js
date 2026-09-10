@@ -46,6 +46,8 @@ const PAGE = 50;             // result rows rendered per batch; "show more" appe
 const REPO = "https://github.com/marcocosta97/istintopuro";
 const STR = {
   it: {
+    modeClubs: "Squadre", modePlayers: "Giocatori", modesLabel: "Modalità principale",
+    browseCountries: "Paesi", browseLeagues: "Campionati",
     tagline: "Scegli squadre, campionati o paesi — chi li unisce?",
     taglineP: "Scegli uno o più giocatori — in quali squadre hanno giocato insieme?",
     placeholder: "Aggiungi squadra, campionato o paese…",
@@ -120,6 +122,8 @@ const STR = {
     themeDark: "Passa al tema scuro", themeLight: "Passa al tema chiaro",
   },
   en: {
+    modeClubs: "Clubs", modePlayers: "Players", modesLabel: "Main mode",
+    browseCountries: "Countries", browseLeagues: "Leagues",
     tagline: "Pick clubs, leagues or countries — who connects them?",
     taglineP: "Pick one or more players — which clubs did they share?",
     placeholder: "Add a club, league, or country…",
@@ -201,6 +205,9 @@ let t = STR[lang];
 function applyLang() {
   t = STR[lang];
   document.documentElement.lang = lang;
+  $("mode-club").textContent = t.modeClubs;
+  $("mode-player").textContent = t.modePlayers;
+  $("modebar").setAttribute("aria-label", t.modesLabel);
   langSel.value = lang;
   paintTheme();  // the toggle's aria-label/title is localized
   $("tagline").textContent = mode === "club" ? t.tagline : t.taglineP;
@@ -218,12 +225,15 @@ function applyLang() {
   $("l-sort").textContent = t.sort;
   [t.sortApps, t.sortGoals, t.sortBirth, t.sortMates].forEach((s, i) => sortSel.options[i].text = s);
   dirBtn.title = sortDir < 0 ? t.desc : t.asc;
+  dirBtn.setAttribute("aria-label", dirBtn.title);
   $("l-adv").textContent = t.adv;
   filtReset.textContent = `✕ ${t.filtReset}`;
   filtReset.title = t.filtResetT;
   renderFilterState();
   $("l-born").textContent = t.born;
   byFrom.placeholder = t.from; byTo.placeholder = t.to;
+  byFrom.setAttribute("aria-label", `${t.born} ${t.from}`);
+  byTo.setAttribute("aria-label", `${t.born} ${t.to}`);
   $("l-nat").textContent = t.nat;
   $("natall").textContent = t.natAll; $("natnone").textContent = t.natNone;
   $("l-nozero").textContent = t.noZero;
@@ -1317,7 +1327,9 @@ addEventListener("hashchange", () => {
 // ------------------------------------------------------- FM-style team browser
 const browse = $("browse"), browseBtn = $("browsebtn"), brBack = $("br-back");
 let brCC = null, brLG = null;  // drill-down state: country code, league index | "x" (Others)
-const canHover = matchMedia("(hover: hover)").matches;
+const browseDesktop = matchMedia("(min-width: 561px)");
+const browseHover = matchMedia("(hover: hover)");
+browseDesktop.addEventListener("change", () => { if (DB && !browse.hidden) renderBrowse(); });
 
 // GB renders as England wherever clubs or leagues appear — the covered pyramid is
 // English, even for its Welsh clubs. Player nationality flags keep flag() (real GB).
@@ -1334,8 +1346,6 @@ function browseOpen(open) {
   browseBtn.setAttribute("aria-expanded", open);
   if (open) {
     suggOpen(false);
-    // desktop opens with all three columns populated; mobile starts at the country list
-    if (brCC === null && matchMedia("(min-width: 561px)").matches) { brCC = DB.leagues[0][2]; brLG = 0; }
     renderBrowse();
   }
 }
@@ -1344,22 +1354,23 @@ document.addEventListener("click", (e) => {
   if (!browse.hidden && !browse.contains(e.target)) browseOpen(false);
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !browse.hidden) { browseOpen(false); search.focus(); }
+  if (e.key === "Escape" && !browse.hidden) { browseOpen(false); browseBtn.focus(); }
 });
 brBack.onclick = () => {
   if (brLG !== null) brLG = null; else brCC = null;
   renderBrowse();
 };
 
-function brItem(ul, html, cls, pick, hoverToo) {
+function brItem(ul, html, cls, pick, hover = false) {
   const el = document.createElement("li");
   el.innerHTML = html;
   if (cls) el.className = cls;
   if (pick) {
     el.tabIndex = 0;
+    el.setAttribute("role", "button");
     el.onclick = (e) => { e.stopPropagation(); pick(); };
     el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } };
-    if (hoverToo && canHover) el.onmouseenter = pick;
+    if (hover) el.onpointermove = () => { if (browseDesktop.matches && browseHover.matches) pick(false); };
   }
   ul.appendChild(el);
   return el;
@@ -1371,8 +1382,10 @@ function brSplitItem(ul, html, active, pick, added, addLabel, add) {
   const main = document.createElement("button");
   main.type = "button";
   main.className = `br-main${active ? " active" : ""}`;
+  if (active) main.setAttribute("aria-current", "true");
   main.innerHTML = html;
   main.onclick = (e) => { e.stopPropagation(); pick(); };
+  main.onpointermove = () => { if (browseDesktop.matches && browseHover.matches) pick(false); };
   const choose = document.createElement("button");
   choose.type = "button";
   choose.className = "br-add";
@@ -1385,14 +1398,25 @@ function brSplitItem(ul, html, active, pick, added, addLabel, add) {
   ul.appendChild(li);
 }
 
-function renderBrowse() {
+function renderBrowse(moveFocus = true, focusLevel = null) {
+  const focused = browse.contains(document.activeElement) ? document.activeElement : null;
+  const focusedText = focused?.textContent;
+  const focusedClass = focused?.className;
+  const focusedList = focused?.closest("ul");
+  const focusedIndex = [...browse.querySelectorAll("ul")].indexOf(focusedList);
+  if (browseDesktop.matches) {
+    brCC ??= DB.leagues[0][2];
+    brLG ??= DB.leagues.findIndex(league => league[2] === brCC);
+  }
   const [ulC, ulL, ulT] = browse.querySelectorAll("ul");
   ulC.innerHTML = ulL.innerHTML = ulT.innerHTML = "";
   const ccs = [...new Set(DB.leagues.map(l => l[2]))];
   for (const cc of ccs) {
     const added = countryIds.includes(cc), name = countryName(cc);
     brSplitItem(ulC, `<span>${countryFlag(cc)} ${esc(name)}</span><span class="arr">›</span>`,
-      cc === brCC, () => { if (brCC !== cc) { brCC = cc; brLG = null; renderBrowse(); } },
+      cc === brCC, (focus = true) => {
+        if (brCC !== cc || focus) { brCC = cc; brLG = null; renderBrowse(focus, 1); }
+      },
       added, added ? `${t.country}: ${name}` : `${t.addCountry}: ${name}`,
       () => { addCountry(cc); browseOpen(false); });
   }
@@ -1405,13 +1429,13 @@ function renderBrowse() {
       if (l[2] !== brCC) return;
       const added = leagueIds.includes(i);
       brSplitItem(ulL, `<span>${esc(l[0])}</span><span class="arr">›</span>`,
-        i === brLG, () => { if (brLG !== i) { brLG = i; renderBrowse(); } },
+        i === brLG, (focus = true) => { if (brLG !== i || focus) { brLG = i; renderBrowse(focus, 2); } },
         added, added ? `${t.league}: ${l[0]}` : `${t.addLeague}: ${l[0]}`,
         () => { addLeague(i); browseOpen(false); });
     });
     brItem(ulL, `<span>${t.others}</span><span class="arr">›</span>`,
            brLG === "x" ? "active" : "",
-           () => { if (brLG !== "x") { brLG = "x"; renderBrowse(); } }, true);
+           (focus = true) => { if (brLG !== "x" || focus) { brLG = "x"; renderBrowse(focus, 2); } }, true);
   }
   if (brCC !== null && brLG !== null) {
     const ccMask = DB.leagues.reduce((m, l, i) => l[2] === brCC ? m | (1 << i) : m, 0);
@@ -1428,13 +1452,28 @@ function renderBrowse() {
     }
   }
   const level = brCC === null ? 0 : brLG === null ? 1 : 2;
+  [ulC, ulL, ulT].forEach((list, index) => {
+    list.hidden = !browseDesktop.matches && index !== level;
+    list.setAttribute("aria-label", [t.browseCountries, t.browseLeagues, t.modeClubs][index]);
+  });
   browse.dataset.level = level;
+  if (brCC !== null) ulL.dataset.title = countryName(brCC);
+  else delete ulL.dataset.title;
+  if (brLG !== null) ulT.dataset.title = brLG === "x" ? t.others : DB.leagues[brLG][0];
+  else delete ulT.dataset.title;
   brBack.hidden = level === 0;
-  // countryFlag() returns markup (including the SVG-backed historical flags), so
-  // textContent would show its <span> literally on the mobile league back row.
   brBack.innerHTML = level === 2
     ? `‹ ${countryFlag(brCC)} ${esc(countryName(brCC))}`
     : `‹ ${esc(t.back)}`;
+  if (focused) {
+    const lists = [ulC, ulL, ulT];
+    const previous = focusedIndex < 0 ? focused : [...lists[focusedIndex].querySelectorAll("button, li[tabindex]")]
+      .find(element => element.textContent === focusedText && element.className === focusedClass);
+    const target = moveFocus
+      ? lists[focusLevel ?? level].querySelector("button, li[tabindex]")
+      : previous ?? ulL.querySelector(".br-main.active") ?? ulC.querySelector(".br-main.active");
+    target?.focus({ preventScroll: true });
+  }
 }
 
 // ---------------------------------------------------------------- selection
@@ -2121,6 +2160,7 @@ dirBtn.onclick = () => {
   const dir = inMates() ? (matesDir = -matesDir) : (sortDir = -sortDir);
   dirBtn.textContent = dir < 0 ? "↓" : "↑";
   dirBtn.title = dir < 0 ? t.desc : t.asc;
+  dirBtn.setAttribute("aria-label", dirBtn.title);
   refilter();
 };
 // point the shared widgets at the active list's own sort state
@@ -2131,6 +2171,7 @@ function syncSort() {
   const dir = on ? matesDir : sortDir;
   dirBtn.textContent = dir < 0 ? "↓" : "↑";
   dirBtn.title = dir < 0 ? t.desc : t.asc;
+  dirBtn.setAttribute("aria-label", dirBtn.title);
 }
 // Typing a year is four keystrokes, and each one used to run a full solve plus a
 // rebuild of the nationality panel — with the half-typed bound ("19", "1") matching
