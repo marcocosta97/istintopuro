@@ -80,6 +80,12 @@ test("validator rejects malformed dates and repeated clubs in published history"
   assert.match(checked.errors.join("\n"), /repeats within the day/);
 });
 
+test("a lock cannot exempt dates outside the schedule horizon from validation", () => {
+  generated ||= buildSchedule(runtime, null);
+  const asset = { ...generated, lockedThrough: shiftDate(generated.through, 1) };
+  assert.match(validateAsset(runtime, asset).errors.join("\n"), /lockedThrough/);
+});
+
 test("730-day deterministic audit meets repetition and balance bounds", { timeout: 120_000 }, () => {
   const result = auditSchedule(runtime);
   assert.equal(result.days, 730);

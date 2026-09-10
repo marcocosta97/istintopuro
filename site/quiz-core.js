@@ -17,7 +17,6 @@
 
   const QEPOCH = Date.UTC(2026, 7, 21);
   const QT = 240;
-  const QWIN = 90;
   const QCOMBO_DAYS = 30;
   const QMAX_ATTEMPTS = 64;
   const Q3ODDS = 0.5;
@@ -83,29 +82,27 @@
       return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`;
     };
 
-    function qApps(ci, pid) {
+    function postingIndex(ci, pid) {
       const arr = postings(ci);
       let lo = 0, hi = arr.length - 1;
       while (lo <= hi) {
         const m = (lo + hi) >> 1;
-        if (arr[m] === pid) return DB.apps[ci][m];
+        if (arr[m] === pid) return m;
         if (arr[m] < pid) lo = m + 1; else hi = m - 1;
       }
       return -1;
+    }
+    function qApps(ci, pid) {
+      const index = postingIndex(ci, pid);
+      return index < 0 ? -1 : DB.apps[ci][index];
     }
     function qGoals(ci, pid) {
       if (DB.gkSet.has(pid)) return 0;
-      const arr = postings(ci), goals = DB.goals[ci];
-      let lo = 0, hi = arr.length - 1;
-      while (lo <= hi) {
-        const m = (lo + hi) >> 1;
-        if (arr[m] === pid) return goals[m];
-        if (arr[m] < pid) lo = m + 1; else hi = m - 1;
-      }
-      return -1;
+      const index = postingIndex(ci, pid);
+      return index < 0 ? -1 : DB.goals[ci][index];
     }
     const appearanceGaps = (pid, clubs) => ({
-      missing: clubs.filter(ci => qApps(ci, pid) < 0),
+      missing: clubs.filter(ci => postingIndex(ci, pid) < 0),
       zero: clubs.filter(ci => qApps(ci, pid) === 0),
     });
 
@@ -251,9 +248,20 @@
     const careerViewKey = (date, stage, clubs) => `${date}|${stage}|${clubs.join(",")}`;
     function migrateState(state, stages, hintKinds = ["nat", "ini", "ini2"]) {
       if (!state || (state.v !== 1 && state.v !== 2)) return null;
+      let identities;
+      const resolveIdentity = (key, pid) => {
+        if (Number.isInteger(pid) && pid >= 0 && pid < DB.names.length && playerIdentity(pid) === key) return pid;
+        identities ||= new Map(DB.names.map((name, index) => [playerIdentity(index), index]));
+        return identities.get(key) ?? null;
+      };
       state.skipped ||= [];
       state.hints = Object.fromEntries(hintKinds.map(kind => [kind, state.hints?.[kind] ?? null]));
       state.hintTargets ||= {};
+      for (const [kind, pid] of Object.entries(state.hintTargets)) {
+        const key = state.hintTargetKeys?.[kind];
+        if (key) state.hintTargets[kind] = resolveIdentity(key, pid);
+        else if (state.built && state.built !== DB.built) delete state.hintTargets[kind];
+      }
       for (const kind of ["ini", "ini2"]) {
         if (state.hints[kind] === null || kind in state.hintTargets) continue;
         const stageIndex = state.hints[kind], stage = stages?.[stageIndex];
@@ -262,14 +270,15 @@
         state.hintTargets[kind] = stage ? nextHintTarget(stage, targets) : null;
       }
       state.guesses = (state.guesses || []).map(guess => {
-        if (guess.key) return guess;
-        if (guess.identity) return { ...guess, key: guess.identity };
-        const valid = Number.isInteger(guess.pid) && guess.pid >= 0 && guess.pid < DB.names.length;
-        const birth = valid ? DB.births[guess.pid] : guess.birth;
-        const nat = valid ? DB.nats[guess.pid] : guess.nat;
+        const valid = Number.isInteger(guess.pid) && guess.pid >= 0 && guess.pid < DB.names.length
+          && DB.names[guess.pid] === guess.name;
+        const birth = guess.birth ?? (valid ? DB.births[guess.pid] : 0);
+        const nat = guess.nat ?? (valid ? DB.nats[guess.pid] : "");
+        const key = guess.key || guess.identity || `${guess.name}\u0000${birth || ""}\u0000${nat || ""}`;
         return { ...guess, birth: birth || 0, nat: nat || "",
-          key: `${guess.name}\u0000${birth || ""}\u0000${nat || ""}` };
+          key, pid: resolveIdentity(key, guess.pid) };
       });
+      state.built = DB.built;
       state.v = 2;
       return state;
     }
@@ -352,7 +361,7 @@
       usedFaces.add(chosen.face);
       return chosen;
     }
-    function drawClubCountryFirst(pool, rng) {
+    function countryPool(pool) {
       const byCountry = {};
       for (const ci of pool) {
         const stratum = countryStratum(ci);
@@ -361,16 +370,21 @@
       const allCountries = Object.keys(byCountry).sort();
       const countries = allCountries.some(country => country !== "other")
         ? allCountries.filter(country => country !== "other") : allCountries;
+      for (const clubs of Object.values(byCountry)) clubs.sort((left, right) => left - right);
+      return { byCountry, countries };
+    }
+    function drawClubCountryFirst({ byCountry, countries }, rng) {
       const country = chooseWeightedCountry(countries, key => byCountry[key].length, rng);
-      const clubs = byCountry[country].sort((a, b) => a - b);
+      const clubs = byCountry[country];
       return clubs[rng() * clubs.length | 0];
     }
     function buildStage(rng, ladder, used, usedFaces, banned, clubUse, countryUse, allowFallback) {
       const pools = qPools();
       for (let tierIndex = 0; tierIndex < ladder.length; tierIndex++) {
         const tier = ladder[tierIndex];
-        const slots = tier.p.map(name => pools[name].filter(ci => !used.has(ci)));
-        if (slots.some((pool, i) => pool.length < i + 1)) continue;
+        const available = tier.p.map(name => pools[name].filter(ci => !used.has(ci)));
+        if (available.some(pool => !pool.length)) continue;
+        const slots = available.map(countryPool);
         const candidates = new Map();
         for (let draw = 0; draw < QT; draw++) {
           const clubs = slots.map(pool => drawClubCountryFirst(pool, rng));
@@ -481,10 +495,10 @@
     }
 
     function stagesFromQids(rows) {
-      if (!Array.isArray(rows)) return null;
+      if (!Array.isArray(rows) || !rows.length) return null;
       DB.byQid ||= new Map(DB.clubs.map((club, i) => [club[3], i]));
       const stages = rows.map(row => {
-        if (!Array.isArray(row)) return null;
+        if (!Array.isArray(row) || row.length < 2 || row.length > 3) return null;
         const clubs = row.map(qid => DB.byQid.get(qid));
         if (clubs.some(ci => ci === undefined) || new Set(clubs).size !== clubs.length) return null;
         const effective = qEffective(clubs, intersect(clubs.map(postings)));
@@ -510,6 +524,8 @@
       };
     }
     function validateEntry(qidStages, options = {}) {
+      if (!Array.isArray(qidStages) || qidStages.length !== 4)
+        return { ok: false, errors: ["entry must contain exactly four stages"], stages: [] };
       const errors = [], stages = stagesFromQids(qidStages);
       if (!stages) errors.push("unresolvable, duplicate, or zero-effective stage");
       if (stages) {
@@ -541,7 +557,7 @@
       qFace, face: qFace, playerIdentity, answerMatches, nextHintTarget, migrateState, restoreHistoryState,
       careerCacheKey, careerViewKey, clubCountry: leagueCC,
       resetCaches: () => comboCache.clear(),
-      constants: { QEPOCH, QT, QWIN, QCOMBO_DAYS, QMAX_ATTEMPTS, Q3ODDS,
+      constants: { QEPOCH, QT, QCOMBO_DAYS, QMAX_ATTEMPTS, Q3ODDS,
         QBRIDGE_FULL_APPS, QBRIDGE_FLOOR, QBREADTH_MIN_FAME, QBREADTH_FULL_FAME,
         QFACE_GUARD_DAYS, QCLUB_SOFT_DAYS, QEASY, QMEDIUM, QHARD, QIMPOSSIBLE, QHARD3, QIMP3 },
     };

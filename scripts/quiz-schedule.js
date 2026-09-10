@@ -24,7 +24,7 @@ const BASELINE_MAX_IMPOSSIBLE_CLUB = 16;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function isIsoDate(date) {
-  if (!ISO_DATE.test(date || "")) return false;
+  if (typeof date !== "string" || !ISO_DATE.test(date)) return false;
   const [year, month, day] = date.split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) === date;
 }
@@ -195,8 +195,9 @@ function validateAsset(runtime, asset, { expectedBuilt, expectedThrough } = {}) 
   if (isIsoDate(asset.through) && asset.through < EPOCH) errors.push(`through must be on or after ${EPOCH}`);
   if (isIsoDate(asset.built) && isIsoDate(asset.through) && asset.through < asset.built) errors.push("through precedes built");
   if (asset.lockedThrough !== undefined && (!isIsoDate(asset.lockedThrough)
-      || (isIsoDate(asset.built) && asset.lockedThrough < asset.built)))
-    errors.push("lockedThrough must be an ISO date on or after built");
+      || (isIsoDate(asset.built) && asset.lockedThrough < asset.built)
+      || (isIsoDate(asset.through) && asset.lockedThrough > asset.through)))
+    errors.push("lockedThrough must be an ISO date between built and through");
   if (expectedBuilt && asset.built !== expectedBuilt) errors.push(`built ${asset.built} != index ${expectedBuilt}`);
   if (expectedThrough && asset.through !== expectedThrough) errors.push(`through ${asset.through} != expected ${expectedThrough}`);
   if (!asset.days || typeof asset.days !== "object" || Array.isArray(asset.days)) {
@@ -401,7 +402,7 @@ function main(argv = process.argv.slice(2)) {
     });
     if (!checked.ok) throw new Error(`quiz schedule validation failed:\n  ${checked.errors.join("\n  ")}`);
     console.log(`quiz schedule: OK (${Object.keys(readJson(options.output).days).length} days)`);
-  } else {
+  } else if (!options.audit) {
     const existing = fs.existsSync(options.output) ? readJson(options.output) : null;
     const asset = buildSchedule(runtime, existing);
     writeAsset(options.output, asset);

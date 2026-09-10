@@ -97,6 +97,7 @@ test("bridge recognisability penalizes cameos without penalizing unknown histori
   const balbino = celtaSevilla.answers.find(pid => DB.names[pid] === "Balbino Clemente");
   assert.equal(celtaSevilla.clubs.every(ci => core.qApps(ci, balbino) < 0), true);
   assert.equal(core.qBridgeFame(balbino, celtaSevilla.clubs), core.qFame(balbino, celtaSevilla.clubs));
+  assert.deepEqual(core.appearanceGaps(balbino, celtaSevilla.clubs), { missing: [], zero: [] });
 });
 
 test("large intersections earn ease from recognisable breadth rather than raw answer count", () => {
@@ -181,6 +182,18 @@ test("validation rejects unresolved and repeated clubs", () => {
   assert.equal(core.validateEntry(rows).ok, false);
 });
 
+test("schedule validation rejects missing stages and malformed club counts without throwing", () => {
+  const { core } = runtime();
+  for (const rows of [null, [], [[]], [["Q1422"]], [[], [], [], []],
+    Array(4).fill(["Q1422", "Q631", "Q1543", "Q2641"])]) {
+    assert.equal(core.validateEntry(rows).ok, false);
+    assert.equal(core.stagesFromQids(rows), null);
+  }
+  const pair = [["Q2052", "Q10333"]];
+  assert.ok(core.stagesFromQids(pair));
+  assert.equal(core.validateEntry(pair).ok, false);
+});
+
 test("combination guard treats permutations as equal for 30 days", () => {
   const { core } = runtime();
   const first = core.generate(SERIES_START);
@@ -226,6 +239,33 @@ test("v1 migration preserves cleared progress while backfilling state contracts"
   assert.equal(migrated.lives, 2);
   assert.equal(migrated.guesses[0].ok, true);
   assert.equal(migrated.hintTargets.ini, core.face(puzzle.stages[0]));
+});
+
+test("saved guesses and hint targets follow identity when a refresh reorders player ids", () => {
+  const { DB, core } = runtime();
+  const original = 0, replacement = 1;
+  const key = core.playerIdentity(original);
+  const name = DB.names[original];
+  for (const column of ["names", "births", "nats"])
+    [DB[column][original], DB[column][replacement]] = [DB[column][replacement], DB[column][original]];
+  const state = { v: 2, built: "old", hints: { ini: 0 },
+    hintTargets: { ini: original }, hintTargetKeys: { ini: key },
+    guesses: [{ pid: original, name, key, stage: 0, ok: true }] };
+  const migrated = core.migrateState(state, []);
+  assert.equal(migrated.guesses[0].pid, replacement);
+  assert.equal(migrated.guesses[0].key, key);
+  assert.equal(migrated.hintTargets.ini, replacement);
+  assert.equal(migrated.built, DB.built);
+});
+
+test("a removed player cannot silently resolve to someone else in a saved game", () => {
+  const { core } = runtime();
+  const migrated = core.migrateState({ v: 2, guesses: [
+    { pid: 0, name: "Removed Player", key: "Removed Player\u00001980\u0000IT", ok: true },
+  ] }, []);
+  assert.equal(migrated.guesses[0].pid, null);
+  assert.equal(migrated.guesses[0].name, "Removed Player");
+  assert.equal(migrated.guesses[0].ok, true);
 });
 
 test("legacy archive summaries restore as completed boards", () => {

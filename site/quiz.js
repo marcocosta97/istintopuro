@@ -54,24 +54,29 @@ try {
 // Runtime generation replays only the fixed 90-day window, supplying the same
 // explicit prior-day context that the checked-in schedule writer uses.
 const qChain = [];
+function qScheduled(date, num) {
+  if (qChain[num]) return qChain[num];
+  const scheduled = CORE_DB.quizSchedule?.days?.[date];
+  if (!scheduled) return null;
+  const checked = qCore().validateEntry(scheduled, { requireOrder: false });
+  if (!checked.ok) return null;
+  return qChain[num] = { date, num, attempt: null, stages: checked.stages };
+}
 function qStagesFor(date) {
   const num = qNum(date);
   if (num < 1) return qCore().generate(date, { allowFallback: true }).stages;
+  const scheduled = qScheduled(date, num);
+  if (scheduled) return scheduled.stages;
   const first = Math.floor((num - 1) / QWIN) * QWIN + 1;
   for (let i = first; i <= num; i++) {
-    if (qChain[i]) continue;
     const here = qShift(date, i - num);
-    const scheduled = CORE_DB.quizSchedule?.days?.[here];
-    if (scheduled) {
-      const checked = qCore().validateEntry(scheduled, { requireOrder: false });
-      if (checked.ok) {
-        qChain[i] = { date: here, num: i, attempt: null, stages: checked.stages };
-        continue;
-      }
-    }
+    if (qScheduled(here, i)) continue;
     const previousDays = [];
     const comboDays = qCore().constants.QCOMBO_DAYS;
-    for (let k = Math.max(first, i - comboDays); k < i; k++) if (qChain[k]) previousDays.push(qChain[k]);
+    for (let k = Math.max(1, i - comboDays); k < i; k++) {
+      const previous = qScheduled(qShift(here, k - i), k);
+      if (previous) previousDays.push(previous);
+    }
     qChain[i] = qCore().generate(here, { previousDays, allowFallback: true });
   }
   return qChain[num].stages;
@@ -99,6 +104,9 @@ let qReplaying = false;
 let qReplayDate = null;
 const qReplays = () => { try { const s = JSON.parse(localStorage.quizReplays || ""); if (s && s.v === 1) return s; } catch {} return { v: 1, days: {} }; };
 const qSave = () => {
+  qs.hintTargetKeys = Object.fromEntries(Object.entries(qs.hintTargets)
+    .filter(([, pid]) => Number.isInteger(pid) && pid >= 0 && pid < CORE_DB.names.length)
+    .map(([kind, pid]) => [kind, qIdentity(pid)]));
   if (!qReplaying) { localStorage.quiz = JSON.stringify(qs); return; }
   const r = qReplays(); r.days[qs.date] = qs; localStorage.quizReplays = JSON.stringify(r);
 };
@@ -116,17 +124,18 @@ const qSolved = () => (qs.won ? 4 : qs.stage) - qs.skipped.length;
 // Returns null for any stage whose club dropped from the build → caller falls
 // back to regeneration.
 function qStagesFromQids(rows, state = null) {
-  if (!Array.isArray(rows)) return null;
+  if (!Array.isArray(rows) || rows.length !== 4) return null;
   let generated = null;
   const stages = rows.map((qids, stageIndex) => {
-    if (!Array.isArray(qids)) return null;
-    const clubs = qids.map(qid => DB.byQid.get(qid));
+    if (!Array.isArray(qids) || qids.length < 2 || qids.length > 3) return null;
+    CORE_DB.byQid ||= new Map(CORE_DB.clubs.map((club, index) => [club[3], index]));
+    const clubs = qids.map(qid => CORE_DB.byQid.get(qid));
     if (clubs.some(ci => ci === undefined) || new Set(clubs).size !== clubs.length) return null;
     const raw = intersect(clubs.map(postings));
     const answers = qEffective(clubs, raw);
     if (answers.length) return { clubs, answers, effective: answers, ease: qEase(clubs, answers) };
     const hit = state?.guesses?.find(guess => guess.stage === stageIndex && guess.ok
-      && Number.isInteger(guess.pid) && DB.names[guess.pid]);
+      && Number.isInteger(guess.pid) && DB.names[guess.pid] === guess.name);
     if (hit) {
       return { clubs, answers: [], effective: [], ease: -Infinity, grandfatheredFace: hit.pid };
     }
@@ -372,8 +381,9 @@ function qBuild() {  // static skeleton, rendered once on first entry
       <div id="qchips"></div>
       <div id="qq"></div>
       <div id="qwrap">
-        <input id="qsearch" type="text" autocomplete="off" autocorrect="off" spellcheck="false">
-        <ul id="qsugg" hidden></ul>
+        <input id="qsearch" type="text" autocomplete="off" autocorrect="off" spellcheck="false"
+               role="combobox" aria-expanded="false" aria-controls="qsugg" aria-autocomplete="list" enterkeyhint="go">
+        <ul id="qsugg" role="listbox" hidden></ul>
       </div>
       <div id="qbar">
         <span id="qlives"></span>
@@ -402,23 +412,25 @@ function qBuild() {  // static skeleton, rendered once on first entry
     qSuggest(ids, qse.value, ids.length === 0 && qInitialsProbe(qse.value));
   });
   qse.addEventListener("keydown", (e) => {
-    const items = [...$("qsugg").children];
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
+      if ($("qsugg").hidden) { qSuggest(qMatches(qse.value), qse.value); return; }
+      const items = [...$("qsugg").querySelectorAll('[role="option"]')];
       if (!items.length) return;
-      qCur = (qCur + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
-      items.forEach((li, i) => li.classList.toggle("active", i === qCur));
-    } else if ((e.key === "Enter" || e.key === "Tab") && qCur >= 0 && !$("qsugg").hidden) {
+      qMoveCursor(items, (qCur + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length);
+      items[qCur].scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter" && qCur >= 0 && !$("qsugg").hidden) {
       e.preventDefault();
-      qPick(qMatches(qse.value)[qCur]);
-    } else if (e.key === "Escape") $("qsugg").hidden = true;
+      const selected = $("qsugg").querySelector('[aria-selected="true"]');
+      if (selected) qPick(Number(selected.dataset.pid));
+    } else if (e.key === "Escape" || e.key === "Tab") qSuggOpen(false);
   });
   // Not tied to keeping focus: hiding on blur meant dismissing the phone keyboard
   // also threw away the list it was opened to read. Every real close path already
   // says so (pick, Escape, skip/resign, empty query); blur only ever meant a tap
   // elsewhere, so a pointerdown outside #qwrap covers that instead.
   document.addEventListener("pointerdown", (e) => {
-    if (!$("qsugg").hidden && !e.target.closest("#qwrap")) $("qsugg").hidden = true;
+    if (!$("qsugg").hidden && !e.target.closest("#qwrap")) qSuggOpen(false);
   });
   // Phones: the keyboard costs half the viewport and nothing takes it away, so the
   // list is read through a slot. Any drag means "done typing, let me read" — including
@@ -454,7 +466,7 @@ function qSkipStage() {
   qs.skipped.push(qs.stage);
   qs.stage++;
   qSave();
-  $("qsugg").hidden = true;
+  qSuggOpen(false);
   qRender();
 }
 
@@ -465,11 +477,25 @@ function qResign() {
   qs.done = true; qs.won = false;
   qFinish();
   qSave();
-  $("qsugg").hidden = true;
+  qSuggOpen(false);
   qRender();
 }
 
 let qCur = -1;
+function qSuggOpen(open) {
+  $("qsugg").hidden = !open;
+  $("qsearch").setAttribute("aria-expanded", String(open));
+  if (!open) { $("qsearch").removeAttribute("aria-activedescendant"); qCur = -1; }
+}
+function qMoveCursor(items, index) {
+  qCur = index;
+  items.forEach((item, position) => {
+    item.classList.toggle("active", position === index);
+    item.setAttribute("aria-selected", String(position === index));
+  });
+  if (index >= 0) $("qsearch").setAttribute("aria-activedescendant", items[index].id);
+  else $("qsearch").removeAttribute("aria-activedescendant");
+}
 // The identikit hint spends itself to hand out initials ("Y. P.", Danish), and
 // the search box hands the answer straight back: it profiles the stage's most
 // recognisable answer, and playerMatches breaks ties by fame — so "y" and "p"
@@ -496,21 +522,25 @@ const qMatches = (q) => {
 function qSuggest(ids, q = "", probe = false) {
   const ul = $("qsugg"), nq = norm(q);
   ul.innerHTML = "";
-  ul.hidden = ids.length === 0 && !probe;
-  qCur = ids.length ? 0 : -1;
+  qSuggOpen(ids.length > 0 || probe);
   if (probe) {
     const li = document.createElement("li");
     li.className = "qnote";
+    li.setAttribute("role", "presentation");
     li.textContent = QSTR[lang].qsProbe;
     ul.appendChild(li);
   }
   ids.forEach((pid, i) => {
     const li = document.createElement("li");
+    li.id = "qsg" + i;
+    li.dataset.pid = pid;
+    li.setAttribute("role", "option");
     li.innerHTML = `<span>${flag(DB.nats[pid])} ${hilite(DB.names[pid], nq)}</span><small>${DB.births[pid] || ""}</small>`;
-    li.className = i === qCur ? "active" : "";
-    li.onmousedown = (e) => { e.preventDefault(); qPick(pid); };
+    li.onmousedown = (e) => e.preventDefault();
+    li.onclick = () => qPick(pid);
     ul.appendChild(li);
   });
+  qMoveCursor([...ul.querySelectorAll('[role="option"]')], ids.length ? 0 : -1);
 }
 
 // which of the stage's (already-visible) clubs a wrong guess didn't play for —
@@ -528,7 +558,7 @@ function qWrongMsg(pid, st) {
 function qPick(pid) {
   if (pid === undefined || qConfirm) return;
   $("qsearch").value = "";
-  $("qsugg").hidden = true;
+  qSuggOpen(false);
   const st = qPz.stages[qs.stage];
   const ev = qGuess(pid);
   if (ev === null) { qRender(); return; }  // frozen (rolled past midnight)
@@ -615,6 +645,7 @@ function qRender() {
     }).join("");
     $("qq").textContent = q.qQ(st.clubs.length);
     $("qsearch").placeholder = q.qPh;
+    $("qsearch").setAttribute("aria-label", q.qPh);
     $("qlives").innerHTML = "●".repeat(qs.lives) + `<span class="off">${"●".repeat(5 - qs.lives)}</span>`;
     $("qlives").setAttribute("aria-label", q.qLives(qs.lives));
     for (const kind of QHINTS) {
