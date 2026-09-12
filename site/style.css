@@ -955,13 +955,6 @@ body.qcal :is(#qhead, #qstages, #qcard, #qend, #qnewday, #qlog) { display: none;
 .qcell.today .qcd { color: var(--accent); }
 .qcell.current .qcbox { box-shadow: 0 0 0 2px var(--accent); }
 .qcell.current .qcd { color: var(--accent); font-weight: 700; }
-@media (pointer: coarse) {
-  #themebtn, #aboutbtn, #langsel { min-width: 44px; min-height: 44px; }
-  #modebar button, #browsebtn, #qhbtns button, #qcal-open, #qresign,
-  .qconfirm-actions button { min-height: 44px; }
-  #browsebtn { min-width: 44px; }
-  .mast { flex-wrap: wrap; }
-}
 @media (prefers-reduced-motion: reduce) {
   .qcbox, body.qcal #qcal { transition: none; animation: none; }
   .qcell.play:hover .qcbox { transform: none; }
