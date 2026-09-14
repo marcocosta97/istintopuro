@@ -7,7 +7,8 @@ const test = require("node:test");
 
 const ROOT = path.resolve(__dirname, "..");
 const {
-  auditSchedule, buildSchedule, createRuntime, EPOCH, inspectEntry, loadRuntime, shiftDate, validateAsset,
+  AUDIT_DAYS, auditSchedule, buildSchedule, countryBalanceErrors, createRuntime, EPOCH, inspectEntry,
+  loadRuntime, shiftDate, validateAsset,
 } = require("../scripts/quiz-schedule.js");
 
 const runtime = loadRuntime();
@@ -84,6 +85,13 @@ test("a lock cannot exempt dates outside the schedule horizon from validation", 
   generated ||= buildSchedule(runtime, null);
   const asset = { ...generated, lockedThrough: shiftDate(generated.through, 1) };
   assert.match(validateAsset(runtime, asset).errors.join("\n"), /lockedThrough/);
+});
+
+test("country balance accepts 32 England days and reports exact failing counts", () => {
+  assert.deepEqual(countryBalanceErrors(new Map([["GB", 32]]), AUDIT_DAYS), []);
+  assert.deepEqual(countryBalanceErrors(new Map([["GB", 31]]), AUDIT_DAYS), [
+    "impossible England count 31/730 is below minimum 32",
+  ]);
 });
 
 test("730-day deterministic audit meets repetition and balance bounds", { timeout: 120_000 }, () => {

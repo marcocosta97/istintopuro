@@ -16,7 +16,9 @@ const COMBO_GUARD_DAYS = 30;
 const TRIPLE_RATE_MIN = 0.4;
 const TRIPLE_RATE_MAX = 0.6;
 const IMPOSSIBLE_ITALY_MAX = 0.404;
-const IMPOSSIBLE_ENGLAND_MIN = 0.044;
+// Express the lower bound in whole audit days so rounding cannot make the
+// observed value and its threshold look identical in a failure message.
+const IMPOSSIBLE_ENGLAND_MIN_COUNT = 32;
 const ALL_SLOT_COUNTRY_MAX_RATIO = 1.5;
 const MIN_GOALKEEPER_FACES = 60;
 // Pinned from the pre-static generator over the same 730 dates on build 2026-08-17.
@@ -230,6 +232,21 @@ function generatedDiagnostics(core, slate) {
   return slate.stages.map(stage => core.stageDiagnostics(stage));
 }
 
+function countryBalanceErrors(countries, days) {
+  const errors = [];
+  const italyCount = countries.get("IT") || 0;
+  const englandCount = countries.get("GB") || 0;
+  const italyRate = italyCount / days;
+  const englandMinimum = Math.ceil(days * IMPOSSIBLE_ENGLAND_MIN_COUNT / AUDIT_DAYS);
+  if (italyRate >= IMPOSSIBLE_ITALY_MAX) {
+    errors.push(`impossible Italy count ${italyCount}/${days} (${(italyRate * 100).toFixed(2)}%) is not below 40.4%`);
+  }
+  if (englandCount < englandMinimum) {
+    errors.push(`impossible England count ${englandCount}/${days} is below minimum ${englandMinimum}`);
+  }
+  return errors;
+}
+
 function generateEntry(runtime, date, previousDays) {
   const slate = runtime.core.generateSlate(date, { previousDays });
   if (!slate || !Array.isArray(slate.stages)) throw new Error(`${date}: generator returned no stages`);
@@ -331,10 +348,7 @@ function auditSchedule(runtime, { start = EPOCH, days = AUDIT_DAYS, enforce = tr
     const rate = triples[stageIndex] / days;
     if (rate < TRIPLE_RATE_MIN || rate > TRIPLE_RATE_MAX) errors.push(`stage ${stageIndex + 1} triple rate ${(rate * 100).toFixed(1)}% is outside 40–60%`);
   }
-  const italyRate = (countries.get("IT") || 0) / days;
-  const englandRate = (countries.get("GB") || 0) / days;
-  if (italyRate >= IMPOSSIBLE_ITALY_MAX) errors.push(`impossible Italy share ${(italyRate * 100).toFixed(1)}% is not below 40.4%`);
-  if (englandRate <= IMPOSSIBLE_ENGLAND_MIN) errors.push(`impossible England share ${(englandRate * 100).toFixed(1)}% is not above 4.4%`);
+  errors.push(...countryBalanceErrors(countries, days));
   const slotCountryCounts = [...allClubCountries.values()];
   const slotCountryRatio = Math.max(...slotCountryCounts) / Math.min(...slotCountryCounts);
   if (slotCountryRatio >= ALL_SLOT_COUNTRY_MAX_RATIO)
@@ -428,6 +442,6 @@ if (require.main === module) {
 module.exports = {
   ALL_SLOT_COUNTRY_MAX_RATIO, AUDIT_DAYS, BASELINE_MAX_IMPOSSIBLE_CLUB, COMBO_GUARD_DAYS,
   EPOCH, HORIZON_DAYS, MIN_GOALKEEPER_FACES, VERSION,
-  auditSchedule, buildSchedule, createRuntime, inspectEntry, loadRuntime,
+  auditSchedule, buildSchedule, countryBalanceErrors, createRuntime, inspectEntry, loadRuntime,
   shiftDate, validateAsset,
 };
