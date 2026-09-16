@@ -429,6 +429,30 @@ const natName = (cc) => {
 const defunct = (c) => c[4] ? ` <span class="defunct" title="${t.dissolved(c[4])}">†${c[4]}</span>` : "";
 // year span of a career spell: single-year ranges collapse, unknown bounds show "?"
 const yspan = (s, e) => s && s === e ? String(s) : `${s || "?"}–${e || (s ? "" : "?")}`;
+// A career shard's years are raw: an older build can carry an impossible range
+// (1988–1969, 1299–9999) or leave a retired player's last spell open. The pipeline
+// repairs those into the years files, but not into shards already on disk, so the
+// same rule is mirrored here. END_AGE/YEAR_MAX match pipeline.py.
+const YEAR_MAX = 2100, END_AGE = 42;
+const builtYear = () => +(DB?.built || "").slice(0, 4) || new Date().getFullYear();
+const stillPlaying = (pid) => { const b = DB?.births?.[pid]; return !!b && b + END_AGE >= builtYear(); };
+// End of a spell for teammate windows: an impossible range collapses to its start;
+// an unclosed spell runs to the player's next move or, only for someone young
+// enough, the dataset year.
+function spellEnd(spells, i, pid) {
+  const s = spells[i][1], e = spells[i][2];
+  if (!s) return e ?? null;
+  if (e != null) return s <= e && e <= YEAR_MAX ? e : s;
+  const next = spells.slice(i + 1).find(sp => sp[1] && sp[1] >= s && !sp[5]);
+  return next ? next[1] : stillPlaying(pid) ? builtYear() : s;
+}
+// End to print: an impossible range reads as its start and a retired player's open
+// spell closes at its start, but a live open spell stays open ("2024–").
+function shownSpellEnd(spells, i, pid) {
+  const s = spells[i][1], e = spells[i][2];
+  if (e != null) return s != null && (e < s || e > YEAR_MAX) ? s : e;
+  return s != null && !stillPlaying(pid) ? s : null;
+}
 
 // ---------------------------------------------------------------- club stature
 // The continent's marquee clubs — the ones a general fan recognises, so a player
@@ -1992,17 +2016,14 @@ async function solvePlayers() {
   const t0 = performance.now();
   const curYear = +(DB.built || "").slice(0, 4) || new Date().getFullYear();
   // per player: team name -> [[start, end, effEnd, apps, goals], ...]; distinct
-  // spells stay separate. An open-ended spell effectively runs until the player's
-  // next transfer (loans out don't end it) or, with no later move, the dataset year.
-  const maps = careers.map(([, career = []]) => {
+  // spells stay separate. spellEnd closes an open spell at the player's next transfer
+  // (loans out don't end it), or the dataset year only for someone still young enough
+  // to be playing; see its comment for the impossible-range repair.
+  const maps = careers.map(([, career = []], k) => {
     const spells = career.filter(e => e[0]);
     const m = new Map();
     spells.forEach(([team, s, e, a, gl], i) => {
-      let eff = e;
-      if (s && !e) {
-        const next = spells.slice(i + 1).find(sp => sp[1] && sp[1] >= s && !sp[5]);
-        eff = next ? next[1] : curYear;
-      }
+      const eff = s ? spellEnd(spells, i, playerIds[k]) : e;
       if (!m.has(team)) m.set(team, []);
       m.get(team).push([s, e, eff, a, gl]);
     });
@@ -2742,7 +2763,7 @@ async function toggleCareer(li, pid) {
     ([, s2, e2]) => s2 && e2 && s2 <= s && e <= e2 && e2 - s2 > e - s)));
   div.innerHTML = (spells.map(([team, s, e, apps, goals], i) =>
     `<div class="crow${selNames.has(team) ? " hit" : ""}">
-       <span class="cyears">${yspan(s, e)}</span><span class="cteam">${loan[i] ? `<span class="loan" title="${t.loan}">↳</span> ` : ""}${esc(team)}</span>
+       <span class="cyears">${yspan(s, shownSpellEnd(spells, i, pid))}</span><span class="cteam">${loan[i] ? `<span class="loan" title="${t.loan}">↳</span> ` : ""}${esc(team)}</span>
        <span class="cstats">${apps != null ? apps + " " + t.apps(apps) : ""}${!gk && goals != null ? " · " + goals + " " + t.goals(goals) : ""}</span>
      </div>`).join("") || `<div class='crow'>${t.noData}</div>`)
     // footer: the sources on the left, and pushed to the far right the reverse

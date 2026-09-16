@@ -55,14 +55,20 @@ function runtime() {
     core: createQuizCore({ DB, postings, intersect, stature, marquee, leagueCC }) };
 }
 
-test("extracted scorer matches snapshots captured from the pre-extraction implementation", (t) => {
+test("extracted scorer reproduces the pinned snapshot and stays internally consistent", (t) => {
   const { DB, core, intersect, postings } = runtime();
   const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/quiz-pre-extraction.json"), "utf8"));
-  if (DB.built !== fixture.built) return t.skip(`snapshot belongs to dataset ${fixture.built}`);
+  const pinned = DB.built === fixture.built;
+  if (!pinned) t.diagnostic(`snapshot pinned to dataset ${fixture.built}; checking invariants only`);
   for (const day of fixture.dates) for (const row of day.stages) {
     const qidCount = row.length === 5 ? 2 : 3;
     const qids = row.slice(0, qidCount), [count, ease, face] = row.slice(qidCount);
     const [stage] = core.stagesFromQids([qids]);
+    assert.ok(stage, `${day.date}: ${qids.join(" x ")} must resolve`);
+    const ranked = core.rankedAnswers(stage);
+    assert.ok(ranked.length && core.qUsableName(ranked[0]) && stage.answers.includes(ranked[0]),
+      `${day.date}: ${qids.join(" x ")} needs a usable representative`);
+    if (!pinned) continue;
     const raw = intersect(stage.clubs.map(postings));
     assert.equal(stage.answers.length, count, `${day.date}: ${qids.join(" x ")} count`);
     assert.equal(Math.round(stage.ease), ease, `${day.date}: ${qids.join(" x ")} ease`);
@@ -192,6 +198,19 @@ test("schedule validation rejects missing stages and malformed club counts witho
   const pair = [["Q2052", "Q10333"]];
   assert.ok(core.stagesFromQids(pair));
   assert.equal(core.validateEntry(pair).ok, false);
+});
+
+test("validation tolerates dropped or malformed prior days instead of throwing", () => {
+  const { core } = runtime();
+  const rows = core.serializeStages(core.generate(SERIES_START).stages);
+  const previousDays = [
+    { date: "2026-07-01", stages: [["Q-does-not-exist", "Q631"]] },
+    { date: "not-a-date", stages: null },
+    { date: "2026-07-02", stages: [{ clubs: ["Q2052", 999999] }] },
+    null,
+  ];
+  const result = core.validateEntry(rows, { date: SERIES_START, previousDays });
+  assert.equal(typeof result.ok, "boolean");
 });
 
 test("combination guard treats permutations as equal for 30 days", () => {

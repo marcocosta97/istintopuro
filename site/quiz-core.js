@@ -433,15 +433,29 @@
 
     function normalizePrevious(previousDays) {
       DB.byQid ||= new Map(DB.clubs.map((club, i) => [club[3], i]));
-      return (previousDays || []).map(day => ({
-        date: day.date,
-        stages: (day.stages || []).map(stage => (Array.isArray(stage) ? stage : stage.clubs)
-          .map(club => {
+      const out = [];
+      // A prior day may name a club this build has since dropped: that is a reason
+      // to stop guarding on it, not to throw out of validation. Skip whatever does
+      // not resolve to a club row in this dataset.
+      for (const day of previousDays || []) {
+        if (!day || typeof day.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day.date)
+            || !Array.isArray(day.stages)) continue;
+        const stages = [];
+        for (const stage of day.stages) {
+          const raw = Array.isArray(stage) ? stage : stage?.clubs;
+          if (!Array.isArray(raw)) continue;
+          const clubs = [];
+          let resolved = true;
+          for (const club of raw) {
             const ci = typeof club === "string" ? DB.byQid.get(club) : club;
-            if (ci === undefined) throw new Error(`unknown club in previous schedule: ${club}`);
-            return ci;
-          })),
-      })).sort((a, b) => a.date.localeCompare(b.date));
+            if (!Number.isInteger(ci) || ci < 0 || ci >= DB.clubs.length) { resolved = false; break; }
+            clubs.push(ci);
+          }
+          if (resolved && clubs.length) stages.push(clubs);
+        }
+        out.push({ date: day.date, stages });
+      }
+      return out.sort((a, b) => a.date.localeCompare(b.date));
     }
     function guardsFor(date, previousDays) {
       const banned = new Set(), recentClubs = new Set(), recentFaces = new Set();

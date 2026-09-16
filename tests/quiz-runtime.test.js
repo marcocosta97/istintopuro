@@ -49,3 +49,15 @@ test("fallback at a 90-day boundary retains the published repetition context", (
   assert.equal(calls[0].previousDays[0].date, shiftDate(EPOCH, 60));
   assert.equal(calls[0].previousDays.at(-1).date, shiftDate(EPOCH, 89));
 });
+
+test("without a published schedule the runtime replays the whole prior chain", () => {
+  const date = shiftDate(EPOCH, 95);
+  const { calls, stagesFor } = runtime({});
+  stagesFor(date);
+  assert.equal(calls.length, 96);
+  assert.equal(calls[0].date, EPOCH);
+  assert.equal(calls[0].previousDays.length, 0);
+  assert.equal(calls.at(-1).date, date);
+  assert.equal(calls.at(-1).previousDays.length, 30);
+  assert.equal(calls.at(-1).previousDays[0].date, shiftDate(EPOCH, 65));
+});

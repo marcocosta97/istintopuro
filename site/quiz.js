@@ -62,24 +62,28 @@ function qScheduled(date, num) {
   if (!checked.ok) return null;
   return qChain[num] = { date, num, attempt: null, stages: checked.stages };
 }
+// Resolve one day, generating it only when the committed schedule does not carry
+// it. Generation pulls its own prior-day context recursively, so an unplayed day
+// gets the same full window the schedule writer used even when the day before it
+// was never published — not the truncated tail a window-local replay produced.
+function qGenerated(date) {
+  const num = qNum(date);
+  if (num < 1) return qCore().generate(date, { allowFallback: true });
+  const scheduled = qScheduled(date, num);
+  if (scheduled) return scheduled;
+  if (qChain[num]) return qChain[num];
+  const previousDays = [];
+  const comboDays = qCore().constants.QCOMBO_DAYS;
+  for (let k = Math.max(1, num - comboDays); k < num; k++) {
+    const previous = qGenerated(qShift(date, k - num));
+    if (previous) previousDays.push(previous);
+  }
+  return qChain[num] = qCore().generate(date, { previousDays, allowFallback: true });
+}
 function qStagesFor(date) {
   const num = qNum(date);
   if (num < 1) return qCore().generate(date, { allowFallback: true }).stages;
-  const scheduled = qScheduled(date, num);
-  if (scheduled) return scheduled.stages;
-  const first = Math.floor((num - 1) / QWIN) * QWIN + 1;
-  for (let i = first; i <= num; i++) {
-    const here = qShift(date, i - num);
-    if (qScheduled(here, i)) continue;
-    const previousDays = [];
-    const comboDays = qCore().constants.QCOMBO_DAYS;
-    for (let k = Math.max(1, i - comboDays); k < i; k++) {
-      const previous = qScheduled(qShift(here, k - i), k);
-      if (previous) previousDays.push(previous);
-    }
-    qChain[i] = qCore().generate(here, { previousDays, allowFallback: true });
-  }
-  return qChain[num].stages;
+  return qGenerated(date).stages;
 }
 const qGen = (date) => ({ date, num: qNum(date), stages: qStagesFor(date) });
 // small and muted so it reads as a footnote, not as part of the label it trails
@@ -712,7 +716,7 @@ async function qLoadCareer(pid, st) {
   try { [, career = []] = await careerOf(pid); } catch { career = []; }
   const spells = career.filter(e => e[0]);  // [team, start, end, apps, goals, loan]
   const names = new Set(st.clubs.map(ci => DB.clubs[ci][0]));  // canonical names match within a build
-  const open = spells.filter(sp => sp[1] && !sp[2]);  // started, no end recorded = ongoing
+  const open = spells.filter(sp => sp[1] && !sp[2] && stillPlaying(pid));  // started, no end, still young enough
   // the two clubs the player is best known for OUTSIDE the stage: a permanent
   // spell beats a loan, then the bigger tally, then the more recent one. Deduped
   // by name, since a return spell shows up twice.

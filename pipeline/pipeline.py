@@ -464,6 +464,18 @@ def career_year_issue(spells, current_year):
             return f"{team} has future open spell {start}–"
     return None
 
+def normalize_career_years(spells, current_year):
+    """Repair the year ranges career_year_issue flags, so a source record with no
+    clean prior version is fixed rather than dropped or shipped malformed."""
+    fixed = []
+    for team, start, end, apps, goals, loan in spells:
+        if start is not None and end is not None and end < start:
+            end = start
+        if start is not None and end is None and start > current_year:
+            end = start
+        fixed.append([team, start, end, apps, goals, loan])
+    return fixed
+
 def batched(seq, n):
     for i in range(0, len(seq), n): yield i // n, seq[i:i + n]
 
@@ -801,6 +813,11 @@ def stage_careers():
             accepted_source[p] = old_source.get(p)
             source_warning(f"kept last validated Wikidata career for {p}: {issue}")
         else:
+            if issue:
+                # No clean prior record to fall back on: repair the range instead of
+                # shipping (and caching) the malformed one.
+                candidate = normalize_career_years(candidate, current_year)
+                source_warning(f"normalized Wikidata career for {p}: {issue}")
             records[p] = candidate
     careers = {p: spells for p, spells in records.items() if spells}
     save("careers", careers)
@@ -885,10 +902,18 @@ FIELD = re.compile(r"\|\s*(years|clubs|caps|goals)(\d+)\s*=\s*([^|\n]*)")
 # reading a lone year as open-ended made a one-season stay sort as if it were current
 # (Diouf's 2023 at Basel outlived his 2023–2025 at Lens and the career read backwards).
 def wp_years(s):
-    m = re.search(r"(\d{4})\s*([–\-])?\s*(\d{4})?", s)
+    # The end may be abbreviated to the season's second year ("2004–05"), which
+    # shares the start's century; a lone four-digit year still reads as a closed
+    # single-season stay, and a trailing dash with nothing after it as open.
+    m = re.search(r"(\d{4})\s*([–\-])?\s*(\d{4}|\d{2}(?!\d))?", s)
     if not m: return None, None
     start = int(m.group(1))
-    if m.group(3): return start, int(m.group(3))
+    if m.group(3):
+        end = int(m.group(3))
+        if end < 100:
+            end += start // 100 * 100
+            if end < start: end += 100
+        return start, end
     return (start, None) if m.group(2) else (start, start)
 
 def wp_club(s):
@@ -1093,6 +1118,28 @@ def spell_end(start, end, moves, built_year, playing):
         end = end or (built_year if playing else start)
     repaired = not start <= end <= YEAR_MAX
     return (start if repaired else end), repaired
+
+def repair_spell_list(career, birth, built_year, who=""):
+    """Apply to a career the same repair spells_at applies to the years files: drop
+    an implausible start, collapse an inverted or out-of-range pair to its start, and
+    close an unclosed spell only when the player could not still be playing. Keeps
+    the career shards and the years files describing identical stays. Returns the
+    repaired spell list."""
+    moves = sorted(s for _, s, _, _, _, ln in career if s and not ln)
+    playing = bool(birth) and birth + END_AGE >= built_year
+    out = []
+    for team, s, e, a, g, ln in career:
+        if s is not None and not YEAR0 <= s <= YEAR_MAX:
+            source_warning(f"dropped {who} at {team}: implausible spell start {s}")
+            continue
+        if s is not None and not (e is None and playing):
+            original_end = e
+            e, repaired = spell_end(s, e, moves, built_year, playing)
+            if repaired:
+                source_warning(f"normalized {who} at {team} from {s}–"
+                               f"{original_end if original_end is not None else 'open'} to {s}–{e}")
+        out.append((team, s, e, a, g, ln))
+    return out
 
 # national sides (senior/under-NN/Olympic/women's, any sport) — not clubs, keep out of careers
 NATIONAL = re.compile(r"\bnational\b.*\bteam\b|nationalmannschaft"
@@ -1373,10 +1420,13 @@ def stage_build():
                  "names": names, "births": births, "nats": nats, "imgs": imgs}
         return index, player_qids, pid, club_qids, years
 
+    def repaired_spells(q):
+        birth = (attrs.get(q) or [None, None])[1]
+        return repair_spell_list(careers.get(q, ()), birth, built_year, q)
+
     def career_entries(q):
-        career = careers.get(q, ())
         entries = [[club_name.get(t, ""), s, e, a, g] + ([1] if ln else [])
-                   for t, s, e, a, g, ln in career
+                   for t, s, e, a, g, ln in repaired_spells(q)
                    if any(x is not None for x in (s, e, a, g))
                    and not NATIONAL.search(club_name.get(t, ""))]
         entries.sort(key=lambda x: (x[1] or 9999, x[2] or 9999))
@@ -1559,6 +1609,9 @@ def career_shard_errors(rows, shard, nshards, expected_ids, keyed_by_qid=False):
                     or not isinstance(spell[0], str)
                     or any(value is not None and (type(value) is not int or value < 0)
                            for value in spell[1:5])
+                    or any(value is not None and not YEAR0 <= value <= YEAR_MAX
+                           for value in spell[1:3])
+                    or (spell[1] is not None and spell[2] is not None and spell[2] < spell[1])
                     or (len(spell) == 6 and (type(spell[5]) is not int or spell[5] != 1))):
                 errors.append(f"career {key}: malformed spell")
     return errors

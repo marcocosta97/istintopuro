@@ -32,9 +32,16 @@ class DataIntegrityTests(unittest.TestCase):
                      {"0": [True, []]}, {"0": [1, [None]]},
                      {"0": [1, [[None, 2000, 2001, 10, 0]]]},
                      {"0": [1, [["Club", 2000, 2001, -1, 0]]]},
-                     {"0": [1, [["Club", 2000, 2001, 1.5, 0]]]}]:
+                     {"0": [1, [["Club", 2000, 2001, 1.5, 0]]]},
+                     {"0": [1, [["Club", 2000, 1990, 10, 0]]]},
+                     {"0": [1, [["Club", 2000, 3000, 10, 0]]]},
+                     {"0": [1, [["Club", 1200, 1300, 10, 0]]]}]:
             with self.subTest(rows=rows):
                 self.assertTrue(PIPELINE.career_shard_errors(rows, 0, 2, range(5)))
+
+    def test_ordered_career_years_are_accepted(self):
+        rows = {"0": [1, [["Club", 2000, 2001, 10, 0], ["Club", 2003, None, 0, 0]]]}
+        self.assertEqual(PIPELINE.career_shard_errors(rows, 0, 2, range(5)), [])
 
 
 if __name__ == "__main__":

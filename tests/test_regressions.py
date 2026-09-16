@@ -87,6 +87,40 @@ class WikipediaOverlayTests(unittest.TestCase):
             PIPELINE.career_year_issue([["Q1", 2025, None, 0, 0, 0]], 2026),
         )
 
+    def test_two_digit_end_years_expand_to_the_starts_century(self):
+        self.assertEqual(PIPELINE.wp_years("2004–05"), (2004, 2005))
+        self.assertEqual(PIPELINE.wp_years("1999–00"), (1999, 2000))
+        self.assertEqual(PIPELINE.wp_years("2004–2005"), (2004, 2005))
+        self.assertEqual(PIPELINE.wp_years("2005–"), (2005, None))
+        self.assertEqual(PIPELINE.wp_years("2005"), (2005, 2005))
+
+    def test_flagged_year_ranges_are_repaired_for_shard_emission(self):
+        self.assertEqual(
+            PIPELINE.normalize_career_years([["Q1", 1988, 1969, 2, 0, 0]], 2026),
+            [["Q1", 1988, 1988, 2, 0, 0]],
+        )
+        self.assertEqual(
+            PIPELINE.normalize_career_years([["Q1", 2027, None, 0, 0, 0]], 2026),
+            [["Q1", 2027, 2027, 0, 0, 0]],
+        )
+
+    def test_shard_repair_matches_the_years_file_rule(self):
+        # retired player (born 1923) with an unclosed last spell: closes at its start
+        retired = [["Ipswich Town F.C.", 1948, None, 356, 1, 0]]
+        self.assertEqual(PIPELINE.repair_spell_list(retired, 1923, 2026),
+                         [("Ipswich Town F.C.", 1948, 1948, 356, 1, 0)])
+        # still-playing player: an unclosed spell stays open, the open end is the client's
+        active = [["Club", 2024, None, 3, 0, 0]]
+        self.assertEqual(PIPELINE.repair_spell_list(active, 2000, 2026),
+                         [("Club", 2024, None, 3, 0, 0)])
+        # inverted, out-of-range and impossible-start spells
+        self.assertEqual(
+            PIPELINE.repair_spell_list(
+                [["A", 1988, 1969, 2, 0, 0], ["B", 1920, 2921, 1, 0, 0],
+                 ["C", 1299, 9999, 0, 0, 0]], 1900, 2026),
+            [("A", 1988, 1988, 2, 0, 0), ("B", 1920, 1920, 1, 0, 0)],
+        )
+
     def test_future_open_spell_is_represented_by_its_start_year(self):
         self.assertEqual(
             PIPELINE.spell_end(2027, None, [], built_year=2026, playing=True),
