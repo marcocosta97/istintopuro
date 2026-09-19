@@ -136,12 +136,13 @@ function qStagesFromQids(rows, state = null) {
     const clubs = qids.map(qid => CORE_DB.byQid.get(qid));
     if (clubs.some(ci => ci === undefined) || new Set(clubs).size !== clubs.length) return null;
     const raw = intersect(clubs.map(postings));
-    const answers = qEffective(clubs, raw);
-    if (answers.length) return { clubs, answers, effective: answers, ease: qEase(clubs, answers) };
+    const answers = qCore().answerSet(raw);
+    const effective = qCore().qEffective(clubs, raw);
+    if (effective.length) return { clubs, answers, effective, ease: qEase(clubs, effective) };
     const hit = state?.guesses?.find(guess => guess.stage === stageIndex && guess.ok
       && Number.isInteger(guess.pid) && DB.names[guess.pid] === guess.name);
     if (hit) {
-      return { clubs, answers: [], effective: [], ease: -Infinity, grandfatheredFace: hit.pid };
+      return { clubs, answers, effective: [], ease: -Infinity, grandfatheredFace: hit.pid };
     }
     if (!state) return null;
     generated ||= qGen(state.date).stages;
@@ -766,26 +767,12 @@ function qIdentikit(p, st) {
   return s;
 }
 
-// The nationality hint counts the whole candidate pool, not just the scored answers:
-// a player Wikidata registers at every club but credits with 0 appearances is dropped
-// by qEffective (guessing one is answered "0 presenze"), yet he is still part of what
-// the clubs turn up, and leaving his country out narrows the hint below the stage.
-// Indistinguishable ids are deduped the same way qEffective dedupes them.
-function qNatAnswerPool(st) {
-  const seen = new Set(), out = [];
-  for (const p of intersect(st.clubs.map(postings))) {
-    const key = qIdentity(p);
-    if (seen.has(key)) continue;
-    seen.add(key); out.push(p);
-  }
-  return out;
-}
 function qHintText(kind, st) {
   const q = QSTR[lang];
   kind = qHintKey(kind, st);
-  if (kind === "nat") {  // count per nationality, biggest first; unknown = "?"
+  if (kind === "nat") {  // count per nationality over every accepted answer, biggest first; unknown = "?"
     const cnt = new Map();
-    for (const p of qNatAnswerPool(st)) { const cc = DB.nats[p]; cnt.set(cc, (cnt.get(cc) || 0) + 1); }
+    for (const p of st.answers) { const cc = DB.nats[p]; cnt.set(cc, (cnt.get(cc) || 0) + 1); }
     return [...cnt].sort((a, b) => b[1] - a[1])
       .map(([cc, n]) => `${n} ${cc ? flag(cc) : "?"}`).join(" · ");
   }
@@ -861,8 +848,10 @@ function qRenderEnd() {
     <div class="qmeta">${esc(line)}</div>`;
   if (!qs.won) {  // reveal the stage that ended the run, most recognisable first
     const stg = qPz.stages[qs.stage];
-    const byFame = qRanked(stg);
-    html += `<div class="qreveal"><b>${q.qReveal(stg.answers.length)}</b>`
+    const byFame = qRanked(stg);  // the difficulty set first…
+    const revealed = new Set(byFame.map(qIdentity));
+    for (const p of stg.answers) if (!revealed.has(qIdentity(p))) byFame.push(p);  // …then the 0-app answers
+    html += `<div class="qreveal"><b>${q.qReveal(byFame.length)}</b>`
       + byFame.slice(0, 10).map(p => `<button type="button" class="qrp" data-p="${p}">${esc(DB.names[p])}</button>`).join(", ")
       + (byFame.length > 10 ? ` <button type="button" class="qrmore" data-s="${qs.stage}">${q.qOthers(byFame.length - 10)}</button>` : "")
       + `</div>`;

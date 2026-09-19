@@ -205,16 +205,22 @@
       return ease;
     }
     const playerIdentity = (pid) => `${DB.names[pid]}\u0000${DB.births[pid] || ""}\u0000${DB.nats[pid] || ""}`;
-    const qEffective = (clubs, answers) => {
+    // The accepted answer set: everyone the clubs turn up, deduped the way a guess
+    // is matched (by identity). It includes players Wikidata registers with 0
+    // appearances, since naming one is a correct answer.
+    const qAnswerSet = (answers) => {
       const seen = new Set();
       return answers.filter(pid => {
-        if (clubs.some(ci => qApps(ci, pid) === 0)) return false;
         const key = playerIdentity(pid);
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
       });
     };
+    // The difficulty candidate set: the accepted answers minus the 0-appearance
+    // registrations, which must not make a stage look easier or harder than it is.
+    const qEffective = (clubs, answers) => qAnswerSet(answers)
+      .filter(pid => !clubs.some(ci => qApps(ci, pid) === 0));
     const qComboKey = (clubs) => clubs.slice().sort((a, b) => a - b).join(",");
     const comboCache = new Map();
     function qComboInfo(clubs) {
@@ -400,8 +406,9 @@
         }
         if (candidates.size) {
           const stage = chooseBalanced(candidates, rng, used, usedFaces, clubUse, countryUse);
-          const effective = qEffective(stage.clubs, intersect(stage.clubs.map(postings)));
-          return { ...stage, answers: effective, effective, ease: qEase(stage.clubs, effective), fallback: false };
+          const raw = intersect(stage.clubs.map(postings));
+          const effective = qEffective(stage.clubs, raw);
+          return { ...stage, answers: qAnswerSet(raw), effective, ease: qEase(stage.clubs, effective), fallback: false };
         }
       }
       if (!allowFallback) return null;
@@ -416,7 +423,8 @@
         [pairs[i], pairs[j]] = [pairs[j], pairs[i]];
       }
       for (const clubs of pairs) {
-        const effective = qEffective(clubs, intersect(clubs.map(postings)));
+        const raw = intersect(clubs.map(postings));
+        const effective = qEffective(clubs, raw);
         if (!effective.length) continue;
         const face = qFace({ clubs, answers: effective, effective });
         if (!qUsableName(face) || usedFaces.has(face)) continue;
@@ -426,7 +434,7 @@
           countryUse.set(country, (countryUse.get(country) || 0) + 1);
         });
         usedFaces.add(face);
-        return { clubs, answers: effective, effective, ease: qEase(clubs, effective), tier: -1, fallback: true };
+        return { clubs, answers: qAnswerSet(raw), effective, ease: qEase(clubs, effective), tier: -1, fallback: true };
       }
       return null;
     }
@@ -515,8 +523,9 @@
         if (!Array.isArray(row) || row.length < 2 || row.length > 3) return null;
         const clubs = row.map(qid => DB.byQid.get(qid));
         if (clubs.some(ci => ci === undefined) || new Set(clubs).size !== clubs.length) return null;
-        const effective = qEffective(clubs, intersect(clubs.map(postings)));
-        return effective.length ? { clubs, answers: effective, effective, ease: qEase(clubs, effective), tier: null, fallback: false } : null;
+        const raw = intersect(clubs.map(postings));
+        const effective = qEffective(clubs, raw);
+        return effective.length ? { clubs, answers: qAnswerSet(raw), effective, ease: qEase(clubs, effective), tier: null, fallback: false } : null;
       });
       return stages.every(Boolean) ? stages : null;
     }
@@ -567,7 +576,8 @@
       validateEntry, validateScheduleEntry: validateEntry, stagesFromQids, serializeStages, stageDiagnostics,
       qHash, qRng, qNum, qShift, qPools, qApps, qGoals, appearanceGaps, qFame, qBridgeFame,
       qRecognitionWeight, qRecognisableBreadth, qUsableName, qEase,
-      qEffective, effectiveAnswers: qEffective, qComboInfo, qComboKey, qRanked, rankedAnswers: qRanked,
+      qEffective, effectiveAnswers: qEffective, qAnswerSet, answerSet: qAnswerSet,
+      qComboInfo, qComboKey, qRanked, rankedAnswers: qRanked,
       qFace, face: qFace, playerIdentity, answerMatches, nextHintTarget, migrateState, restoreHistoryState,
       careerCacheKey, careerViewKey, clubCountry: leagueCC,
       resetCaches: () => comboCache.clear(),

@@ -66,24 +66,27 @@ test("extracted scorer reproduces the pinned snapshot and stays internally consi
     const [stage] = core.stagesFromQids([qids]);
     assert.ok(stage, `${day.date}: ${qids.join(" x ")} must resolve`);
     const ranked = core.rankedAnswers(stage);
-    assert.ok(ranked.length && core.qUsableName(ranked[0]) && stage.answers.includes(ranked[0]),
+    assert.ok(ranked.length && core.qUsableName(ranked[0]) && stage.effective.includes(ranked[0]),
       `${day.date}: ${qids.join(" x ")} needs a usable representative`);
     if (!pinned) continue;
     const raw = intersect(stage.clubs.map(postings));
-    assert.equal(stage.answers.length, count, `${day.date}: ${qids.join(" x ")} count`);
+    assert.equal(stage.effective.length, count, `${day.date}: ${qids.join(" x ")} count`);
     assert.equal(Math.round(stage.ease), ease, `${day.date}: ${qids.join(" x ")} ease`);
     assert.equal(DB.names[core.face({ clubs: stage.clubs, answers: raw })], face,
       `${day.date}: ${qids.join(" x ")} legacy face`);
   }
 });
 
-test("effective answers remove every known zero-appearance registration", () => {
+test("zero-appearance registrations are accepted answers but not difficulty candidates", () => {
   const { core, intersect, postings } = runtime();
   const [stage] = core.stagesFromQids([["Q41420", "Q106394"]]);
   const raw = intersect(stage.clubs.map(postings));
   const registeredOnly = raw.find(pid => core.appearanceGaps(pid, stage.clubs).zero.length);
-  assert.equal(stage.answers.length < raw.length, true);
-  assert.equal(stage.answers.every(pid => stage.clubs.every(ci => core.qApps(ci, pid) !== 0)), true);
+  assert.ok(registeredOnly !== undefined);
+  assert.equal(core.answerMatches(registeredOnly, stage.answers), true);
+  assert.equal(core.answerMatches(registeredOnly, stage.effective), false);
+  assert.equal(stage.answers.length > stage.effective.length, true);
+  assert.equal(stage.effective.every(pid => stage.clubs.every(ci => core.qApps(ci, pid) !== 0)), true);
   assert.equal(core.appearanceGaps(registeredOnly, stage.clubs).missing.length, 0);
   assert.equal(core.appearanceGaps(registeredOnly, stage.clubs).zero.length > 0, true);
 });
@@ -91,16 +94,16 @@ test("effective answers remove every known zero-appearance registration", () => 
 test("bridge recognisability penalizes cameos without penalizing unknown historical totals", () => {
   const { DB, core } = runtime();
   const [dortmundSociedad] = core.stagesFromQids([["Q41420", "Q10315"]]);
-  const weakestLinks = dortmundSociedad.answers.map(pid =>
+  const weakestLinks = dortmundSociedad.effective.map(pid =>
     Math.min(...dortmundSociedad.clubs.map(ci => core.qApps(ci, pid))));
   assert.equal(Math.max(...weakestLinks), 8);
   assert.equal(dortmundSociedad.ease >= 390 && dortmundSociedad.ease < 425, true);
   assert.equal(dortmundSociedad.ease < core.constants.QEASY[0].ease[0], true);
-  const isak = dortmundSociedad.answers.find(pid => DB.names[pid] === "Alexander Isak");
+  const isak = dortmundSociedad.effective.find(pid => DB.names[pid] === "Alexander Isak");
   assert.equal(core.qBridgeFame(isak, dortmundSociedad.clubs) < core.qFame(isak, dortmundSociedad.clubs), true);
 
   const [celtaSevilla] = core.stagesFromQids([["Q8749", "Q10329"]]);
-  const balbino = celtaSevilla.answers.find(pid => DB.names[pid] === "Balbino Clemente");
+  const balbino = celtaSevilla.effective.find(pid => DB.names[pid] === "Balbino Clemente");
   assert.equal(celtaSevilla.clubs.every(ci => core.qApps(ci, balbino) < 0), true);
   assert.equal(core.qBridgeFame(balbino, celtaSevilla.clubs), core.qFame(balbino, celtaSevilla.clubs));
   assert.deepEqual(core.appearanceGaps(balbino, celtaSevilla.clubs), { missing: [], zero: [] });
@@ -109,8 +112,8 @@ test("bridge recognisability penalizes cameos without penalizing unknown histori
 test("large intersections earn ease from recognisable breadth rather than raw answer count", () => {
   const { core } = runtime();
   const [atalantaJuventus] = core.stagesFromQids([["Q1886", "Q1422"]]);
-  const breadth = core.qRecognisableBreadth(atalantaJuventus.clubs, atalantaJuventus.answers);
-  assert.equal(atalantaJuventus.answers.length, 90);
+  const breadth = core.qRecognisableBreadth(atalantaJuventus.clubs, atalantaJuventus.effective);
+  assert.equal(atalantaJuventus.effective.length, 90);
   assert.equal(breadth < 15, true);
   assert.equal(atalantaJuventus.ease >= core.constants.QEASY[0].ease[0], true);
 });
@@ -156,7 +159,7 @@ test("generation is deterministic, ordered, effective, and honors QID prior cont
   assert.equal(first.num, 1);
   assert.deepEqual(core.generate(SERIES_START), first);
   assert.equal(first.stages.every((stage, i) => !i || first.stages[i - 1].ease > stage.ease), true);
-  assert.equal(first.stages.every(stage => stage.answers.length > 0 && !stage.fallback), true);
+  assert.equal(first.stages.every(stage => stage.effective.length > 0 && !stage.fallback), true);
   const previousDays = [{ date: first.date, stages: core.serializeStages(first.stages) }];
   const next = core.generate("2026-08-22", { previousDays });
   const yesterday = new Set(first.stages.flatMap(stage => stage.clubs));
