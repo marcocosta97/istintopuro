@@ -766,12 +766,26 @@ function qIdentikit(p, st) {
   return s;
 }
 
+// The nationality hint counts the whole candidate pool, not just the scored answers:
+// a player Wikidata registers at every club but credits with 0 appearances is dropped
+// by qEffective (guessing one is answered "0 presenze"), yet he is still part of what
+// the clubs turn up, and leaving his country out narrows the hint below the stage.
+// Indistinguishable ids are deduped the same way qEffective dedupes them.
+function qNatAnswerPool(st) {
+  const seen = new Set(), out = [];
+  for (const p of intersect(st.clubs.map(postings))) {
+    const key = qIdentity(p);
+    if (seen.has(key)) continue;
+    seen.add(key); out.push(p);
+  }
+  return out;
+}
 function qHintText(kind, st) {
   const q = QSTR[lang];
   kind = qHintKey(kind, st);
   if (kind === "nat") {  // count per nationality, biggest first; unknown = "?"
     const cnt = new Map();
-    for (const p of st.answers) { const cc = DB.nats[p]; cnt.set(cc, (cnt.get(cc) || 0) + 1); }
+    for (const p of qNatAnswerPool(st)) { const cc = DB.nats[p]; cnt.set(cc, (cnt.get(cc) || 0) + 1); }
     return [...cnt].sort((a, b) => b[1] - a[1])
       .map(([cc, n]) => `${n} ${cc ? flag(cc) : "?"}`).join(" · ");
   }
