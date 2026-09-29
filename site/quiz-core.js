@@ -26,6 +26,14 @@
   const QBREADTH_FULL_FAME = 350;
   const QFACE_GUARD_DAYS = 14;
   const QCLUB_SOFT_DAYS = 7;
+  // The impossible tier anchors on its first (obscure) club, and the 730-day audit
+  // reads the day's country from that club. A flat posting cutoff starves a bimodal
+  // league like England — dozens of clubs at 300+ postings but only three below 200 —
+  // so its impossible share becomes a knife-edge that flips between refreshes while
+  // denser leagues keep theirs. Every covered country is guaranteed a floor of
+  // anchors instead.
+  const QOBS_MAX_POSTINGS = 250;
+  const QOBS_MIN_ANCHORS = 6;
   const QEASY = [
     { p: ["star", "field"], size: [2, 1e9], ease: [545, 1e9] },
     { p: ["star", "field"], size: [2, 1e9], ease: [505, 1e9] },
@@ -117,16 +125,37 @@
         for (const d of DB.gks || []) DB.gkSet.add(a += d);
       }
       const star = [], sub = [], obs = [], any300 = [], any100 = [];
+      const covered = new Set(DB.leagues.map(league => league[2]));
+      const anchorCandidates = {};
       DB.clubs.forEach((c, i) => {
         const n = DB.postings[i].length;
         const topDiv = !c[4] && DB.topLeagues.has(c[5] ?? -1);
         if (n < 30) return;
         if (topDiv && n >= 400) star.push(i);
         if (!c[4] && (c[5] ?? -1) >= 0 && n >= 120 && n < 400) sub.push(i);
-        if (n < 250) obs.push(i);
+        if (n < QOBS_MAX_POSTINGS) obs.push(i);
         if (n >= 300) any300.push(i);
         if (n >= 100) any100.push(i);
+        const cc = leagueCC(i);
+        if (covered.has(cc)) (anchorCandidates[cc] ??= []).push(i);
       });
+      // Top every covered country up to the anchor floor. This only ever widens the
+      // sparse leagues, and the impossible tier's size and ease caps keep the
+      // promoted clubs just as hard; a marquee club would never read as obscure.
+      const starSet = new Set(star);
+      const anchorCount = new Map();
+      for (const ci of obs) anchorCount.set(leagueCC(ci), (anchorCount.get(leagueCC(ci)) || 0) + 1);
+      const obsSet = new Set(obs);
+      for (const [cc, clubs] of Object.entries(anchorCandidates)) {
+        let have = anchorCount.get(cc) || 0;
+        if (have >= QOBS_MIN_ANCHORS) continue;
+        clubs.sort((a, b) => DB.postings[a].length - DB.postings[b].length);
+        for (const ci of clubs) {
+          if (obsSet.has(ci) || starSet.has(ci)) continue;
+          obsSet.add(ci); obs.push(ci);
+          if (++have >= QOBS_MIN_ANCHORS) break;
+        }
+      }
       DB.qMApps = new Float32Array(DB.names.length);
       DB.qMGoals = new Float32Array(DB.names.length);
       DB.clubs.forEach((c, ci) => {
