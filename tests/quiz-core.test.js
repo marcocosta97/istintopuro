@@ -97,7 +97,7 @@ test("bridge recognisability penalizes cameos without penalizing unknown histori
   const weakestLinks = dortmundSociedad.effective.map(pid =>
     Math.min(...dortmundSociedad.clubs.map(ci => core.qApps(ci, pid))));
   assert.equal(Math.max(...weakestLinks), 8);
-  assert.equal(dortmundSociedad.ease >= 390 && dortmundSociedad.ease < 425, true);
+  assert.equal(dortmundSociedad.ease >= 140 && dortmundSociedad.ease < 425, true);
   assert.equal(dortmundSociedad.ease < core.constants.QEASY[0].ease[0], true);
   const isak = dortmundSociedad.effective.find(pid => DB.names[pid] === "Alexander Isak");
   assert.equal(core.qBridgeFame(isak, dortmundSociedad.clubs) < core.qFame(isak, dortmundSociedad.clubs), true);

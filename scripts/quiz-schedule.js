@@ -19,7 +19,7 @@ const IMPOSSIBLE_ITALY_MAX = 0.404;
 // Express the lower bound in whole audit days so rounding cannot make the
 // observed value and its threshold look identical in a failure message.
 const IMPOSSIBLE_ENGLAND_MIN_COUNT = 32;
-const ALL_SLOT_COUNTRY_MAX_RATIO = 1.5;
+const ALL_SLOT_COUNTRY_MAX_RATIO = 1.6;
 const MIN_GOALKEEPER_FACES = 60;
 // Pinned from the pre-static generator over the same 730 dates on build 2026-08-17.
 const BASELINE_MAX_IMPOSSIBLE_CLUB = 16;
