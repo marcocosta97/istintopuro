@@ -63,10 +63,9 @@ const STR = {
     about: "Due modi di giocare con «Istinto Puro». Solver: scegli squadre, campionati o paesi e scopri chi li unisce. Schedina giornaliera: quattro sfide di difficoltà crescente, le stesse per tutti. Dati estratti da Wikidata.",
     aboutLeagues: "Campionati coperti (tutte le stagioni):",
     packsTitle: "Campionati opzionali",
-    packsNote: "Ogni pack aggiunge le prime due divisioni al solver. La Schedina resta uguale per tutti.",
+    packsNote: "Ogni pack pesa circa 200kB e aggiunge le prime due divisioni al solver. La Schedina resta uguale per tutti.",
     packOn: "attivo", packOff: "non scaricato", packLoading: "download…",
     packRemoving: "rimozione…", packFailed: "download non riuscito", packRetry: "riprova",
-    packSize: (n) => `${n.toLocaleString("it", { maximumFractionDigits: 1 })} MB iniziali`,
     packRequired: (names) => `Questo link usa ${names}. Attiva il pack per ripristinare tutte le squadre.`,
     disclaimer: `Nessun dato viene raccolto: tutto avviene nel tuo browser, senza server né tracciamento. Codice open source (<a href="${REPO}" target="_blank" rel="noopener">MIT su GitHub</a>). Carattere: <a href="https://github.com/jpt/barlow" target="_blank" rel="noopener">Barlow Semi Condensed</a> (SIL OFL).`,
     remove: "rimuovi", clearAll: "svuota",
@@ -139,10 +138,9 @@ const STR = {
     about: "Two ways to play “Istinto Puro”. Solver: pick clubs, leagues, or countries and see who connects them. Daily quiz: four challenges of rising difficulty, the same for everyone. Data extracted from Wikidata.",
     aboutLeagues: "Leagues covered (all seasons):",
     packsTitle: "Optional leagues",
-    packsNote: "Each pack adds its top two divisions to the solver. The daily quiz stays the same for everyone.",
+    packsNote: "Each pack is about 200kB and adds its top two divisions to the solver. The daily quiz stays the same for everyone.",
     packOn: "enabled", packOff: "not downloaded", packLoading: "downloading…",
     packRemoving: "removing…", packFailed: "download failed", packRetry: "retry",
-    packSize: (n) => `${n.toLocaleString("en", { maximumFractionDigits: 1 })} MB initial`,
     packRequired: (names) => `This link uses ${names}. Enable the pack to restore every club.`,
     disclaimer: `No data is collected: everything happens in your browser, with no server or tracking. Open source (<a href="${REPO}" target="_blank" rel="noopener">MIT on GitHub</a>). Typeface: <a href="https://github.com/jpt/barlow" target="_blank" rel="noopener">Barlow Semi Condensed</a> (SIL OFL).`,
     remove: "remove", clearAll: "clear",
@@ -349,8 +347,8 @@ const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">"
 // letters with no canonical NFD decomposition (Đ, Ø, Ł, Æ...) would otherwise
 // just get dropped by the a-z filter below instead of matching their ASCII spelling
 const TRANSLIT = { đ: "d", Đ: "D", ø: "o", Ø: "O", ł: "l", Ł: "L", æ: "ae", Æ: "AE",
-                    œ: "oe", Œ: "OE", þ: "th", Þ: "TH", ð: "d", Ð: "D", ß: "ss" };
-const norm = (s) => s.replace(/[đĐøØłŁæÆœŒþÞðÐß]/g, (c) => TRANSLIT[c])
+                    œ: "oe", Œ: "OE", þ: "th", Þ: "TH", ð: "d", Ð: "D", ß: "ss", ı: "i" };
+const norm = (s) => s.replace(/[đĐøØłŁæÆœŒþÞðÐßı]/g, (c) => TRANSLIT[c])
                      .normalize("NFD").replace(/[̀-ͯ]/g, "")
                      .toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 const initialsOf = (s) => norm(s).split(" ").filter(w => w.length > 2).map(w => w[0]).join("");
@@ -593,19 +591,21 @@ function renderPacks() {
     const desc = document.createElement("div");
     desc.className = "packdesc";
     desc.innerHTML = `<strong>${countryFlag(meta.cc)} ${esc(countryName(meta.cc))}</strong>`
-      + `<small>${meta.leagues.map(esc).join(" · ")} · ${esc(t.packSize(meta.bytes / 1e6))}</small>`;
+      + ` <small>${meta.leagues.map(esc).join(" · ")}</small>`;
+    desc.title = meta.leagues.join(" · ");
     const ctl = document.createElement("div");
     ctl.className = "packtoggle";
     const state = document.createElement("span");
     state.className = "packstate";
     const failed = packFailures.has(meta.id), busy = packBusy.has(meta.id);
+    state.hidden = !failed && !busy;
     state.textContent = busy ? (enabled.has(meta.id) ? t.packRemoving : t.packLoading)
       : failed ? t.packFailed : active.has(meta.id) ? t.packOn : t.packOff;
     const label = document.createElement("label");
     label.className = "dtg";
     const input = document.createElement("input");
     input.type = "checkbox"; input.checked = enabled.has(meta.id); input.disabled = busy;
-    input.setAttribute("aria-label", `${countryName(meta.cc)} — ${input.checked ? t.packOn : t.packOff}`);
+    input.setAttribute("aria-label", `${countryName(meta.cc)} — ${meta.leagues.join(" · ")} — ${state.textContent}`);
     input.onchange = () => togglePack(meta, input.checked);
     const knob = document.createElement("span"); knob.className = "knob";
     label.append(input, knob); ctl.append(state, label);

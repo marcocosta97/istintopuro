@@ -95,14 +95,20 @@ h1 .accent { color: var(--accent); }
   border-radius: 7px; font-size: .8rem; margin-top: .6rem; padding: .4rem .55rem;
 }
 .packrow {
-  display: flex; align-items: center; gap: .65rem; padding: .65rem 0;
+  display: flex; align-items: center; gap: .5rem;
   border-bottom: 1px solid var(--line);
 }
-.packrow:last-child { border-bottom: 0; padding-bottom: 0; }
-.packdesc { min-width: 0; flex: 1; }
-.packdesc strong { display: block; font: 600 .95rem var(--display); }
-.packdesc small, .packstate { color: var(--muted); font-size: .76rem; }
-.packtoggle { display: flex; flex-direction: column; align-items: flex-end; gap: .2rem; }
+.packrow:last-child { border-bottom: 0; }
+.packdesc { min-width: 0; flex: 1; padding: .35rem 0; line-height: 1.35; }
+.packdesc strong { font: 600 .95rem var(--display); white-space: nowrap; }
+.packdesc small { color: var(--muted); font-size: .72rem; }
+.packstate { color: var(--muted); font-size: .76rem; }
+.packtoggle {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+  gap: .35rem; max-width: 60%;
+}
+.packtoggle .dtg { margin-left: 0; min-width: 44px; min-height: 44px; justify-content: center; }
+.packstate { max-width: 8rem; }
 .packretry {
   cursor: pointer; color: var(--accent); background: transparent; border: 0;
   font: inherit; font-size: .76rem; text-decoration: underline;
