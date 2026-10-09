@@ -13,11 +13,12 @@ Live at **[istintopuro.mcosta.it](https://istintopuro.mcosta.it)**.
 
 ## How it works
 
-Everything runs in the browser. The core dataset — ~69k players and 474 clubs
+Everything runs in the browser. The core dataset — ~72k players and 469 clubs
 covering the top-5 European leagues and their second divisions, all-time —
 is extracted from Wikidata and precomputed into a static index that the
 client intersects in under a millisecond. Optional country packs add their
-top two divisions only when a user enables them; Portugal is the first pack.
+top two divisions only when a user enables them: Portugal, the Netherlands,
+Belgium, Turkey, Brazil and Argentina. Reserve teams are excluded.
 The daily quiz deliberately remains core-only, so its puzzles stay identical
 for everyone. Photos (Wikimedia Commons),
 nationalities and loan spells come from the same extraction; careers that
@@ -59,9 +60,12 @@ come from the Wikipedia overlay, and for seeded players it is their only
 source, so a broken parse degrades or empties the data without changing any
 of the counts the shrink guards watch. Pack indexes, lazy career shards and
 spell-year files pass the same structural and coverage checks independently.
+Appearance coverage has an 85% floor, except Brazil (75%): its historical
+source infoboxes often omit totals. Unknown counts stay unknown; the same
+two-percentage-point baseline regression guard applies to every pack.
 One list needs a human:
 `CURRENT` in `pipeline.py` (each league's clubs this season) — refresh it
-every August.
+every August, and at the start of the calendar-year seasons for Brazil and Argentina.
 
 ## Running locally
 

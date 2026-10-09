@@ -64,3 +64,24 @@ test("malformed packs are rejected before composition", () => {
   assert.match(checked.errors.join("\n"), /apps\/club count mismatch/);
   assert.throws(() => compose(core(), [pt]), /apps\/club count mismatch/);
 });
+
+test("all optional countries preserve league masks and deduplicate shared players", () => {
+  const input = core();
+  input.leagues = Array.from({ length: 10 }, (_, i) => [`Core ${i}`, i % 2 + 1, "IT"]);
+  const packs = ["pt", "nl", "be", "tr", "br", "ar"].map(id => {
+    const data = pack(id, 100);
+    data.clubs[0][2] = 3;  // played in both divisions
+    data.clubs[0][5] = 1;  // currently in the second division
+    return data;
+  });
+  const result = compose(input, packs);
+  assert.equal(result.leagues.length, 22);
+  assert.equal(result.names.length, 2);
+  packs.forEach((p, i) => {
+    const offset = 10 + 2 * i;
+    assert.equal(result.clubs[i + 1][2], 3 << offset);
+    assert.equal(result.clubs[i + 1][5], offset + 1);
+    assert.deepEqual(result.postings[i + 1], [1]);
+  });
+  assert.deepEqual(result.leagues.slice(0, 10), input.leagues);
+});

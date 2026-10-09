@@ -359,6 +359,123 @@ PACKS = {
         },
         "expected_current": [18, 15],
     },
+    "nl": {
+        "cc": "NL",
+        "leagues": {"Q167541": ("Eredivisie", 1, "NL"),
+                    "Q610823": ("Eerste Divisie", 2, "NL")},
+        "current": {
+            "Q167541": [  # 2026–27
+                "Q24904", "Q81888", "Q191264", "Q370712",  # ADO, Ajax, AZ, Excelsior
+                "Q24711", "Q19603", "Q24680", "Q134241",  # Groningen, Twente, Utrecht, Feyenoord
+                "Q854167", "Q749589", "Q318348", "Q269151",  # Fortuna, Go Ahead, NEC, PEC
+                "Q11938", "Q875120", "Q200321", "Q1071713",  # PSV, Cambuur, Heerenveen, Telstar
+                "Q209895", "Q332664",  # Sparta, Willem II
+            ],
+            "Q610823": [  # Jong Ajax/AZ/PSV/Utrecht excluded
+                "Q653119", "Q221927", "Q875169", "Q1045811",  # Almere, De Graafschap, Den Bosch, Dordrecht
+                "Q876699", "Q1061627", "Q738060", "Q636315",  # Eindhoven, Emmen, Volendam, Helmond
+                "Q11961", "Q876568", "Q332642", "Q24699",  # Heracles, MVV, NAC, RKC
+                "Q24719", "Q219233", "Q1149034", "Q24689",  # Roda, Vitesse, TOP Oss, VVV
+            ],
+        },
+        "expected_current": [18, 16],
+    },
+    "be": {
+        "cc": "BE",
+        "leagues": {"Q216022": ("Belgian Pro League", 1, "BE"),
+                    "Q23925620": ("Challenger Pro League", 2, "BE")},
+        "current": {
+            "Q216022": [  # 2026–27
+                "Q364698", "Q190916", "Q18232", "Q216032",  # Cercle, Club Brugge, Gent, Genk
+                "Q618620", "Q113000", "Q849544", "Q1668203",  # Kortrijk, Mechelen, Westerlo, Lommel
+                "Q916199", "Q536651", "Q187528", "Q732002",  # Leuven, La Louvière, Anderlecht, Antwerp
+                "Q19585", "Q196160", "Q509170", "Q376635",  # Charleroi, Union SG, Beveren, Zulte
+                "Q138248", "Q190561",  # Sint-Truiden, Standard
+            ],
+            "Q23925620": [  # Club NXT, RSCA Futures, Jong Genk/Gent excluded
+                "Q1065328", "Q18001655", "Q2268833", "Q1423718",  # Dender, Francs Borains, Beerschot, Eupen
+                "Q95183770", "Q2313985", "Q2308515", "Q1347229",  # Lokeren, Lierse, Patro Eisden, Liège
+                "Q925973", "Q650917", "Q2456491",  # Seraing, Virton, Hasselt
+            ],
+        },
+        "expected_current": [18, 11],
+    },
+    "tr": {
+        "cc": "TR",
+        "leagues": {"Q485568": ("Süper Lig", 1, "TR"),
+                    "Q1141692": ("TFF 1. Lig", 2, "TR")},
+        "current": {
+            "Q485568": [  # 2026–27
+                "Q1636019", "Q1231804", "Q172567", "Q2426819",  # Alanya, Amed, Beşiktaş, Erzurum
+                "Q118919", "Q6601875", "Q495299", "Q824850",  # Eyüp, Fenerbahçe, Galatasaray, Gaziantep
+                "Q641373", "Q1423118", "Q138230", "Q513237",  # Gençlerbirliği, Göztepe, Kasımpaşa, Kocaeli
+                "Q513840", "Q430107", "Q192641", "Q272712",  # Konya, Samsun, Trabzon, Rize
+                "Q19613395", "Q857938",  # Çorum, Başakşehir
+            ],
+            "Q1141692": [
+                "Q1536956", "Q43710", "Q806415", "Q4869413",  # Keçiörengücü, Antalya, Bandırma, Batman
+                "Q20472948", "Q891679", "Q203573", "Q31192116",  # Bodrum, Bolu, Bursa, Erok
+                "Q1398111", "Q108368442", "Q608122", "Q18411460",  # Karagümrük, Iğdır, Kayseri, Manisa
+                "Q97205551", "Q989553", "Q1347349", "Q1933473",  # Mardin, Muğla, Pendik, Sarıyer
+                "Q372599", "Q815349", "Q6062228", "Q344328",  # Sivas, Van, Ümraniye, İstanbulspor
+            ],
+        },
+        "expected_current": [18, 20],
+    },
+    "br": {
+        "cc": "BR",
+        "leagues": {"Q206813": ("Brasileirão Série A", 1, "BR"),
+                    "Q610175": ("Brasileirão Série B", 2, "BR")},
+        "current": {
+            "Q206813": [  # calendar-year 2026 season
+                "Q2536715", "Q80958", "Q17479", "Q5014111",  # Chapecoense, Botafogo, Flamengo, Vasco
+                "Q506832", "Q270995", "Q2552872", "Q478317",  # Athletico, Atlético MG, Remo, Coritiba
+                "Q188277", "Q198032", "Q274465", "Q80987",  # Cruzeiro, Bahia, Vitória, Fluminense
+                "Q221695", "Q2622870", "Q541744", "Q35933",  # Grêmio, Mirassol, Bragantino, Corinthians
+                "Q80845", "Q80964", "Q80955", "Q38568",  # Internacional, Palmeiras, Santos, São Paulo
+            ],
+            "Q610175": [
+                "Q338285", "Q219120", "Q9636189", "Q198034",  # América MG, Ponte Preta, Athletic, Atlético GO
+                "Q374069", "Q2332493", "Q1052219", "Q73971",  # Avaí, Botafogo SP, Ceará, Náutico
+                "Q1024264", "Q598834", "Q2945011", "Q910453",  # CRB, Criciúma, Cuiabá, Juventude
+                "Q188841", "Q816779", "Q10292312", "Q1633430",  # Fortaleza, Goiás, Novorizontino, Londrina
+                "Q2580083", "Q219098", "Q557103", "Q1513287",  # Operário, Sport, São Bernardo, Vila Nova
+            ],
+        },
+        "expected_current": [20, 20],
+        # Brazilian historical infoboxes often list spells without appearance
+        # totals. Preserve those unknowns; the baseline guard still catches drops.
+        "apps_floor": 0.75,
+    },
+    "ar": {
+        "cc": "AR",
+        "leagues": {"Q223170": ("Primera División", 1, "AR"),
+                    "Q934724": ("Primera Nacional", 2, "AR")},
+        "current": {
+            "Q223170": [  # calendar-year 2026 season
+                "Q220621", "Q757470", "Q2469894", "Q170703",  # Argentinos, Atlético Tucumán, Barracas, Boca
+                "Q5060684", "Q971490", "Q692646", "Q59962",  # Central Córdoba, Aldosivi, Banfield, Belgrano
+                "Q327172", "Q214978", "Q324589", "Q151907",  # Huracán, Independiente, Lanús, Platense
+                "Q15799", "Q519966", "Q80886", "Q215163",  # River, Sarmiento, Tigre, Vélez
+                "Q18640", "Q1024338", "Q4382304", "Q214940",  # Gimnasia LP, Defensa, Riestra, Estudiantes LP
+                "Q8206935", "Q2707037", "Q2454482", "Q1421829",  # Estudiantes RC, Gimnasia M, Rivadavia, Instituto
+                "Q221882", "Q276533", "Q318307", "Q218282",  # Newell's, Racing, Rosario, San Lorenzo
+                "Q1022939", "Q80899",  # Talleres, Unión
+            ],
+            "Q934724": [
+                "Q646088", "Q59839", "Q2979984", "Q3384346",  # All Boys, Rafaela, Tristán Suárez, Central Norte
+                "Q853053", "Q3781627", "Q5772949", "Q1102935",  # Chacarita, Chaco, Agropecuario, Almagro
+                "Q1102931", "Q5136122", "Q1022904", "Q2057734",  # Almirante, Acassuso, Atlanta, Colegiales
+                "Q80897", "Q5773135", "Q2317584", "Q5487437",  # Colón, Güemes, Los Andes, Mitre
+                "Q744555", "Q1773830", "Q972701", "Q2979822",  # Nueva Chicago, Patronato, San Miguel, San Telmo
+                "Q2778591", "Q1102967", "Q5136249", "Q2979817",  # Temperley, Bolívar, Midland, Defensores
+                "Q919761", "Q3775566", "Q2318771", "Q2333719",  # Madryn, Maipú, Morón, Estudiantes BA
+                "Q910444", "Q1022923", "Q2759870", "Q80882",  # Ferro, Gimnasia J, Gimnasia y Tiro, Godoy Cruz
+                "Q775966", "Q632805", "Q80921", "Q1022938",  # Quilmes, Racing Córdoba, San Martín SJ/T
+            ],
+        },
+        "expected_current": [30, 36],
+    },
 }
 
 for _pack in PACKS.values():
@@ -366,16 +483,27 @@ for _pack in PACKS.values():
     LEAGUE_ORDER.extend(_pack["leagues"])
     CURRENT.update(_pack["current"])
 
+# Belgium's former second division is the historical predecessor of today's pack.
+LEAGUES["Q233199"] = ("Belgian Second Division", 2, "BE")
+LEAGUE_ALIAS["Q233199"] = "Q23925620"
+
 EXCLUDE_CLUB = re.compile(
     r"(\s(II|III|IV|B|C)|U-?\d{2}|Under-?\d{2}|[Yy]outh|Primavera|Castilla|Atl[eè]tic\b"
     r"|[Rr]eserves?|[Aa]cademy|[Ww]omen|[Ff]emen|[Ff]rauen|[Ff]éminin|[Ff]emminile)$"
-    r"|Castilla|\bU-?\d{2}\b", )
+    r"|Castilla|\bU-?\d{2}\b|^Jong\s", )
+RESERVE_NAME_EXCEPTIONS = {"Q332664"}  # Willem II is a senior club, including historically.
 
 # reserve teams the regex misses + junk items wrongly tagged with a big league
 BLOCKLIST = {
+    "Q50573061", "Q1770361", "Q24068131", "Q13534332",  # Dutch Jong teams
+    "Q101625593", "Q114056326",  # Club NXT, RSCA Futures
     "Q950835",    # Sevilla Atlético (reserve, Segunda)
     "Q48780921", "Q2137538", "Q16967366", "Q16848750", "Q130302376",  # TZ/BW/RO junk
 }
+
+# Incorrect source labels observed during pack verification; keep stable club names.
+CLUB_NAMES = {"Q2469894": "Barracas Central", "Q1022938": "San Martín de Tucumán",
+              "Q338285": "América Mineiro", "Q482262": "América de Natal"}
 
 _session = requests.Session()
 _session.headers.update({"User-Agent": UA, "Accept": "application/sparql-results+json"})
@@ -526,7 +654,7 @@ def stage_clubs():
         OPTIONAL {{ ?club wdt:P576 ?dissolved }}
         OPTIONAL {{ VALUES ?teamClass {{ wd:Q103229495 wd:Q15944511 }}
                     ?club wdt:P31 ?teamClass ; wdt:P361/wdt:P576 ?teamDissolved }}
-        SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul,it,es,de,fr". }}
+        SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul,it,es,de,fr,pt,nl,tr". }}
       }}""")
     clubs = {}
     for r in rows:
@@ -551,7 +679,7 @@ def stage_clubs():
           OPTIONAL {{ ?club wdt:P576 ?dissolved }}
           OPTIONAL {{ VALUES ?teamClass {{ wd:Q103229495 wd:Q15944511 }}
                       ?club wdt:P31 ?teamClass ; wdt:P361/wdt:P576 ?teamDissolved }}
-          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul,it,es,de,fr". }}
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul,it,es,de,fr,pt,nl,tr". }}
         }}"""):
             q = qid(v(r, "club"))
             clubs[q] = {"name": v(r, "clubLabel"), "cc": v(r, "cc"),
@@ -563,7 +691,7 @@ def stage_clubs():
     dropped = []
     for q in list(clubs):
         name = clubs[q]["name"] or q
-        if EXCLUDE_CLUB.search(name) or name == q or q in BLOCKLIST:  # no-label items are junk
+        if (EXCLUDE_CLUB.search(name) and q not in RESERVE_NAME_EXCEPTIONS) or name == q or q in BLOCKLIST:
             dropped.append(name); del clubs[q]
     for c in clubs.values(): c["leagues"] = sorted(c["leagues"])
     save("clubs", clubs)
@@ -718,7 +846,7 @@ def stage_attrs():
                  (GROUP_CONCAT(DISTINCT ?spcc; separator=",") AS ?spccs) WHERE {{
             VALUES ?p {{ {vals} }}
             OPTIONAL {{ ?p rdfs:label ?len FILTER(LANG(?len)="en") }}
-            OPTIONAL {{ ?p rdfs:label ?lmul FILTER(LANG(?lmul) IN ("mul","it","es","de","fr")) }}
+            OPTIONAL {{ ?p rdfs:label ?lmul FILTER(LANG(?lmul) IN ("mul","it","es","de","fr","pt","nl","tr")) }}
             OPTIONAL {{ ?a schema:about ?p ; schema:isPartOf <https://en.wikipedia.org/> ;
                            schema:name ?page }}
             OPTIONAL {{ ?p wdt:P569 ?b }}
@@ -1089,7 +1217,7 @@ def stage_teams():
           SELECT ?t (SAMPLE(?len) AS ?en) (SAMPLE(?lmul) AS ?mul) WHERE {{
             VALUES ?t {{ {vals} }}
             OPTIONAL {{ ?t rdfs:label ?len FILTER(LANG(?len)="en") }}
-            OPTIONAL {{ ?t rdfs:label ?lmul FILTER(LANG(?lmul) IN ("mul","it","es","de","fr")) }}
+            OPTIONAL {{ ?t rdfs:label ?lmul FILTER(LANG(?lmul) IN ("mul","it","es","de","fr","pt","nl","tr")) }}
           }} GROUP BY ?t""")
         return [[qid(v(r, "t")), v(r, "en") or v(r, "mul")] for r in rows]
     rows = resumable("teams", teams, 400, fetch)
@@ -1150,8 +1278,9 @@ STOP_TOKENS = {"fc", "afc", "cf", "cfc", "ac", "acf", "as", "ss", "ssc", "sc", "
                "usd", "ud", "sd", "cd", "rcd", "ca", "rc", "calcio", "club", "football",
                "futbol", "associazione", "sportiva", "societa", "spa", "ssd", "tsv",
                "vfb", "vfl", "sv", "fsv", "bsc"}
-# same-city clubs that are NOT the same club — never merge
-DONT_MERGE = {("FR", "bastia"), ("ES", "extremadura"), ("ES", "logrones")}
+# Same-named clubs with independent histories — never merge.
+DONT_MERGE = {("FR", "bastia"), ("ES", "extremadura"), ("ES", "logrones"),
+              ("BR", "america futebol clube")}
 # true phoenixes whose names normalize differently
 # successors (Wikidata P576→P1366) whose lineage continues as a club we carry
 EXTRA_MERGE = {"Q56542463": "Q8643",   # LR Vicenza -> Vicenza Calcio (2018 refounding)
@@ -1276,6 +1405,8 @@ def common_name(label, page):
 def stage_build():
     clubs, members, attrs = load("clubs"), load_members(), load("attrs")
     careers, teams = load_careers(), load("teams")
+    for q, name in CLUB_NAMES.items():
+        if q in clubs: clubs[q]["name"] = name
 
     # data freshness = newest Wikidata checkpoint, not build time. Read up here because
     # spells_at closes over its year, as the end of an open-ended spell.
@@ -1661,7 +1792,8 @@ def pack_index_errors(idx, pack_id, core_players, expected_current):
     unrenderable = sorted(c for c in codes if c not in ISO_ALPHA2 and c not in NO_EMOJI_FLAG)
     chk(not unrenderable, f"nat codes with no flag: {unrenderable}")
     cov = apps_coverage(idx) if postings else 0
-    chk(cov >= APPS_FLOOR, f"apps coverage {cov:.1%} below floor {APPS_FLOOR:.0%}")
+    floor = PACKS.get(pack_id, {}).get("apps_floor", APPS_FLOOR)
+    chk(cov >= floor, f"apps coverage {cov:.1%} below floor {floor:.0%}")
     return errs
 
 def stage_validate():
