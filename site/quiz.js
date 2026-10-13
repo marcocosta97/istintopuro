@@ -7,15 +7,14 @@
 // tooling. It is initialized lazily because app.js loads the dataset async.
 let qCoreApi = null;
 const qCore = () => qCoreApi ||= QuizCore.createQuizCore({
-  DB: CORE_DB, postings: corePostings, intersect, stature: coreStature,
-  marquee: MARQUEE, leagueCC: coreLeagueCC, coreClub,
+  DB: CORE_DB, postings: corePostings, intersect,
+  leagueCC: coreLeagueCC, coreClub,
 });
 const qFmt = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const qToday = () => qFmt(new Date());
 const QEPOCH = Date.UTC(2026, 7, 21);
 const QSERIES = "2026-08-21";
-const QWIN = 90;
 const qNum = (date) => {
   const [y, m, d] = date.split("-").map(Number);
   return (Date.UTC(y, m - 1, d) - QEPOCH) / 864e5 + 1;
@@ -25,7 +24,7 @@ const qPools = () => qCore().qPools();
 const qApps = (ci, pid) => qCore().qApps(ci, pid);
 const qGoals = (ci, pid) => qCore().qGoals(ci, pid);
 const qFame = (pid, clubs) => qCore().qFame(pid, clubs);
-const qEase = (clubs, answers) => qCore().qEase(clubs, answers);
+const qEase = (clubs, answers, audience) => qCore().qEase(clubs, answers, audience);
 const qEffective = (clubs, answers) => qCore().qEffective(clubs, answers);
 const qRanked = (stage) => qCore().qRanked(stage);
 const qFace = (stage) => stage.grandfatheredFace ?? qCore().qFace(stage);
@@ -51,21 +50,21 @@ try {
   }
 } catch {}
 
-// Runtime generation replays only the fixed 90-day window, supplying the same
-// explicit prior-day context that the checked-in schedule writer uses.
+// Runtime generation shares the full calendar history with the schedule writer.
+// Opening a published day still requires no replay of unrelated history.
 const qChain = [];
 function qScheduled(date, num) {
   if (qChain[num]) return qChain[num];
   const scheduled = CORE_DB.quizSchedule?.days?.[date];
   if (!scheduled) return null;
-  const checked = qCore().validateEntry(scheduled, { requireOrder: false });
+  const lockedThrough = CORE_DB.quizSchedule.lockedThrough || CORE_DB.quizSchedule.built;
+  const published = typeof lockedThrough === "string" && date <= lockedThrough;
+  const checked = qCore().validateEntry(scheduled, { requireOrder: !published, requireLevels: !published });
   if (!checked.ok) return null;
   return qChain[num] = { date, num, attempt: null, stages: checked.stages };
 }
-// Resolve one day, generating it only when the committed schedule does not carry
-// it. Generation pulls its own prior-day context recursively, so an unplayed day
-// gets the same full window the schedule writer used even when the day before it
-// was never published — not the truncated tail a window-local replay produced.
+// Resolve missing dates chronologically, independently of a person's play
+// history. Iteration avoids a recursion limit as the public series gets longer.
 function qGenerated(date) {
   const num = qNum(date);
   if (num < 1) return qCore().generate(date, { allowFallback: true });
@@ -73,10 +72,11 @@ function qGenerated(date) {
   if (scheduled) return scheduled;
   if (qChain[num]) return qChain[num];
   const previousDays = [];
-  const comboDays = qCore().constants.QCOMBO_DAYS;
-  for (let k = Math.max(1, num - comboDays); k < num; k++) {
-    const previous = qGenerated(qShift(date, k - num));
-    if (previous) previousDays.push(previous);
+  for (let k = 1; k < num; k++) {
+    const previousDate = qShift(date, k - num);
+    const previous = qScheduled(previousDate, k) || qChain[k]
+      || (qChain[k] = qCore().generate(previousDate, { previousDays: [...previousDays], allowFallback: true }));
+    previousDays.push(previous);
   }
   return qChain[num] = qCore().generate(date, { previousDays, allowFallback: true });
 }
@@ -138,7 +138,8 @@ function qStagesFromQids(rows, state = null) {
     const raw = intersect(clubs.map(postings));
     const answers = qCore().answerSet(raw);
     const effective = qCore().qEffective(clubs, raw);
-    if (effective.length) return { clubs, answers, effective, ease: qEase(clubs, effective) };
+    const audience = "european";
+    if (effective.length) return { clubs, answers, effective, audience, ease: qEase(clubs, effective, audience) };
     const hit = state?.guesses?.find(guess => guess.stage === stageIndex && guess.ok
       && Number.isInteger(guess.pid) && DB.names[guess.pid] === guess.name);
     if (hit) {
@@ -1040,16 +1041,15 @@ langSel.addEventListener("change", () => { if (qBuilt && document.body.classList
 document.addEventListener("dbready", () => { if (location.hash === "#quiz") qEnter(); }, { once: true });
 // warm the quiz while the solver idles after boot: the chain replay, the combination
 // cache and the guess-box name index are all memoized, so paying them here
-// makes the Quiz toggle instant even late in a 90-day window. One idle slice
-// per step — replay in 15-day bites — so no single block stalls a fresh page
-// (a whole-window replay measures ~0.4s, noticeable on phones). Idempotent:
+// makes the Quiz toggle instant. Start at the epoch so a missing schedule never
+// triggers one large replay before the first warm-up slice. Resolve in 15-day
+// steps; published dates require no generation. Idempotent:
 // a #quiz deep link above has already done this work by the time it fires.
 document.addEventListener("dbready", () => {
   const today = qToday(), num = qNum(today);
   const steps = [qPools];
   if (num >= 1) {
-    const a0 = Math.floor((num - 1) / QWIN) * QWIN + 1;
-    for (let n = a0; n < num; n += 15) { const d = qShift(today, n - num); steps.push(() => qStagesFor(d)); }
+    for (let n = 1; n < num; n += 15) { const d = qShift(today, n - num); steps.push(() => qStagesFor(d)); }
     steps.push(() => qStagesFor(today));
   }
   steps.push(pIndex);
@@ -1090,7 +1090,8 @@ function quizGen(date = qToday()) {
   return { ...p, stages: p.stages.map(st => {
     const eff = qEffective(st.clubs, st.answers);
     return { clubs: st.clubs.map(ci => DB.clubs[ci][0]),
-      n: st.answers.length, real: eff.length, tier: st.tier, ease: Math.round(qEase(st.clubs, eff)),
+      difficulty: qCore().stageDiagnostics(st).difficulty,
+      n: st.answers.length, real: eff.length, tier: st.tier, ease: Math.round(qEase(st.clubs, eff, st.audience)),
       answers: st.answers.slice(0, 12).map(pid => DB.names[pid]), face: DB.names[qFace(st)] };
   }) };
 }
@@ -1101,7 +1102,7 @@ function quizDebug(days = 14) {
     p.stages.forEach((st, i) => {
       const eff = qEffective(st.clubs, st.answers);
       row[`s${i + 1}`] = st.clubs.map(ci => coreClub(DB.clubs[ci][0])).join(" × ");
-      row[`n${i + 1}`] = `${eff.length}·e${Math.round(qEase(st.clubs, eff))}${qTierTag(st.tier)}`;
+      row[`n${i + 1}`] = `${eff.length}·e${Math.round(qEase(st.clubs, eff, st.audience))}${qTierTag(st.tier)}`;
     });
     rows.push(row);
     d.setDate(d.getDate() + 1);

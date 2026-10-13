@@ -21,6 +21,8 @@ const IMPOSSIBLE_ITALY_MAX = 0.404;
 const IMPOSSIBLE_ENGLAND_MIN_COUNT = 32;
 const ALL_SLOT_COUNTRY_MAX_RATIO = 1.6;
 const MIN_GOALKEEPER_FACES = 60;
+const MIN_DISTINCT_COMBINATIONS = [150, 400, 650, 650];
+const MIN_MEDIUM_REPRESENTATIVES = 130;
 // Pinned from the pre-static generator over the same 730 dates on build 2026-08-17.
 const BASELINE_MAX_IMPOSSIBLE_CLUB = 16;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -83,28 +85,9 @@ function createRuntime(index) {
     const club = index.clubs[ci];
     return club[5] >= 0 ? index.leagues[club[5]][2] : club[1];
   };
-  let statures;
-  const stature = (ci) => {
-    if (!statures) {
-      const byCountry = {};
-      index.clubs.forEach((club, i) => {
-        if (index.postings[i].length >= 120) (byCountry[leagueCC(i)] ??= []).push(i);
-      });
-      statures = new Map();
-      for (const clubs of Object.values(byCountry)) {
-        clubs.sort((a, b) => index.postings[a].length - index.postings[b].length);
-        clubs.forEach((club, i) => {
-          const percentile = clubs.length > 1 ? i / (clubs.length - 1) : 1;
-          statures.set(club, marquee.has(index.clubs[club][3]) ? 1.15
-            : percentile >= 0.6 ? 1 : percentile >= 0.3 ? 0.82 : 0.66);
-        });
-      }
-    }
-    return statures.get(ci) ?? 0.66;
-  };
   const byQid = new Map(index.clubs.map((club, i) => [club[3], i]));
   const core = coreModule.createQuizCore({
-    DB: index, postings, intersect, stature, marquee, leagueCC,
+    DB: index, postings, intersect, marquee, leagueCC,
     coreClub: name => name,
   });
   return { index, core, postings, intersect, leagueCC, byQid };
@@ -148,44 +131,29 @@ function inspectEntry(runtime, entry, { date, previousDays = [], strict = true }
     const answers = runtime.intersect(clubs.map(runtime.postings));
     const effective = runtime.core.qEffective(clubs, answers);
     if (!effective.length) errors.push(`stage ${stageIndex + 1}: no effective answer`);
-    stages.push({ clubs, answers, effective, ease: runtime.core.qEase(clubs, effective) });
+    const audience = "european";
+    stages.push({ clubs, answers, effective, audience, ease: runtime.core.qEase(clubs, effective, audience) });
   });
   if (strict && stages.length === 4) {
-    for (let i = 1; i < stages.length; i++) {
-      if (!(stages[i - 1].ease > stages[i].ease)) {
-        errors.push(`ease is not strictly descending at stages ${i}/${i + 1}`);
-      }
-    }
-    const recentCombos = new Set();
-    const recentClubs = new Set();
-    previousDays.slice(-COMBO_GUARD_DAYS).forEach((day, offset, all) => {
-      const dayStages = day.stages || day;
-      if (!Array.isArray(dayStages)) return;
-      dayStages.forEach(stage => recentCombos.add(canonicalCombo(stage.clubs || stage)));
-      if (offset >= all.length - 2) {
-        dayStages.forEach(stage => (stage.clubs || stage).forEach(club => recentClubs.add(club)));
-      }
+    // All consumers use the same classification and dated repetition guards.
+    const coreCheck = runtime.core.validateEntry(entry, { date, previousDays, requireLevels: true });
+    coreCheck.errors.forEach(error => {
+      if (!errors.includes(error)) errors.push(error);
     });
-    entry.forEach((stage, i) => {
-      if (recentCombos.has(canonicalCombo(stage)))
-        errors.push(`stage ${i + 1}: combination repeated within ${COMBO_GUARD_DAYS} days`);
-      stage.forEach(qid => {
-        if (recentClubs.has(qid)) errors.push(`stage ${i + 1}: club ${qid} repeated within 2 days`);
-      });
-    });
-    if (date) {
-      const coreCheck = runtime.core.validateEntry(entry, { date, previousDays });
-      coreCheck.errors.forEach(error => {
-        if (!errors.includes(error)) errors.push(error);
-      });
-    }
   }
   return { ok: errors.length === 0, errors, stages };
 }
 
 function previousContext(days, date) {
-  const dates = Object.keys(days).filter(d => d < date).sort().slice(-COMBO_GUARD_DAYS);
+  const dates = Object.keys(days).filter(d => d < date).sort();
   return dates.map(d => ({ date: d, stages: days[d] }));
+}
+
+function scheduleThrough(built, requestedThrough) {
+  const minimum = shiftDate(built, HORIZON_DAYS);
+  if (requestedThrough === undefined) return minimum;
+  if (!isIsoDate(requestedThrough)) throw new Error(`invalid requested horizon: ${requestedThrough}`);
+  return requestedThrough > minimum ? requestedThrough : minimum;
 }
 
 function validateAsset(runtime, asset, { expectedBuilt, expectedThrough } = {}) {
@@ -201,6 +169,9 @@ function validateAsset(runtime, asset, { expectedBuilt, expectedThrough } = {}) 
       || (isIsoDate(asset.through) && asset.lockedThrough > asset.through)))
     errors.push("lockedThrough must be an ISO date between built and through");
   if (expectedBuilt && asset.built !== expectedBuilt) errors.push(`built ${asset.built} != index ${expectedBuilt}`);
+  if (asset.horizonThrough !== undefined && (!isIsoDate(asset.horizonThrough)
+      || (isIsoDate(asset.through) && asset.horizonThrough > asset.through)))
+    errors.push("horizonThrough must be an ISO date within the schedule horizon");
   if (expectedThrough && asset.through !== expectedThrough) errors.push(`through ${asset.through} != expected ${expectedThrough}`);
   if (!asset.days || typeof asset.days !== "object" || Array.isArray(asset.days)) {
     errors.push("days must be an object");
@@ -215,7 +186,7 @@ function validateAsset(runtime, asset, { expectedBuilt, expectedThrough } = {}) 
       if (!Object.hasOwn(asset.days, date)) continue;
       // Published history is immutable across data refreshes as long as its clubs
       // still resolve and every stage remains playable. Difficulty can move when
-      // appearances change, so only newly generated/future days enforce ordering
+      // appearances change, so only newly generated/future days enforce levels
       // and the repetition guard against the preserved tail.
       const validationThrough = asset.lockedThrough || asset.built;
       const result = inspectEntry(runtime, asset.days[date], {
@@ -260,13 +231,18 @@ function generateEntry(runtime, date, previousDays) {
   return { entry, slate, diagnostics };
 }
 
-function buildSchedule(runtime, existing, { through = shiftDate(runtime.index.built, HORIZON_DAYS), warn = console.warn } = {}) {
+function buildSchedule(runtime, existing, { through: requestedThrough, regenerateFrom, warn = console.warn } = {}) {
   const built = runtime.index.built;
   if (!isIsoDate(built)) throw new Error(`index has invalid built date: ${built}`);
-  if (through < built) throw new Error(`schedule horizon ${through} precedes build ${built}`);
+  const through = scheduleThrough(built, requestedThrough ?? existing?.horizonThrough);
   const oldDays = existing?.v === VERSION && existing.days && typeof existing.days === "object" ? existing.days : {};
-  const lockedThrough = isIsoDate(existing?.lockedThrough) && existing.lockedThrough > built
+  let lockedThrough = isIsoDate(existing?.lockedThrough) && existing.lockedThrough > built
     ? existing.lockedThrough : built;
+  if (regenerateFrom !== undefined) {
+    if (!isIsoDate(regenerateFrom) || regenerateFrom <= built || regenerateFrom > through)
+      throw new Error("regenerateFrom must be an ISO date after the dataset build and within the horizon");
+    lockedThrough = shiftDate(regenerateFrom, -1);
+  }
   const days = {};
   for (const date of dateRange(EPOCH, through)) {
     const previousDays = previousContext(days, date);
@@ -282,6 +258,7 @@ function buildSchedule(runtime, existing, { through = shiftDate(runtime.index.bu
     days[date] = generateEntry(runtime, date, previousDays).entry;
   }
   const asset = { v: VERSION, built, lockedThrough, through, days };
+  if (through > shiftDate(built, HORIZON_DAYS)) asset.horizonThrough = through;
   const checked = validateAsset(runtime, asset, { expectedBuilt: built, expectedThrough: through });
   if (!checked.ok) throw new Error(`generated schedule failed validation:\n  ${checked.errors.join("\n  ")}`);
   return asset;
@@ -297,6 +274,9 @@ function auditSchedule(runtime, { start = EPOCH, days = AUDIT_DAYS, enforce = tr
   const clubCountriesByStage = Array.from({ length: 4 }, () => new Map());
   const allClubCountries = new Map(), faceLastSeen = new Map(), clubLastSeen = new Map();
   const goalkeeperFaces = [0, 0, 0, 0];
+  const combinations = Array.from({ length: 4 }, () => new Map());
+  const representatives = Array.from({ length: 4 }, () => new Set());
+  const repeatGaps = Array.from({ length: 4 }, () => []);
   let softClubRepeats = 0;
   for (let offset = 0; offset < days; offset++) {
     const date = shiftDate(start, offset);
@@ -306,6 +286,11 @@ function auditSchedule(runtime, { start = EPOCH, days = AUDIT_DAYS, enforce = tr
     if (JSON.stringify(first.entry) !== JSON.stringify(second.entry)) throw new Error(`${date}: generation is not deterministic`);
     history[date] = first.entry;
     first.diagnostics.forEach((diag, stageIndex) => {
+      if (diag.level !== stageIndex) throw new Error(`${date}: stage ${stageIndex + 1} has the wrong classification`);
+      const key = canonicalCombo(first.entry[stageIndex]), last = combinations[stageIndex].get(key);
+      if (last !== undefined) repeatGaps[stageIndex].push(offset - last);
+      combinations[stageIndex].set(key, offset);
+      representatives[stageIndex].add(diag.face);
       if (first.entry[stageIndex].length === 3) triples[stageIndex]++;
       easeByStage[stageIndex].push(diag.ease);
       answerCountsByStage[stageIndex].push(diag.effectiveCount);
@@ -344,6 +329,16 @@ function auditSchedule(runtime, { start = EPOCH, days = AUDIT_DAYS, enforce = tr
     impossible.forEach(qid => impossibleClubs.set(qid, (impossibleClubs.get(qid) || 0) + 1));
   }
   const errors = [];
+  if (days >= AUDIT_DAYS) {
+    combinations.forEach((combos, i) => {
+      if (combos.size < MIN_DISTINCT_COMBINATIONS[i])
+        errors.push(`stage ${i + 1}: only ${combos.size} distinct combinations (minimum ${MIN_DISTINCT_COMBINATIONS[i]})`);
+    });
+    if (representatives[1].size < MIN_MEDIUM_REPRESENTATIVES)
+      errors.push(`medium has only ${representatives[1].size} distinct representatives (minimum ${MIN_MEDIUM_REPRESENTATIVES})`);
+  }
+  if (days >= AUDIT_DAYS && (!triples[0] || triples[0] / days >= 0.2)) errors.push("easy triples must be present and below 20%");
+  if (days >= AUDIT_DAYS && (triples[1] / days < 0.2 || triples[1] / days > 0.4)) errors.push("medium triple rate is outside 20–40%");
   for (const stageIndex of [2, 3]) {
     const rate = triples[stageIndex] / days;
     if (rate < TRIPLE_RATE_MIN || rate > TRIPLE_RATE_MAX) errors.push(`stage ${stageIndex + 1} triple rate ${(rate * 100).toFixed(1)}% is outside 40–60%`);
@@ -373,6 +368,10 @@ function auditSchedule(runtime, { start = EPOCH, days = AUDIT_DAYS, enforce = tr
     softClubRepeats,
     mostUsedImpossibleClub: { qid: mostUsedQid, count: mostUsedCount },
     stages: easeByStage.map((ease, i) => ({
+      uniqueCombinations: combinations[i].size,
+      representativePlayers: representatives[i].size,
+      repeatGap: repeatGaps[i].length ? { min: Math.min(...repeatGaps[i]), p50: percentile(repeatGaps[i], .5),
+        p95: percentile(repeatGaps[i], .95), max: Math.max(...repeatGaps[i]) } : null,
       ease: { min: Math.min(...ease), p50: percentile(ease, 0.5), p95: percentile(ease, 0.95), max: Math.max(...ease) },
       answers: { min: Math.min(...answerCountsByStage[i]), p50: percentile(answerCountsByStage[i], 0.5),
         p95: percentile(answerCountsByStage[i], 0.95), max: Math.max(...answerCountsByStage[i]) },
@@ -401,6 +400,12 @@ function parseArgs(argv) {
     else if (arg === "--output") options.output = path.resolve(argv[++i]);
     else if (arg === "--check") options.check = true;
     else if (arg === "--audit") options.audit = true;
+    else if (arg === "--through" || arg === "--regenerate-from") {
+      const value = argv[++i];
+      if (!isIsoDate(value)) throw new Error(`${arg} requires an ISO date`);
+      if (arg === "--through") options.through = value;
+      else options.regenerateFrom = value;
+    }
     else throw new Error(`unknown argument: ${arg}`);
   }
   return options;
@@ -409,16 +414,16 @@ function parseArgs(argv) {
 function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
   const runtime = loadRuntime(options.index);
-  const expectedThrough = shiftDate(runtime.index.built, HORIZON_DAYS);
   if (options.check) {
-    const checked = validateAsset(runtime, readJson(options.output), {
-      expectedBuilt: runtime.index.built, expectedThrough,
+    const asset = readJson(options.output);
+    const checked = validateAsset(runtime, asset, {
+      expectedBuilt: runtime.index.built, expectedThrough: scheduleThrough(runtime.index.built, asset.horizonThrough),
     });
     if (!checked.ok) throw new Error(`quiz schedule validation failed:\n  ${checked.errors.join("\n  ")}`);
     console.log(`quiz schedule: OK (${Object.keys(readJson(options.output).days).length} days)`);
   } else if (!options.audit) {
     const existing = fs.existsSync(options.output) ? readJson(options.output) : null;
-    const asset = buildSchedule(runtime, existing);
+    const asset = buildSchedule(runtime, existing, { through: options.through, regenerateFrom: options.regenerateFrom });
     writeAsset(options.output, asset);
     console.log(`quiz schedule: wrote ${Object.keys(asset.days).length} days through ${asset.through}`);
   }
@@ -427,7 +432,7 @@ function main(argv = process.argv.slice(2)) {
     console.log(`quiz audit: OK (${result.days} days; hard triples ${result.triples[2]}, impossible triples ${result.triples[3]}; `
       + `all-slot country ratio ${result.allSlotCountryRatio.toFixed(2)}; GK faces ${result.goalkeeperFaces}; `
       + `soft club repeats ${result.softClubRepeats}; max impossible club ${result.mostUsedImpossibleClub.qid} ${result.mostUsedImpossibleClub.count})`);
-    result.stages.forEach((stage, i) => console.log(`  stage ${i + 1}: ease min ${stage.ease.min.toFixed(1)}, p50 ${stage.ease.p50.toFixed(1)}, `
+    result.stages.forEach((stage, i) => console.log(`  stage ${i + 1}: ${stage.uniqueCombinations} distinct combinations, ${stage.representativePlayers} representatives; ease min ${stage.ease.min.toFixed(1)}, p50 ${stage.ease.p50.toFixed(1)}, `
       + `p95 ${stage.ease.p95.toFixed(1)}, max ${stage.ease.max.toFixed(1)}; answers p50 ${stage.answers.p50}, p95 ${stage.answers.p95}; `
       + `breadth p50 ${stage.recognisableBreadth.p50.toFixed(1)}; GK faces ${stage.goalkeeperFaces}; `
       + `club countries ${JSON.stringify(stage.clubCountries)}`));
@@ -443,5 +448,5 @@ module.exports = {
   ALL_SLOT_COUNTRY_MAX_RATIO, AUDIT_DAYS, BASELINE_MAX_IMPOSSIBLE_CLUB, COMBO_GUARD_DAYS,
   EPOCH, HORIZON_DAYS, MIN_GOALKEEPER_FACES, VERSION,
   auditSchedule, buildSchedule, countryBalanceErrors, createRuntime, inspectEntry, loadRuntime,
-  shiftDate, validateAsset,
+  shiftDate, scheduleThrough, validateAsset,
 };

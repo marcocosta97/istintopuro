@@ -32,15 +32,12 @@ The emitted data formats are documented in `pipeline/pipeline.py`'s
 docstring; heuristics and quality passes are commented where they live,
 in the pipeline and in `site/app.js`.
 
-Quiz difficulty is rated by how recognisable the answer set is, not the
-clubs; the tuning lives in `site/quiz-core.js`, and
-`quizDebug(30)` in the console prints the next month of puzzles to
-sanity-check after a dataset refresh. A stage is usually two clubs; the
-two hardest each toss a seeded daily coin for a three-club variant, which
-plays as a different flavour of hard rather than simply a harder one. An
-archive calendar replays past days for practice; game state persists in
-`localStorage`. New schedules reject the same order-independent club
-combination for 30 days and any individual club for two days.
+The daily quiz uses shared recognition rules for easy, medium, hard and
+impossible, with two or three club clues per stage. Selection prefers unused
+intersections and enforces repetition cooldowns. An archive replays past days;
+progress persists in `localStorage`. See [the generator](docs/quiz-generator.md)
+for the rules and schedule controls. `quizDebug(30)` previews the next month
+in the browser console.
 
 ## Refreshing the data
 
