@@ -11,7 +11,7 @@ Stages (each checkpoints to data/, reruns skip completed stages):
   teams    - labels for career teams outside the club universe
   build    - emit site/data/index.json + career shards, print stats
   validate - sanity-check the emitted index; fail instead of shipping junk
-  quiz     - preserve published quizzes and generate/validate the next 14 days
+  quiz     - preserve published quizzes and generate/validate the next 90 days
 
 Usage: python3 pipeline/pipeline.py [stage ...]   (default: all)
 
@@ -1999,7 +1999,7 @@ def stage_validate():
     (DATA / "commit-body.txt").write_text("\n".join(lines) + "\n")
 
 def stage_quiz():
-    """Preserve published quizzes and generate the next 14 days."""
+    """Preserve the published horizon and generate the next 90 days."""
     subprocess.run(["node", str(ROOT / "scripts" / "quiz-schedule.js")], cwd=ROOT, check=True)
 
 STAGES = {"clubs": stage_clubs, "members": stage_members, "roster": stage_roster,

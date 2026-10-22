@@ -85,9 +85,11 @@ test("browser fallback agrees with the writer after locked published history", (
 test("runtime preserves locked levels but repairs invalid future classifications", () => {
   const node = loadRuntime();
   const asset = JSON.parse(fs.readFileSync(path.join(__dirname, "../site/data/quiz-schedule.json"), "utf8"));
-  const date = shiftDate(asset.lockedThrough, 1);
-  const expected = asset.days[date];
+  const date = shiftDate(asset.through, 1);
+  const previousDays = Object.keys(asset.days).sort().map(date => ({ date, stages: asset.days[date] }));
+  const expected = node.core.serializeStages(node.core.generate(date, { previousDays }).stages);
   const corrupted = structuredClone(asset);
+  corrupted.days[date] = structuredClone(expected);
   [corrupted.days[date][0], corrupted.days[date][1]] = [corrupted.days[date][1], corrupted.days[date][0]];
   const browser = createRuntime(structuredClone(node.index));
   browser.index.quizSchedule = corrupted;

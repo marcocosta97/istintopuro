@@ -59,8 +59,10 @@ must retain the level's familiar-answer requirements.
 ## Calendar
 
 The versioned asset is `site/data/quiz-schedule.json`. Normal refresh preserves
-playable days through `lockedThrough` and regenerates the remaining horizon.
-Its default end is 14 days after the dataset build. An explicitly extended
+every playable date through the previous `through`, including future dates
+already downloaded by offline players, and appends new days. Its default end
+is 90 days after the dataset build. The output sets `lockedThrough` to `through`:
+every distributed day is published. An explicitly extended
 `horizonThrough` is retained until the normal refresh horizon catches up.
 
 To recalculate future dates while preserving earlier games:
@@ -70,9 +72,12 @@ node scripts/quiz-schedule.js --regenerate-from 2026-10-15 --through 2026-10-28
 ```
 
 This explicitly replaces any existing future lock: October 14 becomes the
-preservation cutoff, and October 15–28 are regenerated. The dataset build date
-is unchanged. Locked history stays playable under its published levels;
-new dates must satisfy the current classifier and cooldowns.
+preservation cutoff, and October 15 onward is regenerated through at least the
+default 90-day horizon. The dataset build date is unchanged. The resulting
+schedule is locked again when written. Use this override deliberately: offline
+copies keep their previously downloaded puzzles until they reconnect.
+Locked history stays playable under its published levels; new dates must satisfy
+the current classifier and cooldowns.
 
 ## Verification
 

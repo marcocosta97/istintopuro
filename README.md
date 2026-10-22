@@ -7,7 +7,7 @@ or pick one and get everyone he ever lined up alongside.
 The daily quiz mode (`site/quiz.js`) turns the same index into a Wordle-style
 game: four intersections of rising difficulty. A versioned static schedule keeps
 published days stable across dataset refreshes and deterministically prepares the
-next fortnight, so everyone plays the same puzzle.
+next 90 days, so everyone plays the same puzzle even while offline.
 
 Live at **[istintopuro.mcosta.it](https://istintopuro.mcosta.it)**.
 
@@ -73,14 +73,33 @@ python3 -m http.server -d site 8000
 Pushing to `master` deploys `site/` to GitHub Pages, stamping every asset URL
 with the commit sha.
 
-The site installs and runs offline: `site/sw.js` precaches the app itself and
-keeps the core and enabled-pack data files it has been asked for, one version
-of each. Disabling a pack removes its entries from the app's data cache. Nothing is
-cached unversioned — the code carries the deploy's sha, the dataset its build
-date — and the page itself is always fetched from the network first, since it is
-the file that names those versions. Should the worker ever need pulling, deploy
-one whose `install` unregisters it and clears `caches`; browsers revalidate the
-worker script on every load, so clients drop it by themselves.
+The site installs as a PWA and automatically downloads the complete core game:
+the interface, local fonts and flags, index, quiz schedule, all career shards
+(including quiz hints), and teammate spell-year files. This is about 26 MB of
+JSON stored, or 8 MB transferred with gzip, excluding portraits. Settings shows
+download progress, retry controls, the saved daily-puzzle horizon, and an option
+to request persistent browser storage. Wait for “Ready to play offline” before
+disconnecting; installing the PWA alone does not mean the download has finished.
+
+Enabled country packs have a separate “Save offline” button in Settings, which
+downloads their full index, careers, and teammate data. All six add about 18 MB
+stored, or 5 MB with gzip. Disabling a pack removes its offline and runtime
+data. Wikimedia portraits use initials when offline or when the image fails;
+external Wikipedia/Wikidata pages still require a connection.
+
+`site/offline.js` defines each download's inventory. `site/sw.js` marks a release
+ready only after every file is stored, and activates it only then. A failed
+update preserves the previous complete release; one complete predecessor is
+retained after activation. Code and indexes are keyed by the deploy sha, career
+and teammate files by dataset build date. Navigation tries the network first
+and falls back to the complete saved release, including for HTTP server errors.
+Storage can still be cleared by the user or evicted unless persistence is
+granted; readiness is checked again when Settings opens.
+
+The saved schedule covers 90 days after the dataset build and normal refreshes
+preserve every previously published date, including future ones. After that
+horizon, local generation remains playable but can differ from a newer online
+dataset. Reconnect to download a newer release and extend the shared schedule.
 
 ## License
 

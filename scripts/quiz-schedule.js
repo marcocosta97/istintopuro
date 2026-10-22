@@ -10,7 +10,7 @@ const DEFAULT_OUTPUT = path.join(ROOT, "site/data/quiz-schedule.json");
 const CORE_PATH = path.join(ROOT, "site/quiz-core.js");
 const VERSION = 1;
 const EPOCH = "2026-08-21";
-const HORIZON_DAYS = 14;
+const HORIZON_DAYS = 90;
 const AUDIT_DAYS = 730;
 const COMBO_GUARD_DAYS = 30;
 const TRIPLE_RATE_MIN = 0.4;
@@ -236,17 +236,19 @@ function buildSchedule(runtime, existing, { through: requestedThrough, regenerat
   if (!isIsoDate(built)) throw new Error(`index has invalid built date: ${built}`);
   const through = scheduleThrough(built, requestedThrough ?? existing?.horizonThrough);
   const oldDays = existing?.v === VERSION && existing.days && typeof existing.days === "object" ? existing.days : {};
-  let lockedThrough = isIsoDate(existing?.lockedThrough) && existing.lockedThrough > built
-    ? existing.lockedThrough : built;
+  // Every distributed date is available to offline players. Preserve the whole
+  // published horizon, including dates that have not happened yet.
+  let preserveThrough = isIsoDate(existing?.through) && existing.through > built
+    ? existing.through : built;
   if (regenerateFrom !== undefined) {
     if (!isIsoDate(regenerateFrom) || regenerateFrom <= built || regenerateFrom > through)
       throw new Error("regenerateFrom must be an ISO date after the dataset build and within the horizon");
-    lockedThrough = shiftDate(regenerateFrom, -1);
+    preserveThrough = shiftDate(regenerateFrom, -1);
   }
   const days = {};
   for (const date of dateRange(EPOCH, through)) {
     const previousDays = previousContext(days, date);
-    const old = date <= lockedThrough ? oldDays[date] : undefined;
+    const old = date <= preserveThrough ? oldDays[date] : undefined;
     if (old) {
       const preserved = inspectEntry(runtime, old, { strict: false });
       if (preserved.ok) {
@@ -257,7 +259,7 @@ function buildSchedule(runtime, existing, { through: requestedThrough, regenerat
     }
     days[date] = generateEntry(runtime, date, previousDays).entry;
   }
-  const asset = { v: VERSION, built, lockedThrough, through, days };
+  const asset = { v: VERSION, built, lockedThrough: through, through, days };
   if (through > shiftDate(built, HORIZON_DAYS)) asset.horizonThrough = through;
   const checked = validateAsset(runtime, asset, { expectedBuilt: built, expectedThrough: through });
   if (!checked.ok) throw new Error(`generated schedule failed validation:\n  ${checked.errors.join("\n  ")}`);

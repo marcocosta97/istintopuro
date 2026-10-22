@@ -1,77 +1,214 @@
-/* Istinto Puro — offline shell.
-
-   Every URL this site fetches carries a version: the code and the index the deploy's
-   commit sha (?v=<sha>, stamped into index.html and read back by app.js), the career
-   shards and the years files the dataset's build date. A cached response therefore
-   can never be stale FOR ITS URL, which is what makes cache-first safe here. The one
-   thing that must never be served from cache without asking is the document itself,
-   since it is the file that names all those versions.
-
-   Two caches, because they expire on different clocks: the shell is replaced wholesale
-   by a deploy, while the data files outlive it and are keyed by the dataset build —
-   putting them in the shell cache would re-download the index (1.5 MB) after every
-   code change. Old versions of a data file are dropped as its new one arrives, so the
-   cache holds at most one copy of each.
-
-   Escape hatch, should this ever misbehave in the wild: deploy an sw.js whose install
-   handler calls self.registration.unregister() and caches.keys().then(delete). Clients
-   pick it up on their next load, because the browser revalidates the worker script. */
+/* A release becomes the offline fallback only after its entire core is stored.
+   Keep the previous complete release while installing the next one. */
 const V = new URL(self.location).searchParams.get("v") || "dev";
-const SHELL = `istintopuro-shell-${V}`;
+importScripts(`./offline.js?v=${V}`);
+const CORE = `istintopuro-offline-${V}`;
 const DATA = "istintopuro-data";
-const CORE = ["./", `./packs.js?v=${V}`, `./app.js?v=${V}`, `./quiz-core.js?v=${V}`, `./quiz.js?v=${V}`, `./style.css?v=${V}`,
-  "./fonts/barlow-semi-condensed-latin-600-normal.woff2",
-  "./fonts/barlow-semi-condensed-latin-700-italic.woff2",
-  "./icon-192.png", "./icon-512.png", `./manifest.webmanifest?v=${V}`];
+const MARKER = new URL("./__offline__/ready", self.location).href;
+const jobs = new Map(), cancelled = new Set();
+const packCache = meta => `istintopuro-pack-${meta.id}-${meta.built}-${V}`;
 
-self.addEventListener("install", (e) => {
-  // the flags are fetched by CSS only for the four countries that need them: leave
-  // them to the runtime rule below rather than paying for them on every install
-  e.waitUntil(caches.open(SHELL).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));
-});
-
-self.addEventListener("activate", (e) => {
-  e.waitUntil(caches.keys()
-    .then(ks => Promise.all(ks.map(k => (k === SHELL || k === DATA) ? null : caches.delete(k))))
-    .then(() => self.clients.claim()));
-});
-
-// keep one version of each data file: drop the entries for the same path whose ?v differs
-async function putData(req, res) {
-  const c = await caches.open(DATA), here = new URL(req.url);
-  for (const k of await c.keys()) {
-    const u = new URL(k.url);
-    if (u.pathname === here.pathname && u.search !== here.search) await c.delete(k);
-  }
-  await c.put(req, res);
+async function announce(status) {
+  jobs.set(status.id, status);
+  const clients = await self.clients.matchAll({ includeUncontrolled: true });
+  for (const client of clients) client.postMessage({ type: "offline-status", version: V, ...status });
 }
 
-self.addEventListener("fetch", (e) => {
-  const req = e.request;
-  if (req.method !== "GET") return;
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;  // Commons photos: the browser's business
+async function inventory(name) {
+  if (!(await caches.has(name))) return null;
+  const cache = await caches.open(name), response = await cache.match(MARKER);
+  if (!response) return null;
+  const meta = await response.json();
+  const keys = new Set((await cache.keys()).map(key => key.url));
+  return meta.files.every(file => keys.has(new URL(file, self.location).href)) ? meta : null;
+}
 
-  // The document names the versioned assets, so it is fetched fresh whenever the
-  // network allows and only falls back to the cached copy offline.
-  if (req.mode === "navigate") {
-    e.respondWith(fetch(req).catch(() => caches.match("./", { ignoreSearch: true })));
+async function fetchNetwork(request, options = {}, timeout = 30000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try { return await fetch(request, { ...options, signal: controller.signal }); }
+  finally { clearTimeout(timer); }
+}
+
+async function get(url) {
+  const hit = await caches.match(url);
+  if (hit) return hit;
+  const response = await fetchNetwork(url, { cache: "no-cache" });
+  if (!response.ok) throw new Error(`${url}: ${response.status}`);
+  return response;
+}
+
+async function store(name, files, id, extra = {}) {
+  const cache = await caches.open(name);
+  let done = 0, cursor = 0, failed = false;
+  const total = files.length;
+  await announce({ id, state: "downloading", done, total });
+  const results = await Promise.allSettled(Array.from({ length: 4 }, async () => {
+    while (cursor < files.length && !failed) {
+      const url = files[cursor++];
+      try {
+        if (cancelled.has(id)) throw new Error("cancelled");
+        if (!await cache.match(url)) {
+          const response = await get(url);
+          if (url.includes(".json?")) await response.clone().json();
+          if (cancelled.has(id)) throw new Error("cancelled");
+          await cache.put(url, response);
+        }
+        done++;
+        if (done % 10 === 0 || done === total)
+          await announce({ id, state: "downloading", done, total });
+      } catch (error) { failed = true; throw error; }
+    }
+  }));
+  const failure = results.find(result => result.status === "rejected");
+  if (failure) throw failure.reason;
+  if (cancelled.has(id)) throw new Error("cancelled");
+  const meta = { files, version: V, ...extra };
+  // The marker is the commit point; an unfinished download is never a fallback.
+  await cache.put(MARKER, new Response(JSON.stringify(meta), { headers: { "Content-Type": "application/json" } }));
+  if (!await inventory(name)) throw new Error("incomplete offline copy");
+  await announce({ id, state: "ready", done, total, ...extra });
+}
+
+let coreTask;
+function prepareCore() {
+  return coreTask ||= (async () => {
+    try {
+      const indexResponse = await get(`./data/index.json?v=${V}`);
+      const index = await indexResponse.clone().json();
+      if (!Array.isArray(index.clubs) || !Number.isInteger(index.nshards) || index.nshards < 1)
+        throw new Error("invalid index");
+      const scheduleResponse = await get(`./data/quiz-schedule.json?v=${V}`);
+      const schedule = await scheduleResponse.clone().json();
+      if (schedule.v !== 1 || schedule.built !== index.built || !schedule.days || !schedule.through)
+        throw new Error("quiz schedule does not match index");
+      const documentResponse = await fetchNetwork("./", { cache: "no-cache" });
+      if (!documentResponse.ok || !(await documentResponse.clone().text()).includes(`app.js?v=${V}`))
+        throw new Error("release changed during download");
+      const cache = await caches.open(CORE);
+      await cache.put("./", documentResponse);
+      await cache.put(`./data/index.json?v=${V}`, indexResponse);
+      await cache.put(`./data/quiz-schedule.json?v=${V}`, scheduleResponse);
+      await store(CORE, OfflineGame.coreFiles(index, V), "core", { built: index.built, through: schedule.through });
+    } catch (error) {
+      await announce({ id: "core", state: "error" });
+      throw error;
+    } finally { coreTask = null; }
+  })();
+}
+
+self.addEventListener("install", event => {
+  event.waitUntil(prepareCore().then(() => self.skipWaiting()));
+});
+
+self.addEventListener("activate", event => {
+  event.waitUntil((async () => {
+    const names = (await caches.keys()).filter(name => name.startsWith("istintopuro-offline-") && name !== CORE);
+    const complete = [];
+    for (const name of names) if (await inventory(name)) complete.push(name);
+    const previous = complete.at(-1);
+    for (const name of names) if (name !== previous) await caches.delete(name);
+    for (const name of await caches.keys())
+      if (name.startsWith("istintopuro-shell-")) await caches.delete(name);
+    // The first page saves its index before a worker controls it. Once those
+    // responses are in the complete snapshot, remove the temporary duplicates.
+    const meta = await inventory(CORE), runtime = await caches.open(DATA);
+    if (meta) for (const file of meta.files) await runtime.delete(file);
+    await self.clients.claim();
+  })());
+});
+
+const packTasks = new Map();
+async function preparePack(id) {
+  if (packTasks.has(id)) return packTasks.get(id);
+  cancelled.delete(id);
+  const task = (async () => {
+    try {
+      const cache = await caches.open(CORE);
+      const index = await (await cache.match(`./data/index.json?v=${V}`)).json();
+      const meta = index.packs.find(pack => pack.id === id);
+      if (!meta) throw new Error("unknown pack");
+      const response = await get(`./data/packs/${id}/index.json?v=${meta.built}`);
+      const pack = await response.clone().json();
+      if (pack.id !== id || pack.built !== meta.built || !Array.isArray(pack.clubs)
+          || !Number.isInteger(pack.nshards) || pack.nshards < 1) throw new Error("invalid pack");
+      const name = packCache(meta), target = await caches.open(name);
+      await target.put(`./data/packs/${id}/index.json?v=${meta.built}`, response);
+      await store(name, OfflineGame.packFiles(pack), id, { built: meta.built });
+      const old = (await caches.keys()).filter(key => key.startsWith(`istintopuro-pack-${id}-`) && key !== name);
+      for (const key of old.slice(0, -1)) await caches.delete(key);
+    } catch (error) {
+      await announce({ id, state: cancelled.has(id) ? "idle" : "error" });
+      throw error;
+    } finally { packTasks.delete(id); }
+  })();
+  packTasks.set(id, task);
+  return task;
+}
+
+self.addEventListener("message", event => {
+  const message = event.data || {};
+  if (!event.source || new URL(event.source.url).origin !== self.location.origin) return;
+  if (message.type === "offline-status") event.waitUntil((async () => {
+    for (const id of ["core", ...(Array.isArray(message.packs) ? message.packs : [])]) {
+      const running = jobs.get(id);
+      if (running?.state === "downloading" || running?.state === "error") {
+        event.source.postMessage({ type: "offline-status", version: V, ...running });
+        continue;
+      }
+      let name = CORE;
+      if (id !== "core") {
+        const cache = await caches.open(CORE), response = await cache.match(`./data/index.json?v=${V}`);
+        const meta = response && (await response.json()).packs?.find(pack => pack.id === id);
+        if (!meta) continue;
+        name = packCache(meta);
+      }
+      const meta = await inventory(name);
+      event.source.postMessage({ type: "offline-status", version: V, id,
+        state: meta ? "ready" : "idle", through: meta?.through });
+    }
+  })());
+  if (message.type === "offline-core") event.waitUntil(prepareCore().catch(() => {}));
+  if (message.type === "offline-pack" && typeof message.id === "string")
+    event.waitUntil(preparePack(message.id).catch(() => {}));
+  if (message.type === "offline-remove-pack" && /^[a-z]{2}$/.test(message.id)) event.waitUntil((async () => {
+    cancelled.add(message.id);
+    await packTasks.get(message.id)?.catch(() => {});
+    for (const name of await caches.keys())
+      if (name.startsWith(`istintopuro-pack-${message.id}-`)) await caches.delete(name);
+    jobs.delete(message.id);
+    event.ports[0]?.postMessage({ ok: true });
+  })());
+});
+
+self.addEventListener("fetch", event => {
+  const request = event.request, url = new URL(request.url);
+  if (request.method !== "GET" || url.origin !== self.location.origin) return;
+  if (request.mode === "navigate") {
+    event.respondWith((async () => {
+      try {
+        const response = await fetchNetwork(request, {}, 4000);
+        if (response.ok) return response;
+      } catch { /* fall back to the last completely downloaded release */ }
+      const cache = await caches.open(CORE);
+      return (await cache.match("./")) || Response.error();
+    })());
     return;
   }
-
-  const isData = url.pathname.includes("/data/");
-  e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => {
-    if (res.ok && (url.searchParams.has("v") || /\.(woff2|png|svg|webmanifest)$/.test(url.pathname))) {
-      // waitUntil, not fire-and-forget: the response is already on its way to the page,
-      // and a browser may stop the worker the moment it has been delivered. Safari does
-      // so promptly, which loses the write and leaves the cache holding whatever it had
-      // — the page then works online and fails offline, with nothing to show for it.
-      // A full storage quota rejects the put; that is a reason to cache less, not to
-      // fail the request the page is waiting on.
-      const copy = res.clone();
-      e.waitUntil((isData ? putData(req, copy)
-                          : caches.open(SHELL).then(c => c.put(req, copy))).catch(() => {}));
+  event.respondWith((async () => {
+    const hit = await caches.match(request);
+    if (hit) return hit;
+    const response = await fetch(request);
+    if (response.ok && url.pathname.includes("/data/") && url.searchParams.has("v")) {
+      const copy = response.clone();
+      event.waitUntil(caches.open(DATA).then(async cache => {
+        for (const key of await cache.keys()) {
+          const old = new URL(key.url);
+          if (old.pathname === url.pathname && old.search !== url.search) await cache.delete(key);
+        }
+        await cache.put(request, copy);
+      }).catch(() => {}));
     }
-    return res;
-  })));
+    return response;
+  })());
 });

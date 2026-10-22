@@ -63,7 +63,7 @@ const STR = {
     about: "Due modi di giocare con «Istinto Puro». Solver: scegli squadre, campionati o paesi e scopri chi li unisce. Schedina giornaliera: quattro sfide di difficoltà crescente, le stesse per tutti. Dati estratti da Wikidata.",
     aboutLeagues: "Campionati coperti (tutte le stagioni):",
     packsTitle: "Campionati opzionali",
-    packsNote: "Ogni pack pesa circa 200kB e aggiunge le prime due divisioni al solver. La Schedina resta uguale per tutti.",
+    packsNote: "Ogni pack aggiunge le prime due divisioni al solver. Dopo averlo attivato, salva il pack completo offline (circa 1 MB di download). La Schedina resta uguale per tutti.",
     packOn: "attivo", packOff: "non scaricato", packLoading: "download…",
     packRemoving: "rimozione…", packFailed: "download non riuscito", packRetry: "riprova",
     packRequired: (names) => `Questo link usa ${names}. Attiva il pack per ripristinare tutte le squadre.`,
@@ -138,7 +138,7 @@ const STR = {
     about: "Two ways to play “Istinto Puro”. Solver: pick clubs, leagues, or countries and see who connects them. Daily quiz: four challenges of rising difficulty, the same for everyone. Data extracted from Wikidata.",
     aboutLeagues: "Leagues covered (all seasons):",
     packsTitle: "Optional leagues",
-    packsNote: "Each pack is about 200kB and adds its top two divisions to the solver. The daily quiz stays the same for everyone.",
+    packsNote: "Each pack adds its top two divisions to the solver. Once enabled, save the complete pack offline (about 1 MB to download). The daily quiz stays the same for everyone.",
     packOn: "enabled", packOff: "not downloaded", packLoading: "downloading…",
     packRemoving: "removing…", packFailed: "download failed", packRetry: "retry",
     packRequired: (names) => `This link uses ${names}. Enable the pack to restore every club.`,
@@ -250,6 +250,7 @@ function applyLang() {
       `${countryFlag(g.cc)} ` + g.names.map(n => `<span class="lg">${n}</span>`).join(" · ")).join("<br>");
   } else $("aboutleagues").textContent = t.aboutLeagues;
   renderPacks();
+  OfflineGame.render();
   renderPackHint();
   if (DB) {
     renderChips();
@@ -508,7 +509,7 @@ function reopenPackDialog() {
   try { sessionStorage.setItem("leaguePackDialog", "1"); } catch {}
 }
 async function keepPackIndex(id, built, copy) {
-  if (!window.caches) return;
+  if (!window.caches || navigator.serviceWorker?.controller) return;
   try {
     const cache = await caches.open("istintopuro-data");
     for (const key of await cache.keys())
@@ -527,6 +528,7 @@ async function loadPack(meta) {
   return pack;
 }
 async function purgePack(id) {
+  await OfflineGame.removePack(id);
   if (!window.caches) return;
   try {
     const cache = await caches.open("istintopuro-data");
@@ -570,6 +572,7 @@ async function togglePack(meta, on) {
   }
 }
 function renderPacks() {
+  const focusedId = document.activeElement?.id;
   const section = $("aboutpacks");
   const manifests = CORE_DB?.packs || [];
   section.hidden = manifests.length === 0;
@@ -605,10 +608,15 @@ function renderPacks() {
     label.className = "dtg";
     const input = document.createElement("input");
     input.type = "checkbox"; input.checked = enabled.has(meta.id); input.disabled = busy;
+    input.id = `pack-${meta.id}`;
     input.setAttribute("aria-label", `${countryName(meta.cc)} — ${meta.leagues.join(" · ")} — ${state.textContent}`);
     input.onchange = () => togglePack(meta, input.checked);
     const knob = document.createElement("span"); knob.className = "knob";
     label.append(input, knob); ctl.append(state, label);
+    if (active.has(meta.id)) {
+      const offline = OfflineGame.packControl(meta, countryName(meta.cc));
+      if (offline) { offline.id = `offline-pack-${meta.id}`; ctl.appendChild(offline); }
+    }
     if (failed) {
       const retry = document.createElement("button");
       retry.type = "button"; retry.className = "packretry"; retry.textContent = t.packRetry;
@@ -617,6 +625,8 @@ function renderPacks() {
     }
     row.append(desc, ctl); list.appendChild(row);
   }
+  if (focusedId?.startsWith("pack-") || focusedId?.startsWith("offline-pack-"))
+    $(focusedId)?.focus({ preventScroll: true });
 }
 const PACK_HINT_KEY = "leaguePackHintV1";
 function packHintDismissed() {
@@ -662,7 +672,7 @@ function missingPacksForHash() {
 // cache from here, where the response already is — no second download — and keep one
 // version of it, the way sw.js does for the shards.
 async function keepIndex(copy) {
-  if (!window.caches) return;  // http:// or an old browser: nothing to do
+  if (!window.caches || navigator.serviceWorker?.controller) return;
   try {
     const c = await caches.open("istintopuro-data");
     for (const k of await c.keys())
@@ -671,7 +681,7 @@ async function keepIndex(copy) {
   } catch { /* storage full or denied: the app is unaffected */ }
 }
 async function keepQuizSchedule(copy) {
-  if (!window.caches) return;
+  if (!window.caches || navigator.serviceWorker?.controller) return;
   try {
     const c = await caches.open("istintopuro-data");
     for (const k of await c.keys())
@@ -738,6 +748,7 @@ async function boot() {
   try { reopen = sessionStorage.getItem("leaguePackDialog") === "1"; sessionStorage.removeItem("leaguePackDialog"); } catch {}
   if ((reopen || requiredPackIds.length) && !$("about").open) $("about").showModal();
   document.dispatchEvent(new Event("dbready"));  // quiz.js waits on this (e.g. a #quiz deep link)
+  OfflineGame.refresh();
 }
 
 function postingsFor(db, cache, ci) {
@@ -2290,7 +2301,7 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0, opts = {}) {
     const li = document.createElement("li");
     li.className = "player";
     li.style.animationDelay = `${Math.min(i, 14) * 22}ms`;  // solve cascade, capped
-    const img = DB.imgs[pid]
+    const img = DB.imgs[pid] && navigator.onLine !== false
       ? `<img loading="lazy" src="${thumbURL(DB.imgs[pid])}" alt="">`
       : `<span class="avatar">${initials(pid)}</span>`;
     const apps = appsOf.get(pid), goals = goalsOf.get(pid);
@@ -2302,10 +2313,7 @@ function renderResults(ids, appsOf, goalsOf, zeroGoals, from = 0, opts = {}) {
     const rank = mode === "club" ? `<span class="rank">${from + i + 1}</span>` : "";
     li.innerHTML = `${rank}${img}<div class="pinfo"><span class="pname">${flag(DB.nats[pid])} ${esc(DB.names[pid])}${DB.gkSet.has(pid) ? " <small>(GK)</small>" : ""}${DB.births[pid] ? ` <small>(${DB.births[pid]})</small>` : ""}</span></div>${meta ? `<span class="pstats">${meta}</span>` : ""}<span class="expand">▸</span>`;
     const im = li.querySelector("img");
-    if (im) im.onerror = () => {  // e.g. original narrower than 120px: the redirect resolves it
-      im.onerror = () => im.replaceWith(avatar(initials(pid)));
-      im.src = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(DB.imgs[pid].slice(2))}?width=96`;
-    };
+    if (im) im.onerror = () => im.replaceWith(avatar(initials(pid)));
     li.onclick = () => toggleCareer(li, pid);
     li.tabIndex = 0;  // keyboard: Enter/Space toggles the career, arrows walk the list
     li.setAttribute("aria-expanded", "false");
@@ -2715,6 +2723,7 @@ async function careerOf(pid) {  // [qidNumber, spells] — pack routes stay stab
 
 const sitelinksCache = new Map();
 async function wikiSitelinks(qid) {
+  if (navigator.onLine === false) return null;
   if (sitelinksCache.has(qid)) return sitelinksCache.get(qid);
   const p = fetch(`https://www.wikidata.org/wiki/Special:EntityData/Q${qid}.json`)
     .then(r => r.json())
@@ -2793,9 +2802,6 @@ async function toggleCareer(li, pid) {
 applyLang();
 boot();
 
-// Offline shell. Registered after load so it never competes with the first paint, and
-// only where a service worker can run at all — over file:// or plain http the register
-// call throws, which is exactly the case when someone opens the folder directly.
-if ("serviceWorker" in navigator && (location.protocol === "https:"
-    || ["localhost", "127.0.0.1"].includes(location.hostname)))
-  addEventListener("load", () => navigator.serviceWorker.register(`sw.js?v=${V}`).catch(() => {}));
+document.addEventListener("offlinestatus", renderPacks);
+OfflineGame.start({ version: V, getLang: () => lang,
+  getPacks: () => (CORE_DB?.packs || []).filter(meta => enabledPackIds().has(meta.id)) });

@@ -124,6 +124,18 @@
   <h2>Istinto Puro — quiz & solver</h2>
   <p id="abouttext">Due modi di giocare con «Istinto Puro». Solver: scegli squadre, campionati o paesi e scopri chi li unisce. Schedina giornaliera: quattro sfide di difficoltà crescente, le stesse per tutti. Dati estratti da Wikidata.</p>
   <p id="aboutleagues"></p>
+  <section id="aboutoffline" aria-labelledby="offlinetitle">
+    <h3 id="offlinetitle">Gioca offline</h3>
+    <p id="offlinenote"></p>
+    <p id="offlinestate" role="status" aria-live="polite"></p>
+    <progress id="offlineprogress" hidden></progress>
+    <p id="offlinehorizon" hidden></p>
+    <div class="offlineactions">
+      <button id="offlineretry" type="button" hidden></button>
+      <button id="offlineprotect" type="button" hidden></button>
+    </div>
+    <p id="offlinestorage" hidden></p>
+  </section>
   <section id="aboutpacks" hidden>
     <h3 id="packstitle"></h3>
     <p id="packsnote"></p>
@@ -135,6 +147,7 @@
 </dialog>
 <footer id="foot">dati: <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a> · foto: <a href="https://commons.wikimedia.org" target="_blank" rel="noopener">Wikimedia Commons</a> · <a href="https://github.com/marcocosta97/istintopuro/blob/master/LICENSE" target="_blank" rel="noopener">MIT</a> · <a href="https://github.com/marcocosta97/istintopuro" target="_blank" rel="noopener">GitHub</a></footer>
 <script src="packs.js?v=__V__"></script>
+<script src="offline.js?v=__V__"></script>
 <script src="app.js?v=__V__"></script>
 <script src="quiz-core.js?v=__V__"></script>
 <script src="quiz.js?v=__V__"></script>

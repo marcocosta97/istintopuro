@@ -18,7 +18,8 @@ test("writer emits a valid deterministic v1 schedule", () => {
   generated = buildSchedule(runtime, null);
   assert.equal(generated.v, 1);
   assert.equal(generated.built, runtime.index.built);
-  assert.equal(generated.through, shiftDate(runtime.index.built, 14));
+  assert.equal(generated.through, shiftDate(runtime.index.built, 90));
+  assert.equal(generated.lockedThrough, generated.through);
   assert.equal(Object.keys(generated.days)[0], EPOCH);
   assert.deepEqual(validateAsset(runtime, generated, {
     expectedBuilt: runtime.index.built,
@@ -27,7 +28,7 @@ test("writer emits a valid deterministic v1 schedule", () => {
   assert.deepEqual(buildSchedule(runtime, generated), generated);
 });
 
-test("later refresh preserves history, repairs invalid days, and regenerates its horizon", () => {
+test("later refresh preserves the entire offline horizon, repairs invalid days, and extends it", () => {
   generated ||= buildSchedule(runtime, null);
   const input = structuredClone(generated);
   const nextIndex = structuredClone(runtime.index);
@@ -36,25 +37,24 @@ test("later refresh preserves history, repairs invalid days, and regenerates its
   const preservedDate = EPOCH;
   const invalidDate = shiftDate(EPOCH, 1);
   const regeneratedDate = shiftDate(nextIndex.built, 1);
-  const nextThrough = shiftDate(nextIndex.built, 14);
+  const nextThrough = shiftDate(nextIndex.built, 90);
   const excessDate = shiftDate(nextThrough, 1);
   const preservedHistory = Object.fromEntries(Object.entries(input.days)
-    .filter(([date]) => date <= nextIndex.built).map(([date, stages]) => [date, structuredClone(stages)]));
+    .map(([date, stages]) => [date, structuredClone(stages)]));
   const preserved = preservedHistory[preservedDate];
   input.days[invalidDate][0][0] = "Q999999999999";
   delete preservedHistory[invalidDate];
   input.days[regeneratedDate][0].reverse();
-  const deliberatelyReorderedFuture = structuredClone(input.days[regeneratedDate]);
+  preservedHistory[regeneratedDate] = structuredClone(input.days[regeneratedDate]);
   input.days[excessDate] = preserved;
-  input.through = excessDate;
   const warnings = [];
 
   const repaired = buildSchedule(nextRuntime, input, { warn: message => warnings.push(message) });
 
   for (const [date, stages] of Object.entries(preservedHistory)) assert.deepEqual(repaired.days[date], stages);
-  assert.notDeepEqual(repaired.days[regeneratedDate], deliberatelyReorderedFuture);
   assert.equal(repaired.built, nextIndex.built);
   assert.equal(repaired.through, nextThrough);
+  assert.equal(repaired.lockedThrough, nextThrough);
   assert.equal(Object.hasOwn(repaired.days, excessDate), false);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], new RegExp(invalidDate));
@@ -72,12 +72,12 @@ test("committed schedule matches the current index", () => {
 
 test("explicit regeneration replaces future locks while preserving earlier published days", () => {
   const asset = JSON.parse(fs.readFileSync(path.join(ROOT, "site/data/quiz-schedule.json"), "utf8"));
-  const from = shiftDate(runtime.index.built, 6), through = shiftDate(from, 13);
+  const from = shiftDate(runtime.index.built, 6), through = shiftDate(runtime.index.built, 100);
   const input = structuredClone(asset);
   input.lockedThrough = shiftDate(from, 5);
   input.days[from][0].reverse();
   const output = buildSchedule(runtime, input, { regenerateFrom: from, through });
-  assert.equal(output.lockedThrough, shiftDate(from, -1));
+  assert.equal(output.lockedThrough, through);
   assert.equal(output.through, through);
   assert.equal(output.horizonThrough, through);
   for (const [date, rows] of Object.entries(input.days))
