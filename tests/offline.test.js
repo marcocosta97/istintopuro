@@ -177,6 +177,18 @@ test("country packs download completely, persist across restarts, and are remova
   assert.ok(!(await offline.caches.keys()).some(name => name.startsWith("istintopuro-pack-pt-")));
 });
 
+test("runtime data cache stores versioned JSON and rejects a non-JSON body", async () => {
+  const good = worker();
+  const url = "./data/career/0.json?v=one";
+  assert.equal((await good.request(url)).ok, true);
+  assert.deepEqual(await (await good.caches.match(absolute(url))).json(), []);
+
+  const bad = worker({ network: { invalidJson: true } });
+  const html = await bad.request(url);
+  assert.equal(await html.text(), "<html>error</html>");
+  assert.equal(await bad.caches.match(absolute(url)), undefined);
+});
+
 test("a failing navigation uses the complete offline copy even for HTTP errors", async () => {
   const app = worker();
   await app.install();

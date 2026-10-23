@@ -118,6 +118,7 @@ const STR = {
     matesFail: "Compagni non disponibili.",
     matesMore: (n) => `+${n}`,
     copyLink: "copia link", copyLinkT: "Copia il link a questa selezione e ai filtri", copied: "copiato ✓",
+    copyFail: "copia non riuscita",
     themeDark: "Passa al tema scuro", themeLight: "Passa al tema chiaro",
   },
   en: {
@@ -193,6 +194,7 @@ const STR = {
     matesFail: "Teammates unavailable.",
     matesMore: (n) => `+${n}`,
     copyLink: "copy link", copyLinkT: "Copy a link to this selection and filters", copied: "copied ✓",
+    copyFail: "copy failed",
     themeDark: "Switch to dark theme", themeLight: "Switch to light theme",
   },
 };
@@ -671,23 +673,21 @@ function missingPacksForHash() {
 // cached except the thing without which nothing runs. Put it in the worker's own data
 // cache from here, where the response already is — no second download — and keep one
 // version of it, the way sw.js does for the shards.
-async function keepIndex(copy) {
+async function keepVersionedJson(copy, url, pathEnds) {
   if (!window.caches || navigator.serviceWorker?.controller) return;
   try {
+    await copy.clone().json();
     const c = await caches.open("istintopuro-data");
     for (const k of await c.keys())
-      if (new URL(k.url).pathname.endsWith("/data/index.json")) await c.delete(k);
-    await c.put(`data/index.json?v=${V}`, copy);
-  } catch { /* storage full or denied: the app is unaffected */ }
+      if (new URL(k.url).pathname.endsWith(pathEnds)) await c.delete(k);
+    await c.put(url, copy);
+  } catch { /* unreadable JSON, storage full, or denied: leave the previous copy */ }
+}
+async function keepIndex(copy) {
+  await keepVersionedJson(copy, `data/index.json?v=${V}`, "/data/index.json");
 }
 async function keepQuizSchedule(copy) {
-  if (!window.caches || navigator.serviceWorker?.controller) return;
-  try {
-    const c = await caches.open("istintopuro-data");
-    for (const k of await c.keys())
-      if (new URL(k.url).pathname.endsWith("/data/quiz-schedule.json")) await c.delete(k);
-    await c.put(`data/quiz-schedule.json?v=${V}`, copy);
-  } catch { /* optional offline copy; runtime generation remains available */ }
+  await keepVersionedJson(copy, `data/quiz-schedule.json?v=${V}`, "/data/quiz-schedule.json");
 }
 async function boot() {
   status.textContent = t.loading;
@@ -1973,6 +1973,26 @@ function linkBtn() {
   b.onclick = () => shareLink(b);
   return b;
 }
+async function writeClipboard(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* fall through to the synchronous command */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand?.("copy");
+    ta.remove();
+    return !!ok;
+  } catch { return false; }
+}
 async function shareLink(btn) {
   const url = solverShareUrl();
   // native sheet only on touch, like the quiz's share: on desktop navigator.share
@@ -1984,13 +2004,9 @@ async function shareLink(btn) {
     btn.textContent = t.copied; btn.classList.add("copied");
     setTimeout(() => { btn.textContent = `🔗 ${t.copyLink}`; btn.classList.remove("copied"); }, 1500);
   };
-  try { await navigator.clipboard.writeText(url); done(); return; } catch {}
-  try {  // last-ditch for older Safari without the async clipboard API
-    const ta = document.createElement("textarea");
-    ta.value = url; ta.style.position = "fixed"; ta.style.opacity = "0";
-    document.body.appendChild(ta); ta.select();
-    document.execCommand("copy"); ta.remove(); done();
-  } catch {}
+  if (await writeClipboard(url)) { done(); return; }
+  btn.textContent = t.copyFail;
+  status.textContent = t.copyFail;
 }
 
 // ------------------------------------------------------ solve: player mode

@@ -21,7 +21,7 @@ function runtime(days) {
       return { date, stages: [1, 2, 3, 4] };
     },
   };
-  const context = vm.createContext({ CORE_DB: { quizSchedule: { days } },
+  const context = vm.createContext({ CORE_DB: { quizSchedule: days === null ? null : { days } },
     QuizCore: { createQuizCore: () => core }, corePostings() {}, intersect() {},
     coreStature() {}, coreLeagueCC() {}, coreClub() {}, MARQUEE: new Set(),
     localStorage: { quizSeries: EPOCH },
@@ -49,6 +49,13 @@ test("fallback reconstructs missing history before the published tail", () => {
   assert.equal(calls.at(-1).previousDays.length, 90);
   assert.equal(calls.at(-1).previousDays[0].date, EPOCH);
   assert.equal(calls.at(-1).previousDays.at(-1).date, shiftDate(EPOCH, 89));
+});
+
+test("a missing schedule file does not generate an official day", () => {
+  const date = shiftDate(EPOCH, 3);
+  const { calls, stagesFor } = runtime(null);
+  assert.equal(stagesFor(date), null);
+  assert.equal(calls.length, 0);
 });
 
 test("without a published schedule the runtime replays the whole prior chain", () => {

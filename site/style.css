@@ -824,11 +824,22 @@ body.quiz {
 .qend-win .qres { color: var(--accent); }
 /* the on-screen result squares: one component for the end screen and the calendar,
    so both read identically (emoji live only in the copyable share text) */
-.rsq { display: inline-block; border-radius: 4px; background: var(--r3); }
+.rsq {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 4px; background: var(--r3);
+  font-style: normal; font-weight: 700; line-height: 1; color: #fff;
+}
+.rsq::after { font-size: .7em; }
+.qsq .rsq::after { font-size: .8rem; }
+.qcell.done .rsq::after { font-size: .55rem; }
 .rsq.r0 { background: var(--r0); }  /* clean clear */
-.rsq.r1 { background: var(--r1); }  /* cleared with a hint */
+.rsq.r0::after { content: "✓"; }
+.rsq.r1 { background: var(--r1); color: #1a1400; }  /* cleared with a hint */
+.rsq.r1::after { content: "✦"; }
 .rsq.r2 { background: var(--r2); }  /* missed */
-.rsq.r3 { background: var(--r3); }  /* unreached */
+.rsq.r2::after { content: "×"; }
+.rsq.r3 { background: var(--r3); color: var(--fg); }  /* unreached */
+.rsq.r3::after { content: "–"; }
 .qsq {
   margin-top: .7rem; display: flex; align-items: center; justify-content: center; gap: .6rem;
 }
@@ -921,6 +932,7 @@ body.qcal :is(#qhead, #qstages, #qcard, #qend, #qnewday, #qlog) { display: none;
 .qcal-back::before { content: "‹  "; }
 .qcal-back:hover, .qcal-back:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
 .qchint { color: var(--muted); font-size: .78rem; margin: 0 0 1.1rem; }
+.qchint.qlegend { margin-top: -.7rem; letter-spacing: normal; text-transform: none; }
 /* months tile side by side wherever there's room (two in the 640px column, one
    on a phone) — stacked, a year of archive is metres of scrolling */
 .qcmons { display: grid; grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr)); gap: 1.4rem 1.5rem; }

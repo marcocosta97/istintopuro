@@ -54,20 +54,28 @@ try {
 // Opening a published day still requires no replay of unrelated history.
 const qChain = [];
 function qScheduled(date, num) {
+  const schedule = CORE_DB.quizSchedule;
+  const scheduled = schedule?.days?.[date];
+  // A published day always wins over a slate generated while the file was missing.
+  if (scheduled) {
+    const lockedThrough = schedule.lockedThrough || schedule.built;
+    const published = typeof lockedThrough === "string" && date <= lockedThrough;
+    const checked = qCore().validateEntry(scheduled, { requireOrder: !published, requireLevels: !published });
+    if (!checked.ok) return null;
+    return qChain[num] = { date, num, attempt: null, stages: checked.stages };
+  }
+  if (!schedule) return null;
   if (qChain[num]) return qChain[num];
-  const scheduled = CORE_DB.quizSchedule?.days?.[date];
-  if (!scheduled) return null;
-  const lockedThrough = CORE_DB.quizSchedule.lockedThrough || CORE_DB.quizSchedule.built;
-  const published = typeof lockedThrough === "string" && date <= lockedThrough;
-  const checked = qCore().validateEntry(scheduled, { requireOrder: !published, requireLevels: !published });
-  if (!checked.ok) return null;
-  return qChain[num] = { date, num, attempt: null, stages: checked.stages };
+  return null;
 }
 // Resolve missing dates chronologically, independently of a person's play
 // history. Iteration avoids a recursion limit as the public series gets longer.
 function qGenerated(date) {
   const num = qNum(date);
   if (num < 1) return qCore().generate(date, { allowFallback: true });
+  // No schedule file: a local slate would be saved and then preferred over the
+  // published day once the file arrives. Callers show a retry instead.
+  if (!CORE_DB.quizSchedule) return null;
   const scheduled = qScheduled(date, num);
   if (scheduled) return scheduled;
   if (qChain[num]) return qChain[num];
@@ -83,9 +91,12 @@ function qGenerated(date) {
 function qStagesFor(date) {
   const num = qNum(date);
   if (num < 1) return qCore().generate(date, { allowFallback: true }).stages;
-  return qGenerated(date).stages;
+  return qGenerated(date)?.stages ?? null;
 }
-const qGen = (date) => ({ date, num: qNum(date), stages: qStagesFor(date) });
+const qGen = (date) => {
+  const stages = qStagesFor(date);
+  return stages ? { date, num: qNum(date), stages } : null;
+};
 // small and muted so it reads as a footnote, not as part of the label it trails
 const qTag = (s) => `<small class="qplus">${s}</small>`;
 // a revealed name stands in for the whole answer set: flag how many OTHERS there
@@ -106,13 +117,19 @@ let qReplaying = false;
 // replay. Kept across a club/player detour (module state, not localStorage) so
 // returning to Quiz restores the same board; a full page reload resets it to today.
 let qReplayDate = null;
+// "schedule": today's official puzzle cannot be started. "retired": a finished
+// day is on record but its clubs will not rebuild. Neither path mints a new slate.
+let qHold = null, qHoldRes = null, qHoldNum = null;
 const qReplays = () => { try { const s = JSON.parse(localStorage.quizReplays || ""); if (s && s.v === 1) return s; } catch {} return { v: 1, days: {} }; };
 const qSave = () => {
   qs.hintTargetKeys = Object.fromEntries(Object.entries(qs.hintTargets)
     .filter(([, pid]) => Number.isInteger(pid) && pid >= 0 && pid < CORE_DB.names.length)
     .map(([kind, pid]) => [kind, qIdentity(pid)]));
-  if (!qReplaying) { localStorage.quiz = JSON.stringify(qs); return; }
-  const r = qReplays(); r.days[qs.date] = qs; localStorage.quizReplays = JSON.stringify(r);
+  try {
+    if (!qReplaying) { localStorage.quiz = JSON.stringify(qs); return true; }
+    const r = qReplays(); r.days[qs.date] = qs; localStorage.quizReplays = JSON.stringify(r);
+    return true;
+  } catch { return false; }
 };
 const qRolled = () => !qReplaying && qs && qs.date !== qToday();  // played past midnight
 // one shot each, spent on whatever stage you're on. "ini2" is adaptive: the
@@ -125,11 +142,11 @@ const qSolved = () => (qs.won ? 4 : qs.stage) - qs.skipped.length;
 
 // resolve stored stage QIDs against the current build, recomputing answers, so a
 // dataset refresh can't swap the clubs under a saved game (or a replayed one).
-// Returns null for any stage whose club dropped from the build → caller falls
-// back to regeneration.
+// Returns null unless all four stages restore from their QIDs (or a grandfathered
+// face). Never substitutes a single stage from a freshly generated slate — that
+// hybrid board can duplicate clubs and rewrite a corrupt day into storage.
 function qStagesFromQids(rows, state = null) {
   if (!Array.isArray(rows) || rows.length !== 4) return null;
-  let generated = null;
   const stages = rows.map((qids, stageIndex) => {
     if (!Array.isArray(qids) || qids.length < 2 || qids.length > 3) return null;
     CORE_DB.byQid ||= new Map(CORE_DB.clubs.map((club, index) => [club[3], index]));
@@ -145,9 +162,7 @@ function qStagesFromQids(rows, state = null) {
     if (hit) {
       return { clubs, answers, effective: [], ease: -Infinity, grandfatheredFace: hit.pid };
     }
-    if (!state) return null;
-    generated ||= qGen(state.date).stages;
-    return generated[stageIndex];
+    return null;
   });
   return stages.every(Boolean) ? stages : null;
 }
@@ -159,34 +174,142 @@ function qMigrateState(state, stages) {
   return qCore().migrateState(state, stages, QHINTS);
 }
 
+function qRunStarted(state) {
+  if (!state || state.done) return false;
+  return (state.guesses?.length || 0) > 0 || (state.skipped?.length || 0) > 0
+    || Object.values(state.hints || {}).some(h => h !== null);
+}
+function qQidsOf(stages) {
+  return stages.map(st => st.clubs.map(ci => CORE_DB.clubs[ci][3]));
+}
+function qSameQids(rows, stages) {
+  const next = qQidsOf(stages);
+  return Array.isArray(rows) && rows.length === next.length && rows.every((row, i) =>
+    Array.isArray(row) && row.length === next[i].length && row.every((qid, k) => qid === next[i][k]));
+}
+function qNoteStorage() {
+  const text = QSTR[lang].qStorage;
+  const statusEl = $("status");
+  if (statusEl) statusEl.textContent = text;
+  const msg = $("qmsg");
+  if (msg && qBuilt) { msg.textContent = text; msg.className = "no"; }
+}
+function qHoldSchedule() {
+  qHold = "schedule"; qHoldRes = null; qHoldNum = null; qs = null; qPz = null;
+}
+function qHoldRetired(hist) {
+  qHold = "retired";
+  qHoldRes = Array.isArray(hist?.res) ? hist.res : null;
+  qHoldNum = hist?.num ?? null;
+  qs = null; qPz = null;
+  try { localStorage.removeItem("quiz"); } catch {}
+}
+function qFresh(today, puzzle) {
+  qHold = null; qHoldRes = null; qHoldNum = null;
+  qPz = { stages: puzzle.stages };
+  qs = { v: 2, date: today, num: puzzle.num, built: DB.built,
+         stages: qQidsOf(puzzle.stages),
+         stage: 0, lives: 5, guesses: [], hints: Object.fromEntries(QHINTS.map(k => [k, null])),
+         hintTargets: {}, skipped: [], startedAt: Date.now(), done: false, won: false };
+  if (!qSave()) qNoteStorage();
+}
+function qRestoreLive(state) {
+  const stages = qStagesFromQids(state.stages, state);
+  if (!stages) return false;
+  state = qMigrateState(state, stages);  // v1 keeps its reached/cleared stages and gains exact hint targets
+  state.stages = stages.map(stage => stage.clubs.map(ci => DB.clubs[ci][3]));
+  qHold = null; qHoldRes = null; qHoldNum = null;
+  qs = state; qPz = { stages };
+  const saved = qSave();
+  // A done live game whose stats write never landed still needs the aggregate.
+  // qStats no-ops when this date is already on the cursor.
+  if (qs.done && !qReplaying) qStats();
+  // backfill: a game finished before the calendar shipped has no history row
+  if (qs.done && !qHistory().days[qs.date]) qRecordDay();
+  if (!saved) qNoteStorage();
+  return true;
+}
+function qAdoptRecorded(hist, today) {
+  const rows = hist.stages;
+  const stages = qStagesFromQids(rows, hist.state) || qStagesFromQids(rows);
+  const rebuilt = stages && qCore().restoreHistoryState(hist, stages, {
+    date: today, num: hist.num ?? qNum(today), built: DB.built, stageQids: rows,
+  }, QHINTS);
+  if (!rebuilt) { qHoldRetired(hist); return; }
+  qHold = null; qHoldRes = null; qHoldNum = null;
+  qs = rebuilt; qPz = { stages };
+  if (!qSave()) qNoteStorage();
+  if (!qReplaying) qStats();
+}
+function qTodaySettled(hist, today) {
+  if (!hist) return false;
+  const state = hist.state;
+  const stateDone = !!(state && (state.v === 1 || state.v === 2) && state.date === today && state.done);
+  const summary = Array.isArray(hist.res) && hist.res.length === 4;
+  if (!stateDone && !summary) return false;
+  if (stateDone && qRestoreLive(state)) return true;
+  qAdoptRecorded(hist, today);
+  return true;
+}
+
 function qLoad() {
   qPools();  // prime pools + gkSet even on the restore path (qFame needs them)
   qReplaying = false;  // qLoad always means the live daily game
+  qHold = null; qHoldRes = null; qHoldNum = null;
   if (!qStarted()) { qs = null; qPz = null; return; }  // before launch day: no game yet
   const today = qToday();
+  // A finished day stays finished. Restoring the board is optional; starting a
+  // second official slate would let a later finish overwrite the archive row.
+  if (qTodaySettled(qHistory().days[today], today)) return;
   let s = null;
   try { s = JSON.parse(localStorage.quiz || ""); } catch {}
   if (s && (s.v === 1 || s.v === 2) && s.date === today) {
-    // ok guesses are grandfathered regardless of a mid-day rebuild
-    const stages = qStagesFromQids(s.stages, s);
-    if (stages) {
-      s = qMigrateState(s, stages);  // v1 keeps its reached/cleared stages and gains exact hint targets
-      s.stages = stages.map(stage => stage.clubs.map(ci => DB.clubs[ci][3]));
-      qs = s; qPz = { stages };
-      qSave();
-      // backfill: a game finished before the calendar shipped has no history row
-      if (qs.done && !qHistory().days[qs.date]) qRecordDay();
+    if (qRunStarted(s) || s.done) {
+      if (qRestoreLive(s)) return;
+      qHoldRetired({ res: null, num: s.num });
       return;
     }
+    if (!CORE_DB.quizSchedule) {
+      try { localStorage.removeItem("quiz"); } catch {}
+      qHoldSchedule();
+      return;
+    }
+    const official = qGen(today);
+    // An unstarted blob from a schedule miss must not outrank the published day.
+    if (official && qSameQids(s.stages, official.stages) && qRestoreLive(s)) return;
   }
-  // no state, a stale day, or a club dropped from the build: fresh puzzle
+  // Cold open after midnight: show a started run frozen, and forfeit it only
+  // when the player asks for today. An untouched slate is not a played day.
+  if (s && (s.v === 1 || s.v === 2) && s.date !== today && qRunStarted(s) && qRestoreLive(s)) return;
+  if (!CORE_DB.quizSchedule) { qHoldSchedule(); return; }
   const p = qGen(today);
-  qPz = { stages: p.stages };
-  qs = { v: 2, date: today, num: p.num, built: DB.built,
-         stages: p.stages.map(st => st.clubs.map(ci => DB.clubs[ci][3])),
-         stage: 0, lives: 5, guesses: [], hints: Object.fromEntries(QHINTS.map(k => [k, null])),
-         hintTargets: {}, skipped: [], startedAt: Date.now(), done: false, won: false };
-  qSave();
+  if (!p) { qHoldSchedule(); return; }
+  qFresh(today, p);
+}
+function qForfeitRolled() {
+  if (!qRolled() || !qs || qs.done) return true;
+  const snapshot = JSON.parse(JSON.stringify(qs));
+  qs.done = true; qs.won = false;
+  if (!qSave()) { qs = snapshot; qNoteStorage(); return false; }
+  qFinish();
+  return true;
+}
+async function qRetrySchedule() {
+  try {
+    const res = await fetch(`data/quiz-schedule.json?v=${V}`);
+    if (!res.ok) throw new Error(String(res.status));
+    const body = await res.json();
+    if (!(body && body.v === 1 && body.built === CORE_DB.built && body.days)) throw new Error("schedule");
+    CORE_DB.quizSchedule = body;
+    if (typeof DB !== "undefined" && DB) DB.quizSchedule = body;
+    qChain.length = 0;
+  } catch {
+    qHoldSchedule();
+    if (qBuilt) qRender();
+    return;
+  }
+  qLoad();
+  if (qBuilt) qRender();
 }
 
 // Open a past day from the calendar. A completed day restores its finished board;
@@ -204,7 +327,9 @@ function qStartReplay(date) {
       qPz = { stages }; qSave(); return;
     }
   }
-  const stages = (rec && qStagesFromQids(rec.stages)) || qGen(date).stages;
+  const generated = qGen(date);
+  const stages = (rec && qStagesFromQids(rec.stages)) || generated?.stages;
+  if (!stages) { qReplaying = false; qHoldSchedule(); return; }
   qPz = { stages };
   const stageQids = stages.map(st => st.clubs.map(ci => DB.clubs[ci][3]));
   qs = rec && qCore().restoreHistoryState(rec, stages,
@@ -224,6 +349,7 @@ function qGuess(pid) {
   const identity = qIdentity(pid);
   if (qs.guesses.some(g => g.stage === qs.stage && qGuessIdentity(g) === identity)) return "dup";
   const ok = qCore().answerMatches(pid, st.answers);
+  const snapshot = JSON.parse(JSON.stringify(qs));
   qs.guesses.push({ name: DB.names[pid], birth: DB.births[pid] || 0, nat: DB.nats[pid] || "",
     key: identity, pid, stage: qs.stage, ok });
   let ev;
@@ -232,8 +358,10 @@ function qGuess(pid) {
     else { qs.stage++; ev = "stage"; }
   } else if (--qs.lives <= 0) { qs.done = true; ev = "lost"; }
   else ev = "wrong";
+  // A failed write rolls the guess back. Stats and history run only after the
+  // terminal blob is durable, so a full disk cannot close the aggregate early.
+  if (!qSave()) { qs = snapshot; qNoteStorage(); return null; }
   if (qs.done) qFinish();
-  qSave();
   return ev;
 }
 
@@ -258,8 +386,18 @@ function qHint(kind) {  // a QHINTS key — each usable once per run
 
 // daily streak + histogram, updated exactly once as a run reaches done
 function qStats() {
-  const st = qGetStats() ||
+  const existing = qGetStats();
+  const st = existing ||
     { v: 1, played: 0, streak: 0, maxStreak: 0, lastWinDate: null, byStage: [0, 0, 0, 0, 0] };
+  if (st.lastPlayDate === qs.date) return st;
+  // Saves from before the cursor already include a finished day once history has
+  // it. A cursor sitting on an earlier day means today's aggregate write never
+  // landed, even when the calendar row did.
+  if (existing && !Object.prototype.hasOwnProperty.call(existing, "lastPlayDate") && qHistory().days[qs.date]) {
+    st.lastPlayDate = qs.date;
+    try { localStorage.quizStats = JSON.stringify(st); } catch {}
+    return st;
+  }
   st.played++;
   st.byStage[qSolved()]++;
   if (qs.won) {  // UTC day numbers: "yesterday" survives DST shifts
@@ -268,7 +406,8 @@ function qStats() {
     st.maxStreak = Math.max(st.maxStreak, st.streak);
     st.lastWinDate = qs.date;
   } else st.streak = 0;
-  localStorage.quizStats = JSON.stringify(st);
+  st.lastPlayDate = qs.date;
+  try { localStorage.quizStats = JSON.stringify(st); } catch {}
   return st;
 }
 function qGetStats() {
@@ -287,7 +426,7 @@ function qHistory() {
 function qRecordDay() {
   const h = qHistory();
   h.days[qs.date] = { num: qs.num, res: qResCodes(), stages: qs.stages, state: qs };
-  localStorage.quizHistory = JSON.stringify(h);
+  try { localStorage.quizHistory = JSON.stringify(h); } catch {}
 }
 
 // ---------------------------------------------------------------- i18n
@@ -313,7 +452,12 @@ const QSTR = {
     qNoZero: (l) => `No… risulta tesserato per ${l.join(" e ")}, ma con 0 presenze`,
     qNoMixed: (m, z) => `No… mai in ${m.join(" o ")}; tesserato ma con 0 presenze in ${z.join(" e ")}`,
     qWon: "Schedina completata!", qLost: "Tentativi finiti.",
-    qNewDay: "È mezzanotte: c'è una nuova schedina", qPlay: "gioca",
+    qNewDay: "È mezzanotte: la schedina non finita è abbandonata", qPlay: "gioca",
+    qScheduleMiss: "La schedina di oggi non si è caricata.", qRetry: "riprova",
+    qStorage: "Memoria piena: la giocata non è stata salvata.",
+    qRetired: "Questa schedina resta in archivio, ma il tabellone non si può riaprire.",
+    qSq: ["pulita", "con aiuto", "sbagliata", "non raggiunta"],
+    qLegend: "✓ pulita · ✦ con aiuto · × sbagliata · – non raggiunta",
     qStartsOn: (d) => `La schedina del giorno inizia ${d}. Torna a giocare!`,
     qErrS: (n) => `Errori ${n}/5`, qHintS: (n) => `Aiuti ${n}/3`,
     qStreakS: (n) => `Serie ${n}`,
@@ -321,7 +465,7 @@ const QSTR = {
     qHisto: "sfide superate",
     qReveal: (n) => n === 1 ? "la risposta era" : `le ${n} risposte erano`,
     qOthers: (n) => `e altr${n === 1 ? "o" : "i"} ${n}`,
-    qShare: "condividi", qCopied: "copiato negli appunti", qOpen: "apri nel solver",
+    qShare: "condividi", qCopied: "copiato negli appunti", qCopyFail: "copia non riuscita", qOpen: "apri nel solver",
     qResignBtn: "mi arrendo", qResignWarn: "Abbandonare la schedina di oggi?",
     qSkipBtn: "salta la sfida", qSkipWarn: "Saltare questa sfida? Conterà come non risolta.",
     qConfirmNo: "annulla", qConfirmSkip: "salta", qConfirmResign: "abbandona",
@@ -353,7 +497,12 @@ const QSTR = {
     qNoZero: (l) => `No… registered with ${l.join(" and ")}, but made 0 appearances`,
     qNoMixed: (m, z) => `No… didn't play for ${m.join(" or ")}; registered but made 0 appearances for ${z.join(" and ")}`,
     qWon: "Quiz completed!", qLost: "Out of guesses.",
-    qNewDay: "It's past midnight: a new quiz is out", qPlay: "play it",
+    qNewDay: "It's past midnight: the unfinished quiz is forfeited", qPlay: "play it",
+    qScheduleMiss: "Today's quiz did not load.", qRetry: "retry",
+    qStorage: "Storage is full: that play was not saved.",
+    qRetired: "This quiz stays in the archive, but the board cannot be reopened.",
+    qSq: ["clean", "hinted", "missed", "unreached"],
+    qLegend: "✓ clean · ✦ hinted · × missed · – unreached",
     qStartsOn: (d) => `The daily quiz starts ${d}. Come back to play!`,
     qErrS: (n) => `Misses ${n}/5`, qHintS: (n) => `Hints ${n}/3`,
     qStreakS: (n) => `Streak ${n}`,
@@ -361,7 +510,7 @@ const QSTR = {
     qHisto: "stages cleared",
     qReveal: (n) => n === 1 ? "the answer was" : `the ${n} answers were`,
     qOthers: (n) => `and ${n} more`,
-    qShare: "share", qCopied: "copied to clipboard", qOpen: "open in solver",
+    qShare: "share", qCopied: "copied to clipboard", qCopyFail: "copy failed", qOpen: "open in solver",
     qResignBtn: "give up", qResignWarn: "Give up on today's quiz?",
     qSkipBtn: "skip this stage", qSkipWarn: "Skip this stage? It will count as unsolved.",
     qConfirmNo: "cancel", qConfirmSkip: "skip", qConfirmResign: "give up",
@@ -480,9 +629,10 @@ function qSkipStage() {
 function qResign() {
   if (!qs || qs.done) return;
   qConfirm = null; qLeaveMode = null;
+  const snapshot = JSON.parse(JSON.stringify(qs));
   qs.done = true; qs.won = false;
+  if (!qSave()) { qs = snapshot; qNoteStorage(); qSuggOpen(false); qRender(); return; }
   qFinish();
-  qSave();
   qSuggOpen(false);
   qRender();
 }
@@ -590,22 +740,50 @@ function qFlash(text, cls) {
 
 const qClubNames = (st) => st.clubs.map(ci => coreClub(DB.clubs[ci][0])).join(" × ");
 
-function qRenderPre() {  // before launch day: a friendly "starts Monday" screen, no puzzle
+function qRenderQuiet(message, action) {
   const q = QSTR[lang];
-  $("qnum").textContent = q.qNum(1);
-  $("qcal-open").hidden = true;  // nothing to archive before launch
+  $("qnum").textContent = qHoldNum ? q.qNum(qHoldNum) : "";
+  const cb = $("qcal-open");
+  cb.textContent = q.qCal;
+  cb.setAttribute("aria-label", q.qCalTitle);
+  cb.hidden = qNum(qToday()) <= 1;
   $("qstages").innerHTML = "";
   $("qcard").hidden = true;
   $("qlog").innerHTML = "";
   $("qend").hidden = true;
   const nd = $("qnewday");
   nd.hidden = false;
-  nd.textContent = q.qStartsOn(qLaunchLabel());
+  if (!action) { nd.textContent = message; return; }
+  nd.innerHTML = `${message} <button type="button"></button>`;
+  const btn = nd.querySelector("button");
+  btn.textContent = action.label;
+  btn.onclick = action.run;
+}
+function qRenderPre() {  // before launch day: a friendly "starts Monday" screen, no puzzle
+  qHoldNum = 1;
+  qRenderQuiet(QSTR[lang].qStartsOn(qLaunchLabel()));
+  $("qcal-open").hidden = true;
+}
+function qRenderSchedule() {
+  qRenderQuiet(QSTR[lang].qScheduleMiss, { label: QSTR[lang].qRetry, run: () => { qRetrySchedule(); } });
+}
+function qRenderRetired() {
+  qRenderQuiet(QSTR[lang].qRetired);
+  if (!Array.isArray(qHoldRes)) return;
+  const row = document.createElement("div");
+  row.className = "qsq";
+  row.innerHTML = qSqRow(qHoldRes, true);
+  $("qnewday").appendChild(row);
 }
 function qRender() {
   const q = QSTR[lang];
   $("tagline").textContent = q.qTag;  // reuse the masthead tagline slot: content never shifts
   if (!qStarted()) { qRenderPre(); return; }  // before launch day
+  if (!qs) {
+    if (qHold === "retired") qRenderRetired();
+    else qRenderSchedule();
+    return;
+  }
   $("qnum").textContent = q.qNum(qs.num);
   const cb = $("qcal-open");  // the archive is only worth offering once there's a past
   cb.textContent = q.qCal; cb.setAttribute("aria-label", q.qCalTitle); cb.hidden = qNum(qToday()) <= 1;
@@ -636,6 +814,8 @@ function qRender() {
       li.className += " qlink";
       li.title = q.qOpen;
       li.tabIndex = 0;
+      li.setAttribute("role", "button");
+      li.setAttribute("aria-label", `${q.qOpen}: ${qClubNames(st)}`);
       li.onclick = () => qOpenSolver(st.clubs);
       li.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); qOpenSolver(st.clubs); } };
     }
@@ -696,7 +876,10 @@ function qRender() {
   nd.hidden = !qRolled();
   if (!nd.hidden) {
     nd.innerHTML = `${q.qNewDay} <button type="button">${q.qPlay}</button>`;
-    nd.querySelector("button").onclick = () => { qLoad(); qRender(); };
+    nd.querySelector("button").onclick = () => {
+      if (!qForfeitRolled()) { qRender(); return; }
+      qLoad(); qRender();
+    };
   }
   if (document.body.classList.contains("qcal")) qRenderCal();  // keep the open archive in sync (e.g. lang switch)
 }
@@ -801,7 +984,9 @@ const QRESSQ = ["🟩", "🟨", "🟥", "⬛"];  // outcome code → share-grid 
 // the on-screen squares: one CSS component, used by both the end screen (a row)
 // and the calendar (a 2×2), so the two always read identically — no per-platform
 // emoji drift. Emoji stay only in the copyable share text.
-const qSqCells = (codes) => codes.map(c => `<i class="rsq r${c}"></i>`).join("");
+const qSqCells = (codes) => codes.map(c => `<i class="rsq r${c}" aria-hidden="true"></i>`).join("");
+const qSqLabel = (codes) => codes.map(c => QSTR[lang].qSq[c] || "").join(", ");
+const qSqRow = (codes, named) => `<span class="rsqrow"${named ? ` role="img" aria-label="${esc(qSqLabel(codes))}"` : ` aria-hidden="true"`}>${qSqCells(codes)}</span>`;
 
 function qSummary() {  // shared by the end screen and the share text
   const q = QSTR[lang];
@@ -829,13 +1014,9 @@ async function qShareOut(e) {
     btn.textContent = QSTR[lang].qCopied; btn.classList.add("qcopied");
     setTimeout(() => { btn.textContent = QSTR[lang].qShare; btn.classList.remove("qcopied"); }, 1500);
   };
-  try { await navigator.clipboard.writeText(text); done(); return; } catch {}
-  try {  // last-ditch for older Safari without the async clipboard API
-    const ta = document.createElement("textarea");
-    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
-    document.body.appendChild(ta); ta.select();
-    document.execCommand("copy"); ta.remove(); done();
-  } catch {}
+  if (await writeClipboard(text)) { done(); return; }
+  btn.textContent = QSTR[lang].qCopyFail;
+  status.textContent = QSTR[lang].qCopyFail;
 }
 
 function qRenderEnd() {
@@ -845,7 +1026,7 @@ function qRenderEnd() {
   el.className = qs.won ? "qend-win" : "qend-lost";
   const { cleared, line } = qSummary(), st = qGetStats();
   let html = `<div class="qres">${qs.won ? q.qWon : q.qLost}</div>
-    <div class="qsq"><span class="rsqrow">${qSqCells(qResCodes())}</span> <b>${cleared}/4</b></div>
+    <div class="qsq">${qSqRow(qResCodes(), true)} <b>${cleared}/4</b></div>
     <div class="qmeta">${esc(line)}</div>`;
   if (!qs.won) {  // reveal the stage that ended the run, most recognisable first
     const stg = qPz.stages[qs.stage];
@@ -888,15 +1069,20 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && document.body.classList.contains("qcal")) qCalPick(qToday());
 });
 
+function qUtcWeekday(n) {
+  return new Date(Date.UTC(2024, 0, 1 + n)).toLocaleDateString(lang, { weekday: "narrow", timeZone: "UTC" });
+}
+function qUtcMonth(y, m) {
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(lang, { month: "long", year: "numeric", timeZone: "UTC" });
+}
 function qRenderCal() {
   const q = QSTR[lang], today = qToday(), days = qHistory().days;
   const active = qReplayDate || today;  // the board currently open — highlight this, not always today
   const [ty, tm] = today.split("-").map(Number);
   // Intl for the month/weekday labels — respects lang ("it"/"en"), no hardcoding.
   // Monday-first: the toLocaleDateString weekday of a known Monday, rotated.
-  const wd = (n) => new Date(Date.UTC(2024, 0, 1 + n)).toLocaleDateString(lang, { weekday: "narrow" });  // Jan 1 2024 = Monday
-  const wdRow = `<div class="qcwd">${[0, 1, 2, 3, 4, 5, 6].map(n => `<span>${wd(n)}</span>`).join("")}</div>`;
-  const monLabel = (y, m) => new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(lang, { month: "long", year: "numeric" });
+  const wdRow = `<div class="qcwd">${[0, 1, 2, 3, 4, 5, 6].map(n => `<span>${qUtcWeekday(n)}</span>`).join("")}</div>`;
+  const monLabel = qUtcMonth;
   // Walk from the current series' #1 (QEPOCH) to the current month.
   const ep = new Date(QEPOCH), sy = ep.getUTCFullYear(), sm = ep.getUTCMonth() + 1;
   const months = [];
@@ -917,7 +1103,7 @@ function qRenderCal() {
       const label = `${q.qNum(num)}${rec ? " · " + rec.res.filter(c => c < 2).length + "/4" : ""}`;
       cells.push({ play: true, html:
         `<button type="button" class="qcell ${cls}" data-d="${ds}" title="${esc(label)}" aria-label="${esc(label)}">`
-        + `<span class="qcbox">${rec ? qSqCells(rec.res) : ""}</span><span class="qcd">${d}</span></button>` });
+        + `<span class="qcbox">${rec ? qSqRow(rec.res) : ""}</span><span class="qcd">${d}</span></button>` });
     }
     // drop whole weeks holding nothing playable: the pre-launch run-up in the
     // first month, the days still to come in the current one. Three dead rows
@@ -932,7 +1118,7 @@ function qRenderCal() {
   $("qcal").innerHTML =
     `<div class="qchead"><h2 id="qcaltitle">${q.qCalTitle}</h2>`
     + `<button type="button" class="qcal-back">${q.qCalBack}</button></div>`
-    + `<p class="qchint">${q.qCalHint}</p>`
+    + `<p class="qchint">${q.qCalHint}</p><p class="qchint qlegend">${q.qLegend}</p>`
     // newest month first, so today is always the top-left cell block — with a
     // year of archive behind it, chronological order buries it below the fold
     + `<div class="qcmons">${months.reverse().join("")}</div>`;
@@ -1087,6 +1273,7 @@ function quizReset(stats) {
 const qTierTag = (t) => t > 0 ? `/T${t + 1}` : t < 0 ? "/FB" : "";
 function quizGen(date = qToday()) {
   const p = qGen(date);
+  if (!p) return null;
   return { ...p, stages: p.stages.map(st => {
     const eff = qEffective(st.clubs, st.answers);
     return { clubs: st.clubs.map(ci => DB.clubs[ci][0]),
@@ -1098,7 +1285,9 @@ function quizGen(date = qToday()) {
 function quizDebug(days = 14) {
   const rows = [], d = new Date();
   for (let k = 0; k < days; k++) {
-    const p = qGen(qFmt(d)), row = { date: p.date };
+    const p = qGen(qFmt(d));
+    if (!p) { d.setDate(d.getDate() + 1); continue; }
+    const row = { date: p.date };
     p.stages.forEach((st, i) => {
       const eff = qEffective(st.clubs, st.answers);
       row[`s${i + 1}`] = st.clubs.map(ci => coreClub(DB.clubs[ci][0])).join(" × ");

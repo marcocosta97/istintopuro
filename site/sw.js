@@ -206,6 +206,7 @@ self.addEventListener("fetch", event => {
           const old = new URL(key.url);
           if (old.pathname === url.pathname && old.search !== url.search) await cache.delete(key);
         }
+        if (url.pathname.endsWith(".json")) await copy.clone().json();
         await cache.put(request, copy);
       }).catch(() => {}));
     }
