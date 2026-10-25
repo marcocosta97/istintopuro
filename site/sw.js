@@ -1,5 +1,5 @@
 /* A release becomes the offline fallback only after its entire core is stored.
-   Keep the previous complete release while installing the next one. */
+   Keep the previous complete release while downloading the next one. */
 const V = new URL(self.location).searchParams.get("v") || "dev";
 importScripts(`./offline.js?v=${V}`);
 const CORE = `istintopuro-offline-${V}`;
@@ -90,6 +90,7 @@ function prepareCore() {
       await cache.put(`./data/index.json?v=${V}`, indexResponse);
       await cache.put(`./data/quiz-schedule.json?v=${V}`, scheduleResponse);
       await store(CORE, OfflineGame.coreFiles(index, V), "core", { built: index.built, through: schedule.through });
+      await pruneCore().catch(() => {});
     } catch (error) {
       await announce({ id: "core", state: "error" });
       throw error;
@@ -98,25 +99,28 @@ function prepareCore() {
 }
 
 self.addEventListener("install", event => {
-  event.waitUntil(prepareCore().then(() => self.skipWaiting()));
+  // Worker updates also happen in ordinary browser tabs. Bulk downloads must
+  // come from the page: automatically in the PWA, or from its download button.
+  event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", event => {
-  event.waitUntil((async () => {
-    const names = (await caches.keys()).filter(name => name.startsWith("istintopuro-offline-") && name !== CORE);
-    const complete = [];
-    for (const name of names) if (await inventory(name)) complete.push(name);
-    const previous = complete.at(-1);
-    for (const name of names) if (name !== previous) await caches.delete(name);
-    for (const name of await caches.keys())
-      if (name.startsWith("istintopuro-shell-")) await caches.delete(name);
-    // The first page saves its index before a worker controls it. Once those
-    // responses are in the complete snapshot, remove the temporary duplicates.
-    const meta = await inventory(CORE), runtime = await caches.open(DATA);
-    if (meta) for (const file of meta.files) await runtime.delete(file);
-    await self.clients.claim();
-  })());
+  event.waitUntil(self.clients.claim());
 });
+
+async function pruneCore() {
+  const names = (await caches.keys()).filter(name => name.startsWith("istintopuro-offline-") && name !== CORE);
+  const complete = [];
+  for (const name of names) if (await inventory(name)) complete.push(name);
+  const previous = complete.at(-1);
+  for (const name of names) if (name !== previous) await caches.delete(name);
+  for (const name of await caches.keys())
+    if (name.startsWith("istintopuro-shell-")) await caches.delete(name);
+  // The first page saves its index before a worker controls it. Once those
+  // responses are in the complete snapshot, remove the temporary duplicates.
+  const meta = await inventory(CORE), runtime = await caches.open(DATA);
+  if (meta) for (const file of meta.files) await runtime.delete(file);
+}
 
 const packTasks = new Map();
 async function preparePack(id) {
@@ -190,8 +194,14 @@ self.addEventListener("fetch", event => {
         const response = await fetchNetwork(request, {}, 4000);
         if (response.ok) return response;
       } catch { /* fall back to the last completely downloaded release */ }
-      const cache = await caches.open(CORE);
-      return (await cache.match("./")) || Response.error();
+      const previous = (await caches.keys()).filter(name => name.startsWith("istintopuro-offline-") && name !== CORE).reverse();
+      for (const name of [CORE, ...previous]) {
+        if (!await inventory(name)) continue;
+        const cache = await caches.open(name);
+        const response = await cache.match("./");
+        if (response) return response;
+      }
+      return Response.error();
     })());
     return;
   }

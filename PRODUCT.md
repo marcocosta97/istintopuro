@@ -42,8 +42,10 @@ shows when the complete game is ready and which country packs are saved.
   refreshes preserve playable published dates, including future ones. Beyond
   the saved schedule, locally generated puzzles can differ from a newer online
   release.
-- The complete core game downloads automatically, including career hints and
-  teammate data. Enabled country packs have separate offline downloads.
+- The complete core game downloads automatically when opened as an installed
+  PWA, including career hints and teammate data. In a browser tab, the complete
+  download starts only when requested in Settings. Enabled country packs have
+  separate offline downloads.
   Incomplete updates preserve the previous complete offline copy.
 - Optional packs add the top two divisions in Portugal, the Netherlands,
   Belgium, Turkey, Brazil, and Argentina to the solver.

@@ -125,16 +125,21 @@
   <p id="abouttext">Due modi di giocare con «Istinto Puro». Solver: scegli squadre, campionati o paesi e scopri chi li unisce. Schedina giornaliera: quattro sfide di difficoltà crescente, le stesse per tutti. Dati estratti da Wikidata.</p>
   <p id="aboutleagues"></p>
   <section id="aboutoffline" aria-labelledby="offlinetitle">
-    <h3 id="offlinetitle">Gioca offline</h3>
-    <p id="offlinenote"></p>
-    <p id="offlinestate" role="status" aria-live="polite"></p>
-    <progress id="offlineprogress" hidden></progress>
-    <p id="offlinehorizon" hidden></p>
-    <div class="offlineactions">
+    <div class="offlinebar">
+      <h3 id="offlinetitle">Gioca offline</h3>
+      <p id="offlinestate" role="status" aria-live="polite"></p>
       <button id="offlineretry" type="button" hidden></button>
-      <button id="offlineprotect" type="button" hidden></button>
     </div>
-    <p id="offlinestorage" hidden></p>
+    <progress id="offlineprogress" hidden></progress>
+    <details id="offlinedetails">
+      <summary id="offlinedetailstitle">Dettagli</summary>
+      <p id="offlinenote"></p>
+      <p id="offlinehorizon" hidden></p>
+      <div class="offlineactions">
+        <button id="offlineprotect" type="button" hidden></button>
+      </div>
+      <p id="offlinestorage" hidden></p>
+    </details>
   </section>
   <section id="aboutpacks" hidden>
     <h3 id="packstitle"></h3>

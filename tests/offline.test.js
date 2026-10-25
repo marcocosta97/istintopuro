@@ -80,7 +80,7 @@ function worker({ version = "one", caches = storage(), network = {} } = {}) {
     return result;
   }
   return { self, messages, requests, caches, network, dispatch,
-    install: () => dispatch("install"), activate: () => dispatch("activate"),
+    install: () => dispatch("install"), download: () => context.prepareCore(), activate: () => dispatch("activate"),
     message: data => dispatch("message", { data }),
     request: (file, mode = "cors") => dispatch("fetch", { request: { url: absolute(file), method: "GET", mode } }),
   };
@@ -102,9 +102,19 @@ test("offline inventories cover every published core and pack file, including fl
   }
 });
 
-test("a first install stores everything before activation and survives a cold offline launch", async () => {
+test("installing and activating a worker does not download the game", async () => {
   const app = worker();
   await app.install();
+  await app.activate();
+  assert.equal(app.self.skipped, true);
+  assert.equal(app.requests.length, 0);
+  assert.equal((await app.caches.keys()).length, 0);
+});
+
+test("an explicit download stores everything and survives a cold offline launch", async () => {
+  const app = worker();
+  await app.install();
+  await app.download();
   assert.equal(app.self.skipped, true);
   assert.equal(app.messages.at(-1).state, "ready");
   const restarted = worker({ caches: app.caches, network: { offline: true } });
@@ -119,16 +129,24 @@ test("a first install stores everything before activation and survives a cold of
 
 test("interrupted updates leave the previous complete game available and resume later", async () => {
   const old = worker();
-  await old.install();
+  await old.download();
   const next = worker({ version: "two", caches: old.caches,
     network: { fail: url => url.pathname.endsWith("/quiz.js") } });
-  await assert.rejects(next.install(), /network unavailable/);
-  assert.equal(next.self.skipped, undefined);
+  await next.install();
+  await next.activate();
+  assert.equal(next.requests.length, 0);
+  next.network.offline = true;
+  assert.match(await (await next.request("./", "navigate")).text(), /v=one/);
+  next.network.offline = false;
+  await assert.rejects(next.download(), /network unavailable/);
   assert.equal(next.messages.at(-1).state, "error");
   old.network.offline = true;
   assert.match(await (await old.request("./", "navigate")).text(), /v=one/);
+  next.network.offline = true;
+  assert.match(await (await next.request("./", "navigate")).text(), /v=one/);
+  next.network.offline = false;
   next.network.fail = null;
-  await next.install();
+  await next.download();
   await next.activate();
   next.network.offline = true;
   assert.match(await (await next.request("./", "navigate")).text(), /v=two/);
@@ -138,20 +156,20 @@ test("interrupted updates leave the previous complete game available and resume 
 test("storage failures and mismatched releases never become ready", async () => {
   const quota = worker();
   quota.caches.failPut = url => url.includes("/data/career/");
-  await assert.rejects(quota.install(), /QuotaExceededError/);
+  await assert.rejects(quota.download(), /QuotaExceededError/);
   assert.equal(quota.self.skipped, undefined);
   assert.equal(quota.messages.at(-1).state, "error");
   const wrong = worker({ network: { wrongBuild: "2026-01-01" } });
-  await assert.rejects(wrong.install(), /schedule does not match/);
+  await assert.rejects(wrong.download(), /schedule does not match/);
   const raced = worker({ network: { release: "different" } });
-  await assert.rejects(raced.install(), /release changed/);
+  await assert.rejects(raced.download(), /release changed/);
   const malformed = worker({ network: { invalidJson: true } });
-  await assert.rejects(malformed.install(), /Unexpected token/);
+  await assert.rejects(malformed.download(), /Unexpected token/);
 });
 
 test("readiness is rechecked against storage after a worker restart", async () => {
   const app = worker();
-  await app.install();
+  await app.download();
   const cache = await app.caches.open("istintopuro-offline-one");
   await cache.delete("./data/career/1.json?v=2026-10-12");
   const restarted = worker({ caches: app.caches });
@@ -163,7 +181,7 @@ test("readiness is rechecked against storage after a worker restart", async () =
 
 test("country packs download completely, persist across restarts, and are removable offline", async () => {
   const app = worker();
-  await app.install();
+  await app.download();
   await app.message({ type: "offline-pack", id: "pt" });
   assert.equal(app.messages.at(-1).id, "pt");
   assert.equal(app.messages.at(-1).state, "ready");
@@ -191,19 +209,19 @@ test("runtime data cache stores versioned JSON and rejects a non-JSON body", asy
 
 test("a failing navigation uses the complete offline copy even for HTTP errors", async () => {
   const app = worker();
-  await app.install();
+  await app.download();
   app.network.status = 503;
   assert.match(await (await app.request("./", "navigate")).text(), /app.js\?v=one/);
 });
 
-test("activation keeps one complete predecessor and leaves other applications' caches alone", async () => {
+test("completed downloads keep one complete predecessor and leave other applications' caches alone", async () => {
   const first = worker();
-  await first.install();
+  await first.download();
   await first.caches.open("another-app");
   const second = worker({ version: "two", caches: first.caches });
-  await second.install();
+  await second.download();
   const third = worker({ version: "three", caches: first.caches });
-  await third.install();
+  await third.download();
   await third.activate();
   const names = await third.caches.keys();
   assert.ok(names.includes("istintopuro-offline-two"));
@@ -212,8 +230,9 @@ test("activation keeps one complete predecessor and leaves other applications' c
   assert.ok(!names.includes("istintopuro-offline-one"));
 });
 
-function offlineClient({ online = false, installingVersion } = {}) {
-  const elements = new Map(), callbacks = new Map();
+function offlineClient({ online = false, installingVersion, pwa = false, ios = false,
+  ready = true, installed = true, registerFails = true, coreState } = {}) {
+  const elements = new Map(), callbacks = new Map(), windowCallbacks = new Map(), sent = [];
   const document = { readyState: "complete", dispatchEvent() {},
     getElementById(id) {
       if (!elements.has(id)) elements.set(id, { textContent: "", setAttribute() {}, addEventListener() {} });
@@ -221,26 +240,79 @@ function offlineClient({ online = false, installingVersion } = {}) {
     },
   };
   let registrations = 0;
-  const active = { scriptURL: BASE + "sw.js?v=one", postMessage() {
+  const active = { scriptURL: BASE + "sw.js?v=one", postMessage(message) {
+    sent.push(message);
+    if (message.type !== "offline-status") return;
     queueMicrotask(() => callbacks.get("message")({ data: {
-      type: "offline-status", version: "one", id: "core", state: "ready", through: "2027-01-10",
+      type: "offline-status", version: "one", id: "core", state: coreState || (ready ? "ready" : "idle"), through: "2027-01-10",
     } }));
   } };
   const installing = installingVersion ? { scriptURL: BASE + `sw.js?v=${installingVersion}`, postMessage() {
     throw new Error("queried an unrelated worker");
   } } : null;
   const registration = { active, installing, addEventListener() {} };
-  const navigator = { onLine: online, serviceWorker: {
-    getRegistration: async () => registration,
-    register: async () => { registrations++; throw new Error("network unavailable"); },
+  const navigator = { onLine: online, standalone: ios, serviceWorker: {
+    getRegistration: async () => installed ? registration : undefined,
+    register: async () => {
+      registrations++;
+      if (registerFails) throw new Error("network unavailable");
+      return registration;
+    },
     addEventListener: (type, callback) => callbacks.set(type, callback),
   } };
-  const context = vm.createContext({ document, navigator, window: { isSecureContext: true, addEventListener() {} },
+  const display = { matches: pwa, addEventListener: (type, callback) => windowCallbacks.set("display", callback) };
+  const context = vm.createContext({ document, navigator, window: { isSecureContext: true,
+    matchMedia: () => display, addEventListener: (type, callback) => windowCallbacks.set(type, callback) },
     URL, Event, setTimeout, clearTimeout });
   vm.runInContext(fs.readFileSync(path.join(SITE, "offline.js"), "utf8"), context);
   context.OfflineGame.start({ version: "one", getLang: () => "en", getPacks: () => [] });
-  return { elements, registrations: () => registrations };
+  return { elements, sent, display, navigator, windowCallbacks, registrations: () => registrations };
 }
+
+test("browser tabs offer a manual download without starting one on load or reconnect", async () => {
+  const client = offlineClient({ online: true, ready: false, installed: false, registerFails: false });
+  await new Promise(setImmediate);
+  assert.equal(client.sent.filter(message => message.type === "offline-core").length, 0);
+  assert.equal(client.elements.get("offlineretry").hidden, false);
+  assert.equal(client.elements.get("offlineretry").textContent, "Download · 8 MB");
+  client.windowCallbacks.get("online")();
+  await new Promise(setImmediate);
+  assert.equal(client.sent.filter(message => message.type === "offline-core").length, 0);
+  await client.elements.get("offlineretry").onclick();
+  assert.equal(client.sent.filter(message => message.type === "offline-core").length, 1);
+});
+
+test("installed PWA launches automatically request a missing offline copy", async () => {
+  for (const mode of [{ pwa: true }, { ios: true }]) {
+    const client = offlineClient({ online: true, ready: false, registerFails: false, ...mode });
+    await new Promise(setImmediate);
+    assert.equal(client.sent.filter(message => message.type === "offline-core").length, 1);
+    assert.match(client.elements.get("offlinenote").textContent, /Downloads automatically/);
+  }
+});
+
+test("an existing complete PWA copy is checked without downloading it again", async () => {
+  const client = offlineClient({ online: true, pwa: true, registerFails: false });
+  await new Promise(setImmediate);
+  assert.equal(client.sent.filter(message => message.type === "offline-core").length, 0);
+});
+
+test("a PWA launch retries a failed download while a browser tab leaves retry manual", async () => {
+  for (const pwa of [false, true]) {
+    const client = offlineClient({ online: true, pwa, coreState: "error", registerFails: false });
+    await new Promise(setImmediate);
+    assert.equal(client.sent.filter(message => message.type === "offline-core").length, pwa ? 1 : 0);
+  }
+});
+
+test("moving a browser tab into the PWA starts its automatic download", async () => {
+  const client = offlineClient({ online: true, ready: false, registerFails: false });
+  await new Promise(setImmediate);
+  client.display.matches = true;
+  client.windowCallbacks.get("display")();
+  await new Promise(setImmediate);
+  assert.equal(client.sent.filter(message => message.type === "offline-core").length, 1);
+});
 
 test("a cold offline client checks the installed worker without fetching its script", async () => {
   const client = offlineClient();
@@ -264,7 +336,7 @@ test("an open client queries its own release while a different worker is install
 
 test("disabling a pack during download cancels writes before removing its offline copy", async () => {
   const app = worker();
-  await app.install();
+  await app.download();
   let release, entered;
   const blocked = new Promise(resolve => { entered = resolve; });
   const resumed = new Promise(resolve => { release = resolve; });

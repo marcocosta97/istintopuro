@@ -73,7 +73,10 @@ python3 -m http.server -d site 8000
 Pushing to `master` deploys `site/` to GitHub Pages, stamping every asset URL
 with the commit sha.
 
-The site installs as a PWA and automatically downloads the complete core game:
+When opened as an installed PWA, the site automatically downloads the complete
+core game. In an ordinary browser tab, use the download button in Settings to
+start the same download; registration and worker updates do not trigger it.
+The complete offline copy includes
 the interface, local fonts and flags, index, quiz schedule, all career shards
 (including quiz hints), and teammate spell-year files. This is about 26 MB of
 JSON stored, or 8 MB transferred with gzip, excluding portraits. Settings shows
@@ -88,9 +91,10 @@ data. Wikimedia portraits use initials when offline or when the image fails;
 external Wikipedia/Wikidata pages still require a connection.
 
 `site/offline.js` defines each download's inventory. `site/sw.js` marks a release
-ready only after every file is stored, and activates it only then. A failed
-update preserves the previous complete release; one complete predecessor is
-retained after activation. Code and indexes are keyed by the deploy sha, career
+ready only after every file is stored. Worker activation is lightweight and
+does not download the game. A failed download preserves the previous complete
+release; one complete predecessor is retained after a download finishes.
+Code and indexes are keyed by the deploy sha, career
 and teammate files by dataset build date. Navigation tries the network first
 and falls back to the complete saved release, including for HTTP server errors.
 Storage can still be cleared by the user or evicted unless persistence is
