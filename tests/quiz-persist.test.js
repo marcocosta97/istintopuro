@@ -96,7 +96,7 @@ function loadQuiz(storage, today) {
   vm.runInContext(`${source}
 globalThis.__quizTest = {
   qGen, qStagesFromQids, qStagesFor, qLoad, qGuess, qResign, qFinish, qCore, qToday, qSave,
-  qForfeitRolled, qUtcMonth, qUtcWeekday,
+  qForfeitRolled, qUtcMonth, qUtcWeekday, qRenderCal,
   get qs() { return qs; }, set qs(v) { qs = v; },
   get qPz() { return qPz; }, set qPz(v) { qPz = v; },
   get qHold() { return qHold; },
@@ -392,4 +392,19 @@ test("archive month and weekday labels follow the UTC calendar date", () => {
   const monday = new Date(Date.UTC(2024, 0, 1)).toLocaleDateString("en", { weekday: "narrow", timeZone: "UTC" });
   assert.equal(api.qUtcWeekday(0), monday);
   assert.notEqual(api.qUtcWeekday(0), api.qUtcWeekday(1));
+});
+
+test("archive results place four squares directly in each calendar grid box", () => {
+  const today = pickToday();
+  const { api, context } = loadQuiz({ quizHistory: JSON.stringify({
+    v: 1, days: { [today]: { res: [0, 1, 2, 3] } },
+  }) }, today);
+  const calendar = context.$("qcal");
+  calendar.querySelector = () => el("back");
+  api.qRenderCal();
+  const boxes = [...calendar.innerHTML.matchAll(/<span class="qcbox">([\s\S]*?)<\/span>/g)];
+  const results = boxes.map(match => match[1]).find(html => html.includes('class="rsq '));
+  assert.ok(results, "played day contains result squares");
+  assert.doesNotMatch(results, /<(?:span|div)\b/, "nested wrappers break the two-by-two grid");
+  assert.deepEqual([...results.matchAll(/class="rsq r(\d)"/g)].map(match => Number(match[1])), [0, 1, 2, 3]);
 });

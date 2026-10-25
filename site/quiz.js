@@ -1103,7 +1103,7 @@ function qRenderCal() {
       const label = `${q.qNum(num)}${rec ? " · " + rec.res.filter(c => c < 2).length + "/4" : ""}`;
       cells.push({ play: true, html:
         `<button type="button" class="qcell ${cls}" data-d="${ds}" title="${esc(label)}" aria-label="${esc(label)}">`
-        + `<span class="qcbox">${rec ? qSqRow(rec.res) : ""}</span><span class="qcd">${d}</span></button>` });
+        + `<span class="qcbox">${rec ? qSqCells(rec.res) : ""}</span><span class="qcd">${d}</span></button>` });
     }
     // drop whole weeks holding nothing playable: the pre-launch run-up in the
     // first month, the days still to come in the current one. Three dead rows
