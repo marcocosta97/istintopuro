@@ -73,22 +73,26 @@ python3 -m http.server -d site 8000
 Pushing to `master` deploys `site/` to GitHub Pages, stamping every asset URL
 with the commit sha.
 
-When opened as an installed PWA, the site automatically downloads the complete
-core game. In an ordinary browser tab, use the download button in Settings to
-start the same download; registration and worker updates do not trigger it.
-The complete offline copy includes
+The single “Play offline” switch in Settings downloads and maintains the complete
+game together with every enabled country pack. It defaults to on in the installed
+PWA and off in an ordinary browser tab; an explicit choice is remembered across
+visits. Registration and worker updates alone do not trigger a download.
+The complete core offline copy includes
 the interface, local fonts and flags, index, quiz schedule, all career shards
 (including quiz hints), and teammate spell-year files. This is about 26 MB of
 JSON stored, or 8 MB transferred with gzip, excluding portraits. Settings shows
-download progress, retry controls, the saved daily-puzzle horizon, and an option
-to request persistent browser storage. Wait for “Ready to play offline” before
+combined download progress and a retry control, and requests persistent browser
+storage when offline play is enabled. Wait for “Ready to play offline” before
 disconnecting; installing the PWA alone does not mean the download has finished.
 
-Enabled country packs have a separate “Save offline” button in Settings, which
-downloads their full index, careers, and teammate data. All six add about 18 MB
-stored, or 5 MB with gzip. Disabling a pack removes its offline and runtime
-data. Wikimedia portraits use initials when offline or when the image fails;
+Enabled country packs automatically download their full index, careers, and
+teammate data whenever offline play is on, including packs enabled later. The
+ready status requires the core and every enabled pack to be complete. All six
+packs add about 18 MB stored, or 5 MB with gzip. Disabling a pack removes its
+offline and runtime data. Wikimedia portraits use initials when offline or when the image fails;
 external Wikipedia/Wikidata pages still require a connection.
+Turning offline play off stops pending downloads and automatic updates; already
+saved data and quiz progress are preserved.
 
 `site/offline.js` defines each download's inventory. `site/sw.js` marks a release
 ready only after every file is stored. Worker activation is lightweight and

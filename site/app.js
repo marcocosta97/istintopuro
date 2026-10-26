@@ -63,7 +63,7 @@ const STR = {
     about: "Due modi di giocare con «Istinto Puro». Solver: scegli squadre, campionati o paesi e scopri chi li unisce. Schedina giornaliera: quattro sfide di difficoltà crescente, le stesse per tutti. Dati estratti da Wikidata.",
     aboutLeagues: "Campionati coperti (tutte le stagioni):",
     packsTitle: "Campionati opzionali",
-    packsNote: "Ogni pack aggiunge le prime due divisioni al solver. Dopo averlo attivato, salva il pack completo offline (circa 1 MB di download). La Schedina resta uguale per tutti.",
+    packsNote: "Aggiungono le prime due divisioni al solver. La Schedina resta uguale per tutti.",
     packOn: "attivo", packOff: "non scaricato", packLoading: "download…",
     packRemoving: "rimozione…", packFailed: "download non riuscito", packRetry: "riprova",
     packRequired: (names) => `Questo link usa ${names}. Attiva il pack per ripristinare tutte le squadre.`,
@@ -139,7 +139,7 @@ const STR = {
     about: "Two ways to play “Istinto Puro”. Solver: pick clubs, leagues, or countries and see who connects them. Daily quiz: four challenges of rising difficulty, the same for everyone. Data extracted from Wikidata.",
     aboutLeagues: "Leagues covered (all seasons):",
     packsTitle: "Optional leagues",
-    packsNote: "Each pack adds its top two divisions to the solver. Once enabled, save the complete pack offline (about 1 MB to download). The daily quiz stays the same for everyone.",
+    packsNote: "Add the top two divisions to the solver. The daily quiz stays the same for everyone.",
     packOn: "enabled", packOff: "not downloaded", packLoading: "downloading…",
     packRemoving: "removing…", packFailed: "download failed", packRetry: "retry",
     packRequired: (names) => `This link uses ${names}. Enable the pack to restore every club.`,
@@ -615,10 +615,6 @@ function renderPacks() {
     input.onchange = () => togglePack(meta, input.checked);
     const knob = document.createElement("span"); knob.className = "knob";
     label.append(input, knob); ctl.append(state, label);
-    if (active.has(meta.id)) {
-      const offline = OfflineGame.packControl(meta, countryName(meta.cc));
-      if (offline) { offline.id = `offline-pack-${meta.id}`; ctl.appendChild(offline); }
-    }
     if (failed) {
       const retry = document.createElement("button");
       retry.type = "button"; retry.className = "packretry"; retry.textContent = t.packRetry;
@@ -627,7 +623,7 @@ function renderPacks() {
     }
     row.append(desc, ctl); list.appendChild(row);
   }
-  if (focusedId?.startsWith("pack-") || focusedId?.startsWith("offline-pack-"))
+  if (focusedId?.startsWith("pack-"))
     $(focusedId)?.focus({ preventScroll: true });
 }
 const PACK_HINT_KEY = "leaguePackHintV1";
@@ -2818,6 +2814,5 @@ async function toggleCareer(li, pid) {
 applyLang();
 boot();
 
-document.addEventListener("offlinestatus", renderPacks);
 OfflineGame.start({ version: V, getLang: () => lang,
   getPacks: () => (CORE_DB?.packs || []).filter(meta => enabledPackIds().has(meta.id)) });

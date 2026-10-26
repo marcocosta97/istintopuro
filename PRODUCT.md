@@ -30,7 +30,7 @@ career exploration, and dependable daily play, with extra leagues kept optional.
 People use the web app on desktop and mobile for quick lookups, deeper career
 exploration, shared selections, a daily quiz, and archive replays. It can be
 installed as a PWA. Offline play requires an initial online download; Settings
-shows when the complete game is ready and which country packs are saved.
+shows when the complete game and all enabled country packs are ready.
 
 ## Capabilities and Constraints
 
@@ -42,16 +42,17 @@ shows when the complete game is ready and which country packs are saved.
   refreshes preserve playable published dates, including future ones. Beyond
   the saved schedule, locally generated puzzles can differ from a newer online
   release.
-- The complete core game downloads automatically when opened as an installed
-  PWA, including career hints and teammate data. In a browser tab, the complete
-  download starts only when requested in Settings. Enabled country packs have
-  separate offline downloads.
+- One “Play offline” switch maintains the complete game, career hints, teammate
+  data, and all enabled country packs. It defaults to on in the installed PWA and
+  off in a browser tab; explicit choices persist. Newly enabled packs download
+  automatically while offline play is on. The ready status covers the entire
+  selection, and turning the switch off stops pending and automatic downloads.
   Incomplete updates preserve the previous complete offline copy.
 - Optional packs add the top two divisions in Portugal, the Netherlands,
   Belgium, Turkey, Brazil, and Argentina to the solver.
 - Progress and preferences stay in the browser, with no account, application
-  backend, or tracking. Offline storage depends on browser retention; users
-  can request persistent storage.
+  backend, or tracking. Offline storage depends on browser retention; enabling
+  offline play requests persistent storage.
 - Wikimedia portraits fall back to initials when offline or when a fetch fails.
   External Wikipedia and Wikidata pages require a connection.
 

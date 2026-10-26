@@ -5,7 +5,7 @@ importScripts(`./offline.js?v=${V}`);
 const CORE = `istintopuro-offline-${V}`;
 const DATA = "istintopuro-data";
 const MARKER = new URL("./__offline__/ready", self.location).href;
-const jobs = new Map(), cancelled = new Set();
+const jobs = new Map(), cancelled = new Set(), transfers = new Map();
 const packCache = meta => `istintopuro-pack-${meta.id}-${meta.built}-${V}`;
 
 async function announce(status) {
@@ -23,17 +23,36 @@ async function inventory(name) {
   return meta.files.every(file => keys.has(new URL(file, self.location).href)) ? meta : null;
 }
 
-async function fetchNetwork(request, options = {}, timeout = 30000) {
+async function fetchNetwork(request, options = {}, timeout = 30000, task) {
+  if (task && cancelled.has(task)) throw new Error("cancelled");
   const controller = new AbortController();
+  if (task) {
+    if (!transfers.has(task)) transfers.set(task, new Set());
+    transfers.get(task).add(controller);
+  }
   const timer = setTimeout(() => controller.abort(), timeout);
-  try { return await fetch(request, { ...options, signal: controller.signal }); }
-  finally { clearTimeout(timer); }
+  try {
+    const response = await fetch(request, { ...options, signal: controller.signal });
+    if (task && response.ok) await response.clone().arrayBuffer();
+    return response;
+  } finally {
+    clearTimeout(timer);
+    if (task) {
+      transfers.get(task)?.delete(controller);
+      if (!transfers.get(task)?.size) transfers.delete(task);
+    }
+  }
 }
 
-async function get(url) {
+function cancel(id) {
+  cancelled.add(id);
+  for (const controller of transfers.get(id) || []) controller.abort();
+}
+
+async function get(url, task) {
   const hit = await caches.match(url);
   if (hit) return hit;
-  const response = await fetchNetwork(url, { cache: "no-cache" });
+  const response = await fetchNetwork(url, { cache: "no-cache" }, 30000, task);
   if (!response.ok) throw new Error(`${url}: ${response.status}`);
   return response;
 }
@@ -49,7 +68,7 @@ async function store(name, files, id, extra = {}) {
       try {
         if (cancelled.has(id)) throw new Error("cancelled");
         if (!await cache.match(url)) {
-          const response = await get(url);
+          const response = await get(url, id);
           if (url.includes(".json?")) await response.clone().json();
           if (cancelled.has(id)) throw new Error("cancelled");
           await cache.put(url, response);
@@ -72,17 +91,19 @@ async function store(name, files, id, extra = {}) {
 
 let coreTask;
 function prepareCore() {
-  return coreTask ||= (async () => {
+  if (coreTask) return cancelled.has("core") ? coreTask.catch(() => {}).then(prepareCore) : coreTask;
+  cancelled.delete("core");
+  return coreTask = (async () => {
     try {
-      const indexResponse = await get(`./data/index.json?v=${V}`);
+      const indexResponse = await get(`./data/index.json?v=${V}`, "core");
       const index = await indexResponse.clone().json();
       if (!Array.isArray(index.clubs) || !Number.isInteger(index.nshards) || index.nshards < 1)
         throw new Error("invalid index");
-      const scheduleResponse = await get(`./data/quiz-schedule.json?v=${V}`);
+      const scheduleResponse = await get(`./data/quiz-schedule.json?v=${V}`, "core");
       const schedule = await scheduleResponse.clone().json();
       if (schedule.v !== 1 || schedule.built !== index.built || !schedule.days || !schedule.through)
         throw new Error("quiz schedule does not match index");
-      const documentResponse = await fetchNetwork("./", { cache: "no-cache" });
+      const documentResponse = await fetchNetwork("./", { cache: "no-cache" }, 30000, "core");
       if (!documentResponse.ok || !(await documentResponse.clone().text()).includes(`app.js?v=${V}`))
         throw new Error("release changed during download");
       const cache = await caches.open(CORE);
@@ -92,7 +113,7 @@ function prepareCore() {
       await store(CORE, OfflineGame.coreFiles(index, V), "core", { built: index.built, through: schedule.through });
       await pruneCore().catch(() => {});
     } catch (error) {
-      await announce({ id: "core", state: "error" });
+      await announce({ ...jobs.get("core"), id: "core", state: cancelled.has("core") ? "idle" : "error" });
       throw error;
     } finally { coreTask = null; }
   })();
@@ -100,7 +121,7 @@ function prepareCore() {
 
 self.addEventListener("install", event => {
   // Worker updates also happen in ordinary browser tabs. Bulk downloads must
-  // come from the page: automatically in the PWA, or from its download button.
+  // come from the page when its offline setting is enabled.
   event.waitUntil(self.skipWaiting());
 });
 
@@ -124,7 +145,8 @@ async function pruneCore() {
 
 const packTasks = new Map();
 async function preparePack(id) {
-  if (packTasks.has(id)) return packTasks.get(id);
+  if (packTasks.has(id)) return cancelled.has(id)
+    ? packTasks.get(id).catch(() => {}).then(() => preparePack(id)) : packTasks.get(id);
   cancelled.delete(id);
   const task = (async () => {
     try {
@@ -132,7 +154,7 @@ async function preparePack(id) {
       const index = await (await cache.match(`./data/index.json?v=${V}`)).json();
       const meta = index.packs.find(pack => pack.id === id);
       if (!meta) throw new Error("unknown pack");
-      const response = await get(`./data/packs/${id}/index.json?v=${meta.built}`);
+      const response = await get(`./data/packs/${id}/index.json?v=${meta.built}`, id);
       const pack = await response.clone().json();
       if (pack.id !== id || pack.built !== meta.built || !Array.isArray(pack.clubs)
           || !Number.isInteger(pack.nshards) || pack.nshards < 1) throw new Error("invalid pack");
@@ -142,7 +164,7 @@ async function preparePack(id) {
       const old = (await caches.keys()).filter(key => key.startsWith(`istintopuro-pack-${id}-`) && key !== name);
       for (const key of old.slice(0, -1)) await caches.delete(key);
     } catch (error) {
-      await announce({ id, state: cancelled.has(id) ? "idle" : "error" });
+      await announce({ ...jobs.get(id), id, state: cancelled.has(id) ? "idle" : "error" });
       throw error;
     } finally { packTasks.delete(id); }
   })();
@@ -160,23 +182,29 @@ self.addEventListener("message", event => {
         event.source.postMessage({ type: "offline-status", version: V, ...running });
         continue;
       }
-      let name = CORE;
+      let name = CORE, total;
       if (id !== "core") {
         const cache = await caches.open(CORE), response = await cache.match(`./data/index.json?v=${V}`);
         const meta = response && (await response.json()).packs?.find(pack => pack.id === id);
         if (!meta) continue;
         name = packCache(meta);
+        total = 1 + (meta.nshards || 32) + (meta.clubs?.length || 0);
       }
       const meta = await inventory(name);
       event.source.postMessage({ type: "offline-status", version: V, id,
-        state: meta ? "ready" : "idle", through: meta?.through });
+        state: meta ? "ready" : "idle", through: meta?.through,
+        done: meta?.files.length || 0, total: meta?.files.length || total });
     }
   })());
   if (message.type === "offline-core") event.waitUntil(prepareCore().catch(() => {}));
   if (message.type === "offline-pack" && typeof message.id === "string")
     event.waitUntil(preparePack(message.id).catch(() => {}));
+  if (message.type === "offline-cancel") {
+    cancel("core");
+    for (const id of packTasks.keys()) cancel(id);
+  }
   if (message.type === "offline-remove-pack" && /^[a-z]{2}$/.test(message.id)) event.waitUntil((async () => {
-    cancelled.add(message.id);
+    cancel(message.id);
     await packTasks.get(message.id)?.catch(() => {});
     for (const name of await caches.keys())
       if (name.startsWith(`istintopuro-pack-${message.id}-`)) await caches.delete(name);

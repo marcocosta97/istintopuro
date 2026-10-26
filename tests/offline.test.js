@@ -50,11 +50,22 @@ function worker({ version = "one", caches = storage(), network = {} } = {}) {
     skipWaiting: async () => { self.skipped = true; },
     addEventListener: (type, callback) => { listeners[type] = callback; },
   };
-  const fetch = async request => {
+  const fetch = async (request, options = {}) => {
     const url = new URL(absolute(request));
     requests.push(url.href);
     if (network.offline || network.fail?.(url)) throw new Error("network unavailable");
-    if (network.hold) await network.hold(url);
+    if (network.hold) {
+      let abort;
+      try {
+        const held = Promise.resolve(network.hold(url, options));
+        if (options.signal) await Promise.race([held, new Promise((_, reject) => {
+          abort = () => reject(new Error("aborted"));
+          options.signal.addEventListener("abort", abort, { once: true });
+          if (options.signal.aborted) abort();
+        })]);
+        else await held;
+      } finally { if (abort) options.signal.removeEventListener("abort", abort); }
+    }
     if (network.status) return new Response("unavailable", { status: network.status });
     let body = "asset";
     if (url.pathname.endsWith("/data/index.json")) body = index;
@@ -231,8 +242,13 @@ test("completed downloads keep one complete predecessor and leave other applicat
 });
 
 function offlineClient({ online = false, installingVersion, pwa = false, ios = false,
-  ready = true, installed = true, registerFails = true, coreState } = {}) {
+  ready = true, installed = true, registerFails = true, coreState,
+  enabledPacks = [], packStates = {}, savedPreference } = {}) {
   const elements = new Map(), callbacks = new Map(), windowCallbacks = new Map(), sent = [];
+  const saved = new Map();
+  if (savedPreference !== undefined) saved.set("offlinePlay", savedPreference ? "1" : "0");
+  const localStorage = { getItem: key => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value) };
+  let coreStatus = { state: coreState || (ready ? "ready" : "idle"), total: 20 };
   const document = { readyState: "complete", dispatchEvent() {},
     getElementById(id) {
       if (!elements.has(id)) elements.set(id, { textContent: "", setAttribute() {}, addEventListener() {} });
@@ -243,8 +259,9 @@ function offlineClient({ online = false, installingVersion, pwa = false, ios = f
   const active = { scriptURL: BASE + "sw.js?v=one", postMessage(message) {
     sent.push(message);
     if (message.type !== "offline-status") return;
-    queueMicrotask(() => callbacks.get("message")({ data: {
-      type: "offline-status", version: "one", id: "core", state: coreState || (ready ? "ready" : "idle"), through: "2027-01-10",
+    for (const id of ["core", ...message.packs]) queueMicrotask(() => callbacks.get("message")({ data: {
+      type: "offline-status", version: "one", id,
+      ...(id === "core" ? coreStatus : packStates[id] || { state: "idle", total: 4 }),
     } }));
   } };
   const installing = installingVersion ? { scriptURL: BASE + `sw.js?v=${installingVersion}`, postMessage() {
@@ -261,25 +278,37 @@ function offlineClient({ online = false, installingVersion, pwa = false, ios = f
     addEventListener: (type, callback) => callbacks.set(type, callback),
   } };
   const display = { matches: pwa, addEventListener: (type, callback) => windowCallbacks.set("display", callback) };
-  const context = vm.createContext({ document, navigator, window: { isSecureContext: true,
+  const context = vm.createContext({ document, navigator, localStorage, window: { isSecureContext: true,
     matchMedia: () => display, addEventListener: (type, callback) => windowCallbacks.set(type, callback) },
     URL, Event, setTimeout, clearTimeout });
   vm.runInContext(fs.readFileSync(path.join(SITE, "offline.js"), "utf8"), context);
-  context.OfflineGame.start({ version: "one", getLang: () => "en", getPacks: () => [] });
-  return { elements, sent, display, navigator, windowCallbacks, registrations: () => registrations };
+  context.OfflineGame.start({ version: "one", getLang: () => "en", getPacks: () => enabledPacks });
+  return { elements, sent, display, navigator, windowCallbacks, localStorage, api: context.OfflineGame,
+    registrations: () => registrations,
+    async toggle(value) {
+      const target = elements.get("offlineenabled"); target.checked = value;
+      target.onchange({ target }); await new Promise(setImmediate);
+    },
+    async emit(id, status) {
+      if (id === "core") coreStatus = status; else packStates[id] = status;
+      callbacks.get("message")({ data: { type: "offline-status", version: "one", id, ...status } });
+      await new Promise(setImmediate);
+    },
+  };
 }
 
-test("browser tabs offer a manual download without starting one on load or reconnect", async () => {
+test("browser tabs wait for the offline switch before downloading, including after reconnect", async () => {
   const client = offlineClient({ online: true, ready: false, installed: false, registerFails: false });
   await new Promise(setImmediate);
   assert.equal(client.sent.filter(message => message.type === "offline-core").length, 0);
-  assert.equal(client.elements.get("offlineretry").hidden, false);
-  assert.equal(client.elements.get("offlineretry").textContent, "Download · 8 MB");
+  assert.equal(client.elements.get("offlineenabled").checked, false);
+  assert.equal(client.elements.get("offlineretry").hidden, true);
   client.windowCallbacks.get("online")();
   await new Promise(setImmediate);
   assert.equal(client.sent.filter(message => message.type === "offline-core").length, 0);
-  await client.elements.get("offlineretry").onclick();
+  await client.toggle(true);
   assert.equal(client.sent.filter(message => message.type === "offline-core").length, 1);
+  assert.equal(client.localStorage.getItem("offlinePlay"), "1");
 });
 
 test("installed PWA launches automatically request a missing offline copy", async () => {
@@ -287,7 +316,7 @@ test("installed PWA launches automatically request a missing offline copy", asyn
     const client = offlineClient({ online: true, ready: false, registerFails: false, ...mode });
     await new Promise(setImmediate);
     assert.equal(client.sent.filter(message => message.type === "offline-core").length, 1);
-    assert.match(client.elements.get("offlinenote").textContent, /Downloads automatically/);
+    assert.equal(client.elements.get("offlineenabled").checked, true);
   }
 });
 
@@ -315,23 +344,115 @@ test("moving a browser tab into the PWA starts its automatic download", async ()
 });
 
 test("a cold offline client checks the installed worker without fetching its script", async () => {
-  const client = offlineClient();
+  const client = offlineClient({ savedPreference: true });
   await new Promise(setImmediate);
   assert.equal(client.registrations(), 0);
   assert.equal(client.elements.get("offlinestate").textContent, "Ready to play offline");
 });
 
 test("a failed online update check still reports a complete installed copy", async () => {
-  const client = offlineClient({ online: true });
+  const client = offlineClient({ online: true, savedPreference: true });
   await new Promise(setImmediate);
   assert.equal(client.registrations(), 1);
   assert.equal(client.elements.get("offlinestate").textContent, "Ready to play offline");
 });
 
 test("an open client queries its own release while a different worker is installing", async () => {
-  const client = offlineClient({ installingVersion: "two" });
+  const client = offlineClient({ installingVersion: "two", savedPreference: true });
   await new Promise(setImmediate);
   assert.equal(client.elements.get("offlinestate").textContent, "Ready to play offline");
+});
+
+test("offline play downloads enabled packs and reports ready only when all are complete", async () => {
+  const enabledPacks = [{ id: "pt" }, { id: "nl" }];
+  const client = offlineClient({ savedPreference: true, enabledPacks });
+  await new Promise(setImmediate);
+  assert.deepEqual(client.sent.filter(message => message.type === "offline-pack").map(message => message.id), ["pt", "nl"]);
+  assert.equal(client.sent.filter(message => message.type === "offline-core").length, 0);
+  assert.notEqual(client.elements.get("offlinestate").textContent, "Ready to play offline");
+  await client.emit("pt", { state: "ready", total: 4 });
+  assert.notEqual(client.elements.get("offlinestate").textContent, "Ready to play offline");
+  await client.emit("nl", { state: "ready", total: 6 });
+  assert.equal(client.elements.get("offlinestate").textContent, "Ready to play offline");
+  assert.equal(client.elements.get("offlineprogress").max, 30);
+  assert.equal(client.elements.get("offlineprogress").value, 30);
+});
+
+test("packs enabled later are automatically saved without downloading complete content again", async () => {
+  const enabledPacks = [{ id: "pt" }];
+  const client = offlineClient({ savedPreference: true, enabledPacks, packStates: { pt: { state: "ready", total: 4 } } });
+  await new Promise(setImmediate);
+  assert.equal(client.elements.get("offlinestate").textContent, "Ready to play offline");
+  enabledPacks.push({ id: "nl" });
+  client.api.refresh();
+  await new Promise(setImmediate);
+  assert.deepEqual(client.sent.filter(message => message.type === "offline-pack").map(message => message.id), ["nl"]);
+  assert.equal(client.sent.filter(message => message.type === "offline-core").length, 0);
+});
+
+test("a failed pack offers one retry and leaves completed content alone", async () => {
+  const client = offlineClient({ savedPreference: true, enabledPacks: [{ id: "pt" }] });
+  await new Promise(setImmediate);
+  await client.emit("pt", { state: "error", done: 1, total: 4 });
+  assert.equal(client.elements.get("offlineretry").hidden, false);
+  assert.equal(client.sent.filter(message => message.type === "offline-pack").length, 1);
+  client.elements.get("offlineretry").onclick();
+  await new Promise(setImmediate);
+  assert.equal(client.sent.filter(message => message.type === "offline-pack").length, 2);
+  assert.equal(client.sent.filter(message => message.type === "offline-core").length, 0);
+});
+
+test("offline play restores downloaded content if a later storage check finds it missing", async () => {
+  const client = offlineClient({ savedPreference: true, enabledPacks: [{ id: "pt" }] });
+  await new Promise(setImmediate);
+  await client.emit("pt", { state: "ready", total: 4 });
+  await client.emit("pt", { state: "idle", total: 4 });
+  assert.equal(client.sent.filter(message => message.type === "offline-pack").length, 2);
+  assert.equal(client.sent.filter(message => message.type === "offline-core").length, 0);
+});
+
+test("the saved offline preference overrides browser and PWA defaults", async () => {
+  const browser = offlineClient({ savedPreference: true, ready: false });
+  const pwa = offlineClient({ savedPreference: false, pwa: true, ready: false });
+  await new Promise(setImmediate);
+  assert.equal(browser.sent.filter(message => message.type === "offline-core").length, 1);
+  assert.equal(pwa.sent.filter(message => message.type === "offline-core").length, 0);
+  assert.equal(pwa.elements.get("offlineenabled").checked, false);
+});
+
+test("turning offline play off cancels transfers and suppresses retries until re-enabled", async () => {
+  const client = offlineClient({ savedPreference: true, ready: false });
+  await new Promise(setImmediate);
+  await client.toggle(false);
+  assert.equal(client.sent.at(-1).type, "offline-cancel");
+  assert.equal(client.localStorage.getItem("offlinePlay"), "0");
+  await client.emit("core", { state: "idle" });
+  client.windowCallbacks.get("online")();
+  await new Promise(setImmediate);
+  assert.equal(client.sent.filter(message => message.type === "offline-core").length, 1);
+  assert.equal(client.elements.get("offlineprogress").hidden, true);
+  await client.toggle(true);
+  assert.equal(client.sent.filter(message => message.type === "offline-core").length, 2);
+});
+
+test("cancelling a core transfer aborts the network and supports an immediate restart", async () => {
+  const app = worker();
+  let entered;
+  const blocked = new Promise(resolve => { entered = resolve; });
+  app.network.hold = url => {
+    if (url.pathname.includes("/data/career/")) { entered(); return new Promise(() => {}); }
+  };
+  const first = app.download();
+  const rejected = assert.rejects(first, /aborted|cancelled/);
+  await blocked;
+  await app.message({ type: "offline-cancel" });
+  app.network.hold = null;
+  const restarted = app.download();
+  await rejected;
+  await restarted;
+  assert.ok(app.messages.some(message => message.id === "core" && message.state === "idle"));
+  assert.equal(app.messages.at(-1).state, "ready");
+  assert.ok(await (await app.caches.open("istintopuro-offline-one")).match("./__offline__/ready"));
 });
 
 test("disabling a pack during download cancels writes before removing its offline copy", async () => {
