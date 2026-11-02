@@ -61,6 +61,7 @@ jobs:
       - name: Refresh dataset from Wikidata + Wikipedia (revision-aware after first run)
         id: refresh
         continue-on-error: true
+        shell: bash
         env:
           FULL_REFRESH: ${{ inputs.full_refresh && '1' || '0' }}
         run: |
@@ -70,7 +71,21 @@ jobs:
             [ -f "$pack/index.json" ] || continue
             cp "$pack/index.json" "/tmp/pack-baselines/$(basename "$pack").json"
           done
-          VALIDATE_BASELINE=/tmp/index-baseline.json VALIDATE_PACK_BASELINE_DIR=/tmp/pack-baselines python3 pipeline/pipeline.py
+          VALIDATE_BASELINE=/tmp/index-baseline.json VALIDATE_PACK_BASELINE_DIR=/tmp/pack-baselines python3 pipeline/pipeline.py 2>&1 | tee /tmp/refresh-pipeline.log
+
+      # Capture before recovery restores site/data, so even a rejected candidate
+      # can be reproduced without fetching the sources again.
+      - name: Capture candidate and compare data changes
+        if: always() && steps.refresh.outcome != 'skipped'
+        continue-on-error: true
+        run: |
+          mkdir -p /tmp/refresh-diagnostics
+          cp -R site/data /tmp/refresh-diagnostics/candidate
+          cp /tmp/index-baseline.json /tmp/refresh-diagnostics/baseline-index.json
+          cp -R /tmp/pack-baselines /tmp/refresh-diagnostics/pack-baselines
+          cp /tmp/refresh-pipeline.log /tmp/refresh-diagnostics/pipeline.log
+          node scripts/refresh-report.js --baseline /tmp/index-baseline.json --candidate /tmp/refresh-diagnostics/candidate/index.json --output /tmp/refresh-diagnostics
+          cat /tmp/refresh-diagnostics/report.md >> "$GITHUB_STEP_SUMMARY"
 
       # Remote APIs and community-edited source data can fail independently of this
       # repository. Keep the last validated dataset in that case, while leaving the
@@ -85,7 +100,10 @@ jobs:
           echo "The refresh or validation failed. The last validated dataset was retained and deployed; inspect the refresh step log for the upstream error." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Test pipeline and audit quiz schedule
-        run: sh scripts/check.sh
+        shell: bash
+        run: |
+          mkdir -p /tmp/refresh-diagnostics
+          sh scripts/check.sh 2>&1 | tee /tmp/refresh-diagnostics/checks.log
 
       - uses: actions/cache/save@v6
         if: steps.refresh.outcome == 'success'
@@ -130,3 +148,12 @@ jobs:
           path: site
       - id: deployment
         uses: actions/deploy-pages@v5
+
+      - name: Save failed refresh diagnostics
+        if: always() && (failure() || steps.refresh.outcome == 'failure')
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: refresh-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/refresh-diagnostics
+          retention-days: 7

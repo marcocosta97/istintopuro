@@ -53,6 +53,12 @@ sh scripts/check.sh
 This checks JavaScript syntax, runs the Python and Node.js tests, validates
 published data, and checks the quiz schedule.
 
+Recognition calibration tests use the fixed inputs described in
+[`tests/fixtures/README.md`](../tests/fixtures/README.md). Exact scores, answer
+counts and named-player examples belong there. Tests on the current dataset
+check invariants and the 730-day quiz quality bounds; legitimate source edits
+must not require updating a hard-coded score every week.
+
 ## Refreshing the data
 
 ```
@@ -77,6 +83,31 @@ two-percentage-point baseline regression guard applies to every pack.
 One list needs a human:
 `CURRENT` in `pipeline.py` (each league's clubs this season) — refresh it
 every August, and at the start of the calendar-year seasons for Brazil and Argentina.
+
+Every weekly run adds a baseline/candidate comparison to its job summary:
+player and posting counts, appearance coverage, and representative quiz score
+and classification changes. Probe changes are advisory; the existing data and
+calendar guards still block invalid releases. To compare two indexes locally:
+
+```sh
+node scripts/refresh-report.js --baseline /tmp/baseline-index.json --candidate site/data/index.json --output /tmp/refresh-report
+```
+
+A failed refresh or release check uploads a `refresh-diagnostics-RUN-ATTEMPT`
+artifact retained for seven days. It contains the candidate `site/data` captured
+before any fallback, the core and pack baselines, pipeline/check logs, and the
+comparison in JSON and Markdown. A failed source refresh may leave a partial
+candidate; the report records unreadable inputs as diagnostics. For reproduction,
+check out the SHA in `report.json`, replace `site/data` with the artifact's
+`candidate` directory, then run `sh scripts/check.sh`. To repeat baseline data
+validation too, run:
+
+```sh
+VALIDATE_PUBLISHED_ONLY=1 VALIDATE_BASELINE=/tmp/baseline-index.json VALIDATE_PACK_BASELINE_DIR=/tmp/pack-baselines python3 pipeline/pipeline.py validate
+```
+
+Use the paths to the extracted artifact's baselines in that command. Reporting
+and artifact upload are best-effort and do not change whether the checks pass.
 
 ## Offline play
 

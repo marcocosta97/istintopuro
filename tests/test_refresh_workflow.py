@@ -51,6 +51,7 @@ class RefreshWorkflowTests(unittest.TestCase):
             "actions/cache/save@v6",
             "actions/upload-pages-artifact@v5",
             "actions/deploy-pages@v5",
+            "actions/upload-artifact@v7",
         ):
             self.assertIn(action, text)
         for legacy in (
@@ -64,7 +65,25 @@ class RefreshWorkflowTests(unittest.TestCase):
         ):
             self.assertNotIn(legacy, text)
         self.assertIn("pip install --retries 10 --timeout 30", text)
-        self.assertEqual(text.count("continue-on-error: true"), 5)
+
+    def test_candidate_is_captured_before_recovery_and_uploaded_after_checks(self):
+        text = WORKFLOW.read_text()
+        capture = text.index("- name: Capture candidate")
+        recovery = text.index("- name: Keep the last validated dataset")
+        checks = text.index("- name: Test pipeline")
+        upload = text.index("- name: Save failed refresh diagnostics")
+        self.assertLess(capture, recovery)
+        self.assertLess(checks, upload)
+        self.assertIn("cp -R site/data /tmp/refresh-diagnostics/candidate", text)
+        self.assertIn("failure() || steps.refresh.outcome == 'failure'", text[upload:])
+        self.assertIn("retention-days: 7", text[upload:])
+
+    def test_logged_commands_use_bash_pipefail_so_tee_cannot_hide_failure(self):
+        text = WORKFLOW.read_text()
+        for name in ("Refresh dataset", "Test pipeline"):
+            step = text.split(f"- name: {name}", 1)[1].split("\n      - ", 1)[0]
+            self.assertIn("shell: bash", step)
+            self.assertIn("| tee /tmp/", step)
 
 
 if __name__ == "__main__":

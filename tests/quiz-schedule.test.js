@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const { calibrationRuntime } = require("./helpers/quiz-runtime.js");
 
 const ROOT = path.resolve(__dirname, "..");
 const {
@@ -93,6 +94,7 @@ test("explicit regeneration replaces future locks while preserving earlier publi
 });
 
 test("a higher medium score is valid when its recognition requirements differ from easy", () => {
+  const runtime = calibrationRuntime();
   const rows = [["Q18741", "Q51974"], ["Q483020", "Q19509"],
     ["Q38245", "Q19604"], ["Q39052565", "Q501372"]];
   const stages = runtime.core.stagesFromQids(rows);
