@@ -1,120 +1,71 @@
-# Istinto Puro — quiz & solver
+<p align="center">
+  <img src="site/icon-192.png" width="112" alt="Istinto Puro icon">
+</p>
 
-Two ways to play the game «Istinto Puro». The solver: pick clubs, leagues or
-countries and instantly get every matching player — or switch to
-player mode and go the other way: pick players, get the clubs they shared,
-or pick one and get everyone he ever lined up alongside.
-The daily quiz mode (`site/quiz.js`) turns the same index into a Wordle-style
-game: four intersections of rising difficulty. A versioned static schedule keeps
-published days stable across dataset refreshes and deterministically prepares the
-next 90 days, so everyone plays the same puzzle even while offline.
+<h1 align="center">Istinto Puro</h1>
 
-Live at **[istintopuro.mcosta.it](https://istintopuro.mcosta.it)**.
+<p align="center"><strong>Every career has a connection.</strong></p>
 
-## How it works
+<p align="center">
+  <a href="https://istintopuro.mcosta.it">Play now</a> ·
+  <a href="#run-locally">Run locally</a> ·
+  <a href="docs/development.md">Development</a>
+</p>
 
-Everything runs in the browser. The core dataset — ~72k players and 469 clubs
-covering the top-5 European leagues and their second divisions, all-time —
-is extracted from Wikidata and precomputed into a static index that the
-client intersects in under a millisecond. Optional country packs add their
-top two divisions only when a user enables them: Portugal, the Netherlands,
-Belgium, Turkey, Brazil and Argentina. Reserve teams are excluded.
-The daily quiz deliberately remains core-only, so its puzzles stay identical
-for everyone. Photos (Wikimedia Commons),
-nationalities and loan spells come from the same extraction; careers that
-Wikidata leaves incomplete are filled from the English Wikipedia infobox.
-Players are found through their Wikidata club statements, which recent
-items increasingly lack altogether — so current squads are additionally
-seeded from the squad table on each club's Wikipedia article, and their
-careers come entirely from the infobox. No server, no tracking.
+A daily football quiz and a career solver. Find the players who connect your
+clubs, explore shared careers, or test your football memory with a new puzzle
+every day. Everything runs in your browser, with no account or tracking.
 
-The emitted data formats are documented in `pipeline/pipeline.py`'s
-docstring; heuristics and quality passes are commented where they live,
-in the pipeline and in `site/app.js`.
+- **Daily quiz** — four club intersections, from easy to impossible. The same
+  puzzle for everyone, with an archive to replay past days.
+- **Club solver** — combine clubs, leagues and countries to find matching players.
+- **Player connections** — find shared clubs or discover former teammates.
+- **Extra leagues** — enable country packs for Portugal, the Netherlands,
+  Belgium, Turkey, Brazil and Argentina.
+- **Offline play** — install as a PWA and download the game to keep playing
+  without a connection. Progress stays in your browser.
 
-The daily quiz uses shared recognition rules for easy, medium, hard and
-impossible, with two or three club clues per stage. Selection prefers unused
-intersections and enforces repetition cooldowns. An archive replays past days;
-progress persists in `localStorage`. See [the generator](docs/quiz-generator.md)
-for the rules and schedule controls. `quizDebug(30)` previews the next month
-in the browser console.
+## Coverage
 
-## Refreshing the data
+Around **72,000 players and 469 clubs** across the top two divisions in England,
+Spain, Germany, Italy and France, including historical careers. Optional packs
+add the top two divisions in six more countries; the daily quiz uses the core
+dataset so everyone gets the same clues.
 
-```
-python3 pipeline/pipeline.py            # full fetch first time; later runs reuse unchanged source revisions
-FULL_REFRESH=1 python3 pipeline/pipeline.py  # ignore incremental state and audit every source record
-python3 pipeline/pipeline.py build      # rebuild site/data from checkpoints
-python3 pipeline/pipeline.py quiz       # regenerate/validate the static quiz horizon
-node scripts/quiz-schedule.js --audit   # deterministic 730-day balance audit
-```
+Data comes from Wikidata and English Wikipedia, refreshed weekly. Coverage
+depends on those sources, so some careers and appearance totals are incomplete.
 
-A weekly GitHub Action re-runs the pipeline and deploys; the `validate`
-stage blocks a malformed or shrunken dataset, one whose apps coverage
-dropped, one whose spell years stopped lining up with the postings they
-describe, and one where too few squad-table seeds survived — half the careers
-come from the Wikipedia overlay, and for seeded players it is their only
-source, so a broken parse degrades or empties the data without changing any
-of the counts the shrink guards watch. Pack indexes, lazy career shards and
-spell-year files pass the same structural and coverage checks independently.
-Appearance coverage has an 85% floor, except Brazil (75%): its historical
-source infoboxes often omit totals. Unknown counts stay unknown; the same
-two-percentage-point baseline regression guard applies to every pack.
-One list needs a human:
-`CURRENT` in `pipeline.py` (each league's clubs this season) — refresh it
-every August, and at the start of the calendar-year seasons for Brazil and Argentina.
+## Play offline
 
-## Running locally
+In **Settings**, enable **Play offline** and wait for **Ready to play offline**
+before disconnecting. The download includes the game and all enabled country
+packs. Installing the PWA turns this on by default; the download still needs
+to finish.
 
-```
+Player photos fall back to initials offline. Reconnect occasionally to get fresh
+data and extend the shared quiz calendar, which covers 90 days after each build.
+
+## Run locally
+
+From the repository root, serve the included site and dataset with Python 3:
+
+```sh
 python3 -m http.server -d site 8000
 ```
 
-Pushing to `master` deploys `site/` to GitHub Pages, stamping every asset URL
-with the commit sha.
+Open [localhost:8000](http://localhost:8000). No build step required.
 
-The single “Play offline” switch in Settings downloads and maintains the complete
-game together with every enabled country pack. It defaults to on in the installed
-PWA and off in an ordinary browser tab; an explicit choice is remembered across
-visits. Registration and worker updates alone do not trigger a download.
-The complete core offline copy includes
-the interface, local fonts and flags, index, quiz schedule, all career shards
-(including quiz hints), and teammate spell-year files. This is about 26 MB of
-JSON stored, or 8 MB transferred with gzip, excluding portraits. Settings shows
-combined download progress and a retry control, and requests persistent browser
-storage when offline play is enabled. Wait for “Ready to play offline” before
-disconnecting; installing the PWA alone does not mean the download has finished.
-
-Enabled country packs automatically download their full index, careers, and
-teammate data whenever offline play is on, including packs enabled later. The
-ready status requires the core and every enabled pack to be complete. All six
-packs add about 18 MB stored, or 5 MB with gzip. Disabling a pack removes its
-offline and runtime data. Wikimedia portraits use initials when offline or when the image fails;
-external Wikipedia/Wikidata pages still require a connection.
-Turning offline play off stops pending downloads and automatic updates; already
-saved data and quiz progress are preserved.
-
-`site/offline.js` defines each download's inventory. `site/sw.js` marks a release
-ready only after every file is stored. Worker activation is lightweight and
-does not download the game. A failed download preserves the previous complete
-release; one complete predecessor is retained after a download finishes.
-Code and indexes are keyed by the deploy sha, career
-and teammate files by dataset build date. Navigation tries the network first
-and falls back to the complete saved release, including for HTTP server errors.
-Storage can still be cleared by the user or evicted unless persistence is
-granted; readiness is checked again when Settings opens.
-
-The saved schedule covers 90 days after the dataset build and normal refreshes
-preserve every previously published date, including future ones. After that
-horizon, local generation remains playable but can differ from a newer online
-dataset. Reconnect to download a newer release and extend the shared schedule.
+For checks, data refreshes, deployment and offline internals, see the
+[development guide](docs/development.md). The [quiz generator guide](docs/quiz-generator.md)
+documents difficulty rules and calendar controls.
 
 ## License
 
-MIT. Data derived from [Wikidata](https://www.wikidata.org) (CC0);
-photos are served by Wikimedia Commons under their own licenses.
-The four flags in `site/flags/` (Yugoslavia, the GDR, Kosovo, the
-Netherlands Antilles — states Unicode has no emoji flag for) are
-public domain, from Wikimedia Commons.
-The [Barlow Semi Condensed](https://github.com/jpt/barlow) typeface
-(`site/fonts/`) is © The Barlow Project Authors, SIL OFL 1.1.
+Code: [MIT](LICENSE). Data: [Wikidata](https://www.wikidata.org) (CC0),
+with career details from [English Wikipedia](https://en.wikipedia.org).
+Photos are served by Wikimedia Commons under their individual licenses.
+
+The four flags in `site/flags/` (Yugoslavia, the GDR, Kosovo and the Netherlands
+Antilles) are public domain, from Wikimedia Commons.
+[Barlow Semi Condensed](https://github.com/jpt/barlow) is © The Barlow Project
+Authors, licensed under [SIL OFL 1.1](site/fonts/LICENSE).
