@@ -1327,6 +1327,12 @@ def merge_map(clubs, members):
         m.update({q: canon for q in qs if q != canon})
     return {old: canon for old, canon in m.items() if old in members and canon in members}
 
+def career_sort_key(spell):
+    """Same-year arrivals put the parent stay before its shorter loans."""
+    return (spell[1] or 9999, -(spell[2] if spell[2] is not None else 9999),
+            spell[5] if len(spell) > 5 else 0)
+
+
 def fold_spells(career, canon=lambda t: t, hidden=lambda t: False, prefer=lambda t: 0):
     """Fold the statements that split ONE continuous stay — a loan made permanent, a
     re-signing, a contract renewal filed as its own statement — into a single spell,
@@ -1560,7 +1566,7 @@ def stage_build():
                    for t, s, e, a, g, ln in repaired_spells(q)
                    if any(x is not None for x in (s, e, a, g))
                    and not NATIONAL.search(club_name.get(t, ""))]
-        entries.sort(key=lambda x: (x[1] or 9999, x[2] or 9999))
+        entries.sort(key=career_sort_key)
         return entries
 
     core_current = {q: CURRENT[q] for q in CORE_LEAGUE_ORDER}

@@ -2777,7 +2777,12 @@ async function toggleCareer(li, pid) {
   const gk = DB.gkSet.has(pid);  // goalkeeper goal counts are unreliable, show apps only
   const div = document.createElement("div");
   div.className = "career";
-  const spells = career.filter(e => e[0]);
+  // Same-year arrivals: put the parent stay before its shorter loans, including
+  // careers loaded from older shards that sorted by ascending end year.
+  const spells = career.filter(e => e[0]).sort((a, b) =>
+    (a[1] || Infinity) - (b[1] || Infinity)
+    || (b[2] ?? Infinity) - (a[2] ?? Infinity)
+    || (a[5] || 0) - (b[5] || 0));
   // explicit Wikidata loan flag (P1642), else heuristic: a spell strictly inside
   // an earlier spell's known range reads as a loan from that club
   const loan = spells.map(([, s, e, , , ln], i) => !!ln || !!(s && e && spells.slice(0, i).some(

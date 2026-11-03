@@ -58,6 +58,24 @@ class ExternalApiTests(unittest.TestCase):
         self.assertEqual(get.call_count, 2)
 
 
+class CareerOrderTests(unittest.TestCase):
+    def test_parent_stay_precedes_same_start_loans(self):
+        spells = [["Verona", 1990, 1991, 0, 0, 1],
+                  ["Milan", 1990, 1993, 0, 0],
+                  ["Trento", 1991, 1992, 38, 0, 1],
+                  ["Ravenna", 1992, 1993, 31, 0, 1]]
+        self.assertEqual([sp[0] for sp in sorted(spells, key=PIPELINE.career_sort_key)],
+                         ["Milan", "Verona", "Trento", "Ravenna"])
+
+    def test_open_stays_equal_ranges_and_unknown_starts(self):
+        spells = [["Undated", None, None], ["Later", 2025, 2026],
+                  ["Short loan", 2024, 2025, 1, 0, 1], ["Open parent", 2024, None],
+                  ["Equal loan", 2020, 2021, 1, 0, 1], ["Equal parent", 2020, 2021]]
+        self.assertEqual([sp[0] for sp in sorted(spells, key=PIPELINE.career_sort_key)],
+                         ["Equal parent", "Equal loan", "Open parent", "Short loan",
+                          "Later", "Undated"])
+
+
 class WikipediaOverlayTests(unittest.TestCase):
     def test_statistics_preserve_thousands_and_reject_ambiguous_values(self):
         for text, expected in [("1,234", 1234), ("{{0}}7<ref>source</ref>", 7),
