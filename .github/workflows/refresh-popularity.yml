@@ -1,0 +1,59 @@
+name: Collect quiz recognition signals
+
+on:
+  schedule:
+    - cron: "17 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: popularity-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: python3 -m pip install --retries 10 --timeout 30 requests==2.32.3
+      - name: Restore previous checkpoint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/popularity-artifacts.py checkpoint
+      - name: Restore last validated snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/popularity-artifacts.py snapshot
+      - name: Collect a bounded portion of the core quiz candidate pool
+        run: python3 pipeline/pipeline.py popularity
+      - name: Preserve source results, including partial progress
+        if: always() && hashFiles('data/popularity/state.jsonl') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: quiz-recognition-checkpoint-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/popularity/state.jsonl
+          compression-level: 6
+          retention-days: 90
+      - name: Preserve last validated snapshot
+        if: always() && hashFiles('data/popularity/snapshot.json') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: quiz-recognition-snapshot-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/popularity/snapshot.json
+          compression-level: 6
+          retention-days: 90
+      - name: Save recognition audit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: quiz-recognition-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/popularity/metrics.json
+          if-no-files-found: warn
+          retention-days: 30

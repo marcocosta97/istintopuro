@@ -117,6 +117,97 @@ available, but the run is marked failed after diagnostics are saved. Its summary
 distinguishes this recovery from a successful data update; commits are only
 attempted after a successful refresh.
 
+## Collecting quiz recognition signals
+
+Wikipedia readership and language coverage are maintained separately from releases:
+
+```sh
+python3 pipeline/pipeline.py popularity
+# Targeted live check; subset runs write an audit but do not promote a snapshot:
+python3 pipeline/popularity.py --qids Q1835,Q615 --max-requests 10 --max-seconds 120
+# Reuse the last validated snapshot without querying either source:
+python3 pipeline/pipeline.py recognition
+```
+
+The collector reads the published core index and career shards. Its candidates
+have links to at least two core clubs, excluding zero-appearance registrations;
+unknown appearances remain eligible. Optional packs do not affect this scope.
+Records use Wikidata QIDs, so rebuilding positional player IDs cannot attach
+another player's measurements. `--limit`, `--site-data`, `--state`, `--snapshot`
+and `--output` support isolated checks.
+
+The first collection backfills 12 complete UTC calendar months. Subsequent runs
+fetch new players and observations at least 90 days old (`--refresh-days` can
+override this interval). Both language coverage and readership have their own
+source timestamps. A new calendar month does not expire fresh observations:
+each player retains their own measured readership window and `through` date.
+All newly needed months are fetched in one request per player, retaining the
+cached overlap. Partial and unavailable responses also wait for the refresh
+interval; failed requests back off for seven days. No missing bucket is treated
+as zero, and a newly created article need not have a complete history yet.
+
+`data/popularity/state.jsonl` journals source results before the next request.
+Repeated runs resume unfinished work, prioritising new players and the oldest
+attempts. The budget is 6,000 HTTP attempts or 3,000 seconds per run, whichever
+comes first. Requests are serial, identify the pipeline, and retry with backoff
+and `Retry-After`. Three consecutive failed batches or articles stop collection.
+Source errors return a nonzero exit status after saving progress and an audit;
+reaching the budget is a successful partial run. Additional manually triggered
+runs can complete the initial backfill without waiting for the next schedule.
+
+`refresh-popularity.yml` runs on Sundays and can also be dispatched manually.
+It restores the latest retained checkpoint and last validated snapshot from the
+same workflow, repository and branch, including progress from failed runs.
+Both are compressed workflow artifacts retained for 90 days and renewed on each
+maintenance run; dependency caches are not the persistence mechanism. Invalid
+artifacts fall back to an older valid artifact. Transport errors or an entirely
+invalid history fail restoration without overwriting existing files. No retained
+artifact allows a new bootstrap. Repository retention settings may cap the
+requested 90 days. The collector does not commit or deploy.
+
+Language coverage comes from Wikidata's
+[`wbgetentities` API](https://www.mediawiki.org/wiki/Wikibase/API), counting only
+Wikipedia editions and retaining their language codes and English article title.
+A missing entity has an unknown count, distinct from an existing entity with no
+Wikipedia editions. `period` records the UTC month of observation; it does not
+control expiry. A failed refresh retains the prior observation with its original
+source timestamp. Language weights can be recalculated locally from these codes.
+
+Readership uses the English Wikipedia
+[per-article pageviews endpoint](https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/reference/page-views.html),
+`all-access/user`. `--through YYYY-MM` selects the target historical window for
+players due for collection; it does not force a refresh of fresh records.
+Changed article titles start a separate series. Redirects and article moves can
+therefore leave incomplete historical coverage.
+
+`data/popularity/metrics.json` audits the latest attempts, keyed by QID. It
+includes names, language coverage, measured monthly readership, source timestamps,
+freshness, errors, request counts and exhausted budgets. `current` means younger
+than the configured refresh interval at audit generation. Total and median
+monthly readership are populated only for complete 12-month series; the median
+reduces sensitivity to a single news spike. The source data is
+[CC0](https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/documentation/access-policy.html).
+
+A structurally validated `data/popularity/snapshot.json` is promoted after a
+full-scope run with no source errors, including a bounded partial run. Existing
+complete readership series survive incomplete updates in this snapshot. A failed
+run retains the previous snapshot while still saving checkpoint progress. The
+snapshot summary describes retained observations; the audit summary describes
+the latest attempts. Source timestamps always retain the actual observation time.
+
+The Monday data refresh restores this snapshot as an optional step. The normal
+pipeline's `recognition` stage reuses it as `site/data/recognition.json` without
+Wikimedia requests. Missing or invalid input retains the published snapshot, and
+an older artifact cannot replace a newer published snapshot. Snapshot restoration
+never delays the release waiting for the collection workflow. Subsequent data
+validation or release failure uses the existing dataset recovery mechanism.
+
+These remain calibration inputs: quiz scoring, accepted answers and the published
+calendar use the existing rules. The browser does not fetch this sidecar. Audit
+coverage and recognised-answer breadth before choosing weights or thresholds;
+language bias and recall of a player's particular club spells remain separate
+concerns.
+
 ## Offline play
 
 The single “Play offline” switch in Settings downloads and maintains the complete

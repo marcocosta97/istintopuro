@@ -10,10 +10,12 @@ Stages (each checkpoints to data/, reruns skip completed stages):
   wp       - Wikipedia-infobox career overlay (every player; authoritative when complete)
   teams    - labels for career teams outside the club universe
   build    - emit site/data/index.json + career shards, print stats
+  recognition - reuse an optional validated popularity snapshot, without source requests
   validate - sanity-check the emitted index; fail instead of shipping junk
   quiz     - preserve published quizzes and generate/validate the next 90 days
+  popularity - opt-in, bounded Wikipedia readership + language-coverage collection
 
-Usage: python3 pipeline/pipeline.py [stage ...]   (default: all)
+Usage: python3 pipeline/pipeline.py [stage ...]   (default: all except popularity)
 
 Emitted formats — site/data/index.json (one file, whole club-mode dataset):
   clubs     [name, country, leagueMask, QID, dissolvedYear, currentLeague]
@@ -2009,10 +2011,20 @@ def stage_quiz():
     """Preserve the published horizon and generate the next 90 days."""
     subprocess.run(["node", str(ROOT / "scripts" / "quiz-schedule.js")], cwd=ROOT, check=True)
 
+def stage_popularity():
+    """Collect audit signals separately from the release pipeline and quiz scores."""
+    subprocess.run([sys.executable, str(ROOT / "pipeline" / "popularity.py")], cwd=ROOT, check=True)
+
+def stage_recognition():
+    """Reuse the latest validated QID-keyed recognition inputs in normal releases."""
+    subprocess.run([sys.executable, str(ROOT / "pipeline" / "popularity.py"), "--publish",
+                    "--snapshot", str(DATA / "popularity" / "snapshot.json"),
+                    "--output", str(SITE_DATA / "recognition.json")], cwd=ROOT, check=True)
+
 STAGES = {"clubs": stage_clubs, "members": stage_members, "roster": stage_roster,
           "attrs": stage_attrs, "careers": stage_careers, "wp": stage_wp,
-          "teams": stage_teams, "build": stage_build, "validate": stage_validate,
-          "quiz": stage_quiz}
+          "teams": stage_teams, "build": stage_build, "recognition": stage_recognition, "validate": stage_validate,
+          "quiz": stage_quiz, "popularity": stage_popularity}
 
 def publish_source_warnings():
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -2025,9 +2037,9 @@ def publish_source_warnings():
 if __name__ == "__main__":
     DATA.mkdir(exist_ok=True)
     try:
-        todo = sys.argv[1:] or list(STAGES)
+        todo = sys.argv[1:] or [s for s in STAGES if s != "popularity"]
         for s in todo:
-            if s not in ("build", "quiz") and load(s) is not None and s not in sys.argv[1:]:
+            if s not in ("build", "quiz", "popularity", "recognition") and load(s) is not None and s not in sys.argv[1:]:
                 print(f"{s}: checkpoint exists, skipping"); continue
             print(f"== stage {s}", flush=True)
             STAGES[s]()

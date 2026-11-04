@@ -21,6 +21,18 @@ class RefreshWorkflowTests(unittest.TestCase):
 
         self.assertIn('cron: "0 2 * * 1"', text)
 
+    def test_recognition_restore_is_optional_and_runs_after_checkpoint_restore(self):
+        text = WORKFLOW.read_text()
+        restore = text.index("- name: Restore optional recognition snapshot")
+        fetch = text.index("- name: Refresh dataset")
+        self.assertLess(text.index("path: data\n"), restore)
+        self.assertLess(restore, fetch)
+        step = text[restore:fetch]
+        self.assertIn("continue-on-error: true", step)
+        self.assertIn("scripts/popularity-artifacts.py snapshot", step)
+        self.assertIn("actions: read", text)
+        self.assertNotIn("pipeline.py popularity", text)
+
     def test_deployment_uses_the_refreshed_head_as_its_cache_version(self):
         text = WORKFLOW.read_text()
 

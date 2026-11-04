@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: write   # commit the refreshed dataset
+  actions: read     # reuse recognition snapshots without querying Wikimedia
   pages: write      # publish to GitHub Pages
   id-token: write
 
@@ -55,6 +56,12 @@ jobs:
           path: data
           key: checkpoints-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: checkpoints-${{ github.run_id }}-
+
+      - name: Restore optional recognition snapshot
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/popularity-artifacts.py snapshot
 
       # the validate stage rejects the candidate if the new index is malformed or
       # shrank >3% vs the deployed one; the recovery step below retains the baseline
