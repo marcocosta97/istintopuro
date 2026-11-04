@@ -371,14 +371,14 @@ class LeaguePackTests(unittest.TestCase):
         idx = {
             "v": 1, "id": "be", "leagues": [["One", 1, "PT"], ["Two", 2, "PT"]],
             "clubs": [["A", "PT", 1, "Q10", 0, 0], ["B", "PT", 2, "Q11", 0, 1]],
-            "players": [[100, 10, "One", 1990, "ZZ", "", 0]],
+            "players": [[100, 10, "One", 1990, "Z1", "", 0]],
             "postings": [[0], [0]], "apps": [[2], [4]], "goals": [[0], [1]],
         }
 
         errors = "\n".join(PIPELINE.pack_index_errors(idx, "pt", 10, [1, 1]))
         self.assertIn("id 'be' != 'pt'", errors)
         self.assertIn("invalid core player id", errors)
-        self.assertIn("nat codes with no flag", errors)
+        self.assertIn("malformed nationality fields", errors)
 
 
 class MobileBrowserBackTests(unittest.TestCase):

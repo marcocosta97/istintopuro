@@ -80,6 +80,10 @@ spell-year files pass the same structural and coverage checks independently.
 Appearance coverage has an 85% floor, except Brazil (75%): its historical
 source infoboxes often omit totals. Unknown counts stay unknown; the same
 two-percentage-point baseline regression guard applies to every pack.
+Missing nationality flags produce a source warning, while the client shows the
+country code with its accessible country name. This also covers newly introduced
+historical nationalities such as `SU`, without substituting a modern successor.
+Malformed nationality fields still fail validation in both core and pack data.
 One list needs a human:
 `CURRENT` in `pipeline.py` (each league's clubs this season) — refresh it
 every August, and at the start of the calendar-year seasons for Brazil and Argentina.
@@ -108,6 +112,10 @@ VALIDATE_PUBLISHED_ONLY=1 VALIDATE_BASELINE=/tmp/baseline-index.json VALIDATE_PA
 
 Use the paths to the extracted artifact's baselines in that command. Reporting
 and artifact upload are best-effort and do not change whether the checks pass.
+A failed source refresh may redeploy the previous dataset to keep the site
+available, but the run is marked failed after diagnostics are saved. Its summary
+distinguishes this recovery from a successful data update; commits are only
+attempted after a successful refresh.
 
 ## Offline play
 

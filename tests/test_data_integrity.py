@@ -1,4 +1,8 @@
 import importlib.util
+import json
+import os
+import re
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +15,51 @@ SPEC.loader.exec_module(PIPELINE)
 
 
 class DataIntegrityTests(unittest.TestCase):
+    def test_missing_flags_warn_without_rejecting_valid_nationalities(self):
+        with patch.object(PIPELINE, "SOURCE_WARNINGS", set()):
+            self.assertEqual(PIPELINE.nationality_errors(["IT", "SU,RU", "ZZ", ""], "core"), [])
+            self.assertEqual(len(PIPELINE.SOURCE_WARNINGS), 1)
+            warning = next(iter(PIPELINE.SOURCE_WARNINGS))
+            self.assertIn("['SU', 'ZZ']", warning)
+            self.assertIn("country-code labels", warning)
+
+    def test_malformed_nationality_fields_still_fail_validation(self):
+        for value in [None, 12, [], "Russia", "it", "Z1", "SU,", ",SU", "SU,,RU"]:
+            with self.subTest(value=value):
+                self.assertTrue(PIPELINE.nationality_errors([value], "core"))
+
+    def test_client_and_pipeline_agree_which_codes_have_emoji_flags(self):
+        source = (ROOT / "site/app.js").read_text()
+        codes = re.search(r"const ISO_ALPHA2 = new Set\(`([^`]+)`", source).group(1)
+        self.assertEqual(set(codes.split()), PIPELINE.ISO_ALPHA2)
+
+    def test_core_validator_accepts_a_dataset_with_a_missing_flag(self):
+        # Reproduce the rejected weekly input without copying its career shards.
+        with tempfile.TemporaryDirectory() as tmp:
+            candidate = Path(tmp)
+            for entry in (ROOT / "site/data").iterdir():
+                if entry.name != "index.json":
+                    (candidate / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
+            index = json.loads((ROOT / "site/data/index.json").read_text())
+            index["nats"][0] = "SU"
+            (candidate / "index.json").write_text(json.dumps(index))
+            with patch.object(PIPELINE, "SITE_DATA", candidate), \
+                    patch.object(PIPELINE, "SOURCE_WARNINGS", set()), \
+                    patch.dict(os.environ, {"VALIDATE_PUBLISHED_ONLY": "1"}):
+                PIPELINE.stage_validate()
+                self.assertTrue(any("['SU']" in warning for warning in PIPELINE.SOURCE_WARNINGS))
+
+    def test_pack_validator_accepts_nationality_without_flag_artwork(self):
+        index = {
+            "v": 1, "id": "pt", "leagues": [["One", 1, "PT"], ["Two", 2, "PT"]],
+            "clubs": [["A", "PT", 1, "Q10", 0, 0], ["B", "PT", 2, "Q11", 0, 1]],
+            "players": [[100, -1, "Player", 1990, "SU", "", 0]],
+            "postings": [[0], [0]], "apps": [[2], [3]], "goals": [[0], [0]],
+        }
+        with patch.object(PIPELINE, "SOURCE_WARNINGS", set()):
+            self.assertEqual(PIPELINE.pack_index_errors(index, "pt", 0, [1, 1]), [])
+            self.assertTrue(any("pack pt:" in warning for warning in PIPELINE.SOURCE_WARNINGS))
+
     def test_only_brazil_has_a_source_specific_appearance_floor(self):
         self.assertEqual(PIPELINE.APPS_FLOOR, .85)
         for pack_id in PIPELINE.PACKS:

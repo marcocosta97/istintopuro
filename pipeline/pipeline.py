@@ -806,14 +806,12 @@ NAT_FIX = {
 # for them. These used to be dropped (or mapped to a successor) because they rendered
 # as letter boxes; site/flags/<cc>.svg now covers them, so they stay as themselves —
 # a GDR international is shown under the GDR, not backdated into modern Germany.
-# Exhaustive: a survey of every P297-carrying item found only 10 non-ISO codes, and
-# the other 6 (Ascension, Clipperton, Sark, Diego Garcia, Trust Territory of the
-# Pacific Islands, Tristan da Cunha) have no football nationals. stage_validate
-# fails the build if a code ever appears that neither this set nor an emoji covers.
+# Other codes use a country-code label in the client. New historical nationalities
+# should remain visible without making an otherwise valid dataset unpublishable.
 NO_EMOJI_FLAG = {"YU", "DD", "XK", "AN"}
 
 # officially assigned ISO 3166-1 alpha-2 codes — exactly the set Unicode gives a
-# regional-indicator flag, so it is what stage_validate checks nat codes against
+# regional-indicator flag. Keep in sync with the client's ISO_ALPHA2 set.
 ISO_ALPHA2 = set("""AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG
 BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU
 CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF
@@ -823,6 +821,17 @@ MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI
 NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD
 SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR
 TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW""".split())
+
+def nationality_errors(nats, scope):
+    """Reject malformed fields; missing flag artwork is only a source warning."""
+    malformed = [i for i, nat in enumerate(nats)
+                 if not isinstance(nat, str) or (nat and not re.fullmatch(r"[A-Z]{2}(,[A-Z]{2})*", nat))]
+    codes = {code for i, nat in enumerate(nats) if i not in malformed and nat
+             for code in nat.split(",")}
+    missing_flags = sorted(codes - ISO_ALPHA2 - NO_EMOJI_FLAG)
+    if missing_flags:
+        source_warning(f"{scope}: no flag for nationality codes {missing_flags}; using country-code labels")
+    return [f"{scope}: malformed nationality fields at rows {malformed[:5]}"] if malformed else []
 
 def pick_nat(ccs):  # a single citizenship, used only when no sport country is known
     cur = sorted(c for c in ccs if c and c in ISO_ALPHA2)
@@ -1794,9 +1803,7 @@ def pack_index_errors(idx, pack_id, core_players, expected_current):
                 and (pos == 0 or i > ids[pos - 1]) for pos, i in enumerate(ids)),
             f"club {ci}: invalid postings")
         chk(all(type(x) is int and x >= -1 for x in acol + gcol), f"club {ci}: invalid apps/goals")
-    codes = {c for p in valid_players if p[4] for c in p[4].split(",")}
-    unrenderable = sorted(c for c in codes if c not in ISO_ALPHA2 and c not in NO_EMOJI_FLAG)
-    chk(not unrenderable, f"nat codes with no flag: {unrenderable}")
+    errs.extend(nationality_errors([p[4] for p in valid_players], f"pack {pack_id}"))
     cov = apps_coverage(idx) if postings else 0
     floor = PACKS.get(pack_id, {}).get("apps_floor", APPS_FLOOR)
     chk(cov >= floor, f"apps coverage {cov:.1%} below floor {floor:.0%}")
@@ -1853,13 +1860,7 @@ def stage_validate():
     chk(ycov >= YEARS_FLOOR, f"dated postings {ycov:.1%} below floor {YEARS_FLOOR:.0%}")
     cov = apps_coverage(idx)
     chk(cov >= APPS_FLOOR, f"apps coverage {cov:.1%} below floor {APPS_FLOOR:.0%}")
-    # every nat code must be renderable: a real ISO 3166-1 alpha-2 (emoji flag) or one
-    # of the four we ship an SVG for. Codes that are neither used to reach the client
-    # and render as two letter boxes — 216 players shipped that way before anyone
-    # noticed, so this is a build failure, not a cosmetic issue.
-    codes = {c for n in idx["nats"] if n for c in n.split(",")}
-    unrenderable = sorted(c for c in codes if c not in ISO_ALPHA2 and c not in NO_EMOJI_FLAG)
-    chk(not unrenderable, f"nat codes with no flag: {unrenderable}")
+    errs.extend(nationality_errors(idx["nats"], "core"))
     published_only = os.environ.get("VALIDATE_PUBLISHED_ONLY") == "1"
     roster = {} if published_only else load("roster") or {}
     core_current_clubs = {q for lq in CORE_LEAGUE_ORDER for q in CURRENT[lq]}

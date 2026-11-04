@@ -85,6 +85,16 @@ class RefreshWorkflowTests(unittest.TestCase):
             self.assertIn("shell: bash", step)
             self.assertIn("| tee /tmp/", step)
 
+    def test_failed_refresh_is_reported_after_recovery_and_diagnostics(self):
+        text = WORKFLOW.read_text()
+        mark = text.index("- name: Mark unsuccessful refresh after fallback")
+        self.assertLess(text.index("uses: actions/deploy-pages@v5"), mark)
+        self.assertLess(text.index("- name: Save failed refresh diagnostics"), mark)
+        self.assertIn("always() && steps.refresh.outcome == 'failure'", text[mark:])
+        self.assertIn("exit 1", text[mark:])
+        commit = text.split("- name: Commit refreshed dataset", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("if: steps.refresh.outcome == 'success'", commit)
+
 
 if __name__ == "__main__":
     unittest.main()

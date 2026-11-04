@@ -97,7 +97,7 @@ jobs:
           git clean -fd -- site/data
           echo "### Weekly data refresh warning" >> "$GITHUB_STEP_SUMMARY"
           echo >> "$GITHUB_STEP_SUMMARY"
-          echo "The refresh or validation failed. The last validated dataset was retained and deployed; inspect the refresh step log for the upstream error." >> "$GITHUB_STEP_SUMMARY"
+          echo "The refresh or validation failed. The last validated dataset was retained for deployment; inspect the refresh step log for the upstream error." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Test pipeline and audit quiz schedule
         shell: bash
@@ -120,6 +120,7 @@ jobs:
           key: checkpoints-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Commit refreshed dataset if it changed
+        if: steps.refresh.outcome == 'success'
         run: |
           git config user.name "istintopuro-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -149,6 +150,12 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v5
 
+      - name: Report successful refresh
+        if: steps.refresh.outcome == 'success'
+        run: |
+          echo "### Weekly refresh succeeded" >> "$GITHUB_STEP_SUMMARY"
+          echo "The candidate passed validation and release checks and was deployed. The commit step reports whether it changed the dataset." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Save failed refresh diagnostics
         if: always() && (failure() || steps.refresh.outcome == 'failure')
         continue-on-error: true
@@ -157,3 +164,12 @@ jobs:
           name: refresh-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: /tmp/refresh-diagnostics
           retention-days: 7
+
+      # Recovery keeps the site available, but must not make a failed update green.
+      - name: Mark unsuccessful refresh after fallback
+        if: always() && steps.refresh.outcome == 'failure'
+        run: |
+          echo "::error::Dataset refresh failed; the previous validated dataset was retained. See the refresh diagnostics artifact and deployment step for details."
+          echo "### Weekly refresh did not update the data" >> "$GITHUB_STEP_SUMMARY"
+          echo "Recovery retained the previous dataset. This run is marked failed so it cannot be mistaken for a completed data update." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
