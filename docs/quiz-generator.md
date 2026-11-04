@@ -33,6 +33,13 @@ reduce bridge recall. Unknown appearance totals are neutral in that
 discount, but do not establish a familiar answer. Zero-appearance
 registrations remain accepted guesses and are excluded from difficulty.
 
+The quiz presents one choice per exact name and birth year, including records
+with different nationalities. Selecting that choice is correct if any matching
+record is an accepted answer; the saved correct guess points to that record so
+its revealed career matches the clues. Repeating the same name/year is free,
+and a second hint skips records of an already revealed name/year. Namesakes
+born in different years remain separate choices.
+
 The levels are exclusive; their raw scores need not descend. An intersection
 with one familiar route can be medium even above 550. Unusable intersections
 or high scores without an appropriate recognisable anchor can be discarded.

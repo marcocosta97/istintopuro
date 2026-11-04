@@ -101,7 +101,10 @@ const qGen = (date) => {
 const qTag = (s) => `<small class="qplus">${s}</small>`;
 // a revealed name stands in for the whole answer set: flag how many OTHERS there
 // are (never for a single-solution stage, where the name already says it all)
-const qFaceTag = (st) => st.answers.length > 1 ? qTag(`+${st.answers.length - 1}`) : "";
+const qFaceTag = (st) => {
+  const count = qCore().uniqueChoices(st.answers).length;
+  return count > 1 ? qTag(`+${count - 1}`) : "";
+};
 
 // ---------------------------------------------------------------- game state
 // fresh → playing(stage 0-3, lives 5-1) → won | lost; terminal for the day.
@@ -168,8 +171,8 @@ function qStagesFromQids(rows, state = null) {
 }
 
 const qIdentity = (pid) => qCore().playerIdentity(pid);
-const qGuessIdentity = (guess) => guess.key || guess.identity
-  || `${guess.name}\u0000${guess.birth || ""}\u0000${guess.nat || ""}`;
+const qGuessIdentity = (guess) => (guess.key || guess.identity
+  || `${guess.name}\u0000${guess.birth || ""}`).split("\u0000").slice(0, 2).join("\u0000");
 function qMigrateState(state, stages) {
   return qCore().migrateState(state, stages, QHINTS);
 }
@@ -346,12 +349,14 @@ function qStartReplay(date) {
 function qGuess(pid) {
   if (!qs || qs.done || qRolled()) return null;
   const st = qPz.stages[qs.stage];
-  const identity = qIdentity(pid);
-  if (qs.guesses.some(g => g.stage === qs.stage && qGuessIdentity(g) === identity)) return "dup";
-  const ok = qCore().answerMatches(pid, st.answers);
+  const choice = qCore().choiceIdentity(pid);
+  if (qs.guesses.some(g => g.stage === qs.stage && qGuessIdentity(g) === choice)) return "dup";
+  const answer = qCore().resolveAnswer(pid, st.answers), ok = answer !== null;
+  // Store the matching record so opening a correct guess shows a valid career.
+  if (ok) pid = answer;
   const snapshot = JSON.parse(JSON.stringify(qs));
   qs.guesses.push({ name: DB.names[pid], birth: DB.births[pid] || 0, nat: DB.nats[pid] || "",
-    key: identity, pid, stage: qs.stage, ok });
+    key: qIdentity(pid), pid, stage: qs.stage, ok });
   let ev;
   if (ok) {
     if (qs.stage === 3) { qs.done = qs.won = true; ev = "won"; }
@@ -668,9 +673,10 @@ const qInitialsProbe = (q) => {
 // that IS somebody's whole name is a guess, not a probe — "p" still matches no
 // name outright, so the initials stay closed.
 const qMatches = (q) => {
-  if (!qInitialsProbe(q)) return playerMatches(q, [], true, CORE_DB.names.length);
+  const core = qCore();
+  if (!qInitialsProbe(q)) return core.uniqueChoices(playerMatches(q, [], true, CORE_DB.names.length));
   const nq = norm(q);
-  return playerMatches(q, [], false, CORE_DB.names.length).filter(id => norm(DB.names[id]) === nq);
+  return core.uniqueChoices(playerMatches(q, [], false, CORE_DB.names.length).filter(id => norm(DB.names[id]) === nq));
 };
 
 // Deliberately NOT the solver's two-line row: naming a candidate's clubs here
@@ -1030,9 +1036,8 @@ function qRenderEnd() {
     <div class="qmeta">${esc(line)}</div>`;
   if (!qs.won) {  // reveal the stage that ended the run, most recognisable first
     const stg = qPz.stages[qs.stage];
-    const byFame = qRanked(stg);  // the difficulty set first…
-    const revealed = new Set(byFame.map(qIdentity));
-    for (const p of stg.answers) if (!revealed.has(qIdentity(p))) byFame.push(p);  // …then the 0-app answers
+    // Prefer difficulty representatives, then include registration-only answers.
+    const byFame = qCore().uniqueChoices([...qRanked(stg), ...stg.answers]);
     html += `<div class="qreveal"><b>${q.qReveal(byFame.length)}</b>`
       + byFame.slice(0, 10).map(p => `<button type="button" class="qrp" data-p="${p}">${esc(DB.names[p])}</button>`).join(", ")
       + (byFame.length > 10 ? ` <button type="button" class="qrmore" data-s="${qs.stage}">${q.qOthers(byFame.length - 10)}</button>` : "")

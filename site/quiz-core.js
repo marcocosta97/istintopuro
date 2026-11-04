@@ -301,9 +301,21 @@
       return ease;
     }
     const playerIdentity = (pid) => `${DB.names[pid]}\u0000${DB.births[pid] || ""}\u0000${DB.nats[pid] || ""}`;
-    // The accepted answer set: everyone the clubs turn up, deduped the way a guess
-    // is matched (by identity). It includes players Wikidata registers with 0
-    // appearances, since naming one is a correct answer.
+    // Guess choices are distinguished by name and birth year. Keep the fuller
+    // identity above for saved record resolution and recognition calibration.
+    const choiceIdentity = (pid) => `${DB.names[pid]}\u0000${DB.births[pid] || ""}`;
+    const uniqueChoices = (pids) => {
+      const seen = new Set();
+      return pids.filter(pid => {
+        const key = choiceIdentity(pid);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    // Answer records retain their full identity for recognition calibration;
+    // displayed choices and guesses use name/year. Zero-appearance registrations
+    // remain accepted answers, since naming one is a correct guess.
     const qAnswerSet = (answers) => {
       const seen = new Set();
       return answers.filter(pid => {
@@ -365,13 +377,14 @@
         || qBridgeFame(b, stage.clubs, stage.audience) - qBridgeFame(a, stage.clubs, stage.audience) || a - b);
     }
     const qFace = (stage) => qRanked(stage)[0] ?? -1;
-    const answerMatches = (pid, answers) => {
-      const identity = playerIdentity(pid);
-      return answers.some(answer => playerIdentity(answer) === identity);
+    const resolveAnswer = (pid, answers) => {
+      const identity = choiceIdentity(pid);
+      return answers.find(answer => choiceIdentity(answer) === identity) ?? null;
     };
+    const answerMatches = (pid, answers) => resolveAnswer(pid, answers) !== null;
     const nextHintTarget = (stage, targets = []) => {
-      const used = new Set(targets.filter(pid => pid !== null && pid !== undefined).map(playerIdentity));
-      return qRanked(stage).find(pid => !used.has(playerIdentity(pid))) ?? null;
+      const used = new Set(targets.filter(pid => pid !== null && pid !== undefined).map(choiceIdentity));
+      return qRanked(stage).find(pid => !used.has(choiceIdentity(pid))) ?? null;
     };
     const careerCacheKey = (pid, date, stage, clubs) =>
       `${date}|${stage}|${pid}|${clubs.slice().sort((a, b) => a - b).join(",")}`;
@@ -758,7 +771,7 @@
       qRecognitionWeight, qRecognisableBreadth, qUsableName, qEase,
       qEffective, effectiveAnswers: qEffective, qAnswerSet, answerSet: qAnswerSet,
       qComboInfo, qComboKey, qFamiliarAnswers, qEasyEligible, classifyStage, qRanked, rankedAnswers: qRanked,
-      qFace, face: qFace, playerIdentity, answerMatches, nextHintTarget, migrateState, restoreHistoryState,
+      qFace, face: qFace, playerIdentity, choiceIdentity, uniqueChoices, resolveAnswer, answerMatches, nextHintTarget, migrateState, restoreHistoryState,
       careerCacheKey, careerViewKey, clubCountry: leagueCC,
       resetCaches: () => comboCache.clear(),
       constants: { QEPOCH, QT, QCOMBO_DAYS, QMAX_ATTEMPTS, Q3ODDS, QEASY3ODDS, QMEDIUM3ODDS, QLEVELS,
