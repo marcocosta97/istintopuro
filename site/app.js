@@ -341,9 +341,30 @@ const ALIASES = {
   Q15789: ["bayern", "bayern monaco"], Q41420: ["borussia dortmund", "bvb"],
   Q7156: ["barca", "barcellona"], Q8687: ["athletic bilbao", "bilbao"],
   Q18741: ["spurs"], Q19500: ["wolves"], Q101959: ["gladbach"], Q51974: ["hsv"],
-  Q104770: ["cologne", "colonia"], Q185163: ["nizza"], Q19521: ["st etienne"],
+  Q104770: ["cologne", "colonia"], Q185163: ["nizza"],
   Q8760: ["la coruna", "deportivo la coruna"], Q12278: ["sporting gijon"],
+  Q704: ["ol"], Q132885: ["om"], Q19516: ["losc"],
+  Q19521: ["st etienne", "asse"],
 };
+
+// Conventional names that cannot be obtained by stripping legal-form words.
+// QIDs supply search aliases; source labels also identify names in career hints.
+const CLUB_NAMES = {
+  Q13385: ["S.P.A.L.", "Ars et Labor Ferrara Calcio", "Ars et Labor Ferrara",
+    "Società Polisportiva Ars et Labor", "SPAL", "S.P.A.L. 2013", "SPAL 2013"],
+  Q483020: ["PSG", "Paris Saint-Germain FC"],
+  Q18723: ["QPR", "Queens Park Rangers F.C."],
+  Q501693: ["ESTAC Troyes", "ES Troyes AC"],
+  Q191264: ["AZ", "AZ Alkmaar"],
+  Q11938: ["PSV", "PSV Eindhoven"],
+  Q2306468: ["ASA", "Agremiação Sportiva Arapiraquense"],
+  Q1024264: ["CRB", "Clube de Regatas Brasil"],
+  Q2946171: ["CEUB", "Centro de Ensino Unificado de Brasília Esporte Clube"],
+  Q1028545: ["Icasa", "Associação Desportiva Recreativa e Cultural Icasa"],
+};
+const SHORT_CLUB_NAMES = new Map(Object.values(CLUB_NAMES)
+  .flatMap(([short, ...names]) => [short, ...names].map(name => [name, short])));
+const clubAliases = (c) => [...(ALIASES[c[3]] || []), ...(CLUB_NAMES[c[3]] || [])];
 
 // Wikidata labels (club/player/team names) are publicly editable — never trust them in innerHTML
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -355,6 +376,9 @@ const norm = (s) => s.replace(/[đĐøØłŁæÆœŒþÞðÐßı]/g, (c) => TRAN
                      .normalize("NFD").replace(/[̀-ͯ]/g, "")
                      .toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 const initialsOf = (s) => norm(s).split(" ").filter(w => w.length > 2).map(w => w[0]).join("");
+// Dotted club acronyms answer to the same query as their compact spelling.
+// Keep this separate from player normalization and its initials matching rules.
+const clubNorm = (s) => norm(s.replace(/\b(?:[a-z]\.){2,}[a-z]?/gi, x => x.replace(/\./g, "")));
 // leading legal-form tokens (kin to the pipeline's STOP_TOKENS) don't count for
 // sorting or prefix ranking: "AC Milan" sorts under M and matches "mil" as a prefix
 const LEGAL = new Set(["fc", "afc", "cf", "cfc", "ac", "acf", "as", "ss", "ssc", "sc",
@@ -364,18 +388,21 @@ const LEGAL = new Set(["fc", "afc", "cf", "cfc", "ac", "acf", "as", "ss", "ssc",
   "centre", "esports", "alsace", "herault",
   "spa", "ssd", "tsv", "vfb", "vfl", "sv", "fsv", "bsc", "bc", "spvgg", "tsg"]);
 const sortName = (s) => {
-  const w = norm(s).split(" ");  // single letters/digits = abbreviation debris ("U.C.", "1.")
+  const short = SHORT_CLUB_NAMES.get(s);
+  const w = (short ? clubNorm(short) : norm(s)).split(" ");
   while (w.length > 1 && (LEGAL.has(w[0]) || w[0].length === 1 || /^\d+$/.test(w[0]))) w.shift();
   return w.join(" ");
 };
 // FM-style display name for the browse panel: drop legal tokens around the core
-// ("AC Milan" -> "Milan", "Bologna F.C. 1909" -> "Bologna"); search/chips keep full names
+// ("AC Milan" -> "Milan", "Bologna F.C. 1909" -> "Bologna").
+// Curated conventional names take precedence; full source names remain in titles.
 const isLegal = (word) => {
   const toks = norm(word).split(" ").filter(Boolean);
   return toks.length > 0 && toks.every(x => LEGAL.has(x) || x.length === 1 || /^\d+$/.test(x));
 };
 const KEEP = new Set(["Athletic Club", "Paris FC", "FC Lyon", "Hamburger SV", "Karlsruher SC"]);
 const coreClub = (name) => {
+  if (SHORT_CLUB_NAMES.has(name)) return SHORT_CLUB_NAMES.get(name);
   if (KEEP.has(name)) return name;  // stripping would maim or disambiguate these away
   const w = name.split(" ");
   let a = 0, b = w.length;
@@ -736,10 +763,10 @@ async function boot() {
   }
   DB.gkSet = new Set();  // goalkeepers ("gks" delta-encoded like postings): goal counts are unreliable, never shown
   { let acc = 0; for (const d of DB.gks || []) DB.gkSet.add(acc += d); }
-  DB.searchNames = DB.clubs.map(c => norm(c[0]));
+  DB.searchNames = DB.clubs.map(c => clubNorm(c[0]));
   DB.sortNames = DB.clubs.map(c => sortName(c[0]));
   DB.searchInitials = DB.clubs.map(c => initialsOf(c[0]));
-  DB.aliasNorm = DB.clubs.map(c => (ALIASES[c[3]] || []).map(norm));
+  DB.aliasNorm = DB.clubs.map(c => clubAliases(c).map(clubNorm));
   // space-padded copies so clubMatches can test word boundaries without building
   // a new string per club per keystroke
   const pad = (s) => " " + s + " ";
@@ -851,7 +878,7 @@ function clubTier(n, pad, nq, word) {
 }
 
 function clubMatches(q, rescue = true) {
-  const nq = norm(q);
+  const nq = clubNorm(q);
   if (!nq) return [];
   const toks = nq.split(" ");
   const word = " " + nq;
@@ -1274,7 +1301,7 @@ function renderSuggestions(ids, q = "") {
         li.innerHTML = `<span>${countryFlag(l[2])} ${hilite(l[0], nq)}</span><small>${esc(t.league)}</small>`;
       } else {
         const c = DB.clubs[id];
-        li.innerHTML = `<span>${countryFlag(c[1])} ${hilite(c[0], nq)}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
+        li.innerHTML = `<span title="${esc(c[0])}">${countryFlag(c[1])} ${hilite(SHORT_CLUB_NAMES.get(c[0]) || c[0], nq)}${defunct(c)}</span><small>${leagueNames(c[2])}</small>`;
       }
     } else {
       li.innerHTML = playerRow(id, nq);
