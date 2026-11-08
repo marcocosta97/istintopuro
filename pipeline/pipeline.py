@@ -2016,10 +2016,8 @@ def stage_popularity():
     subprocess.run([sys.executable, str(ROOT / "pipeline" / "popularity.py")], cwd=ROOT, check=True)
 
 def stage_recognition():
-    """Reuse the latest validated QID-keyed recognition inputs in normal releases."""
-    subprocess.run([sys.executable, str(ROOT / "pipeline" / "popularity.py"), "--publish",
-                    "--snapshot", str(DATA / "popularity" / "snapshot.json"),
-                    "--output", str(SITE_DATA / "recognition.json")], cwd=ROOT, check=True)
+    """Compile cached QID-keyed sources into the shared quiz index, without requests."""
+    subprocess.run(["node", str(ROOT / "scripts" / "quiz-recognition.js")], cwd=ROOT, check=True)
 
 STAGES = {"clubs": stage_clubs, "members": stage_members, "roster": stage_roster,
           "attrs": stage_attrs, "careers": stage_careers, "wp": stage_wp,

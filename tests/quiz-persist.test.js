@@ -7,6 +7,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 const { EPOCH, createRuntime, loadRuntime } = require("../scripts/quiz-schedule.js");
 const QuizCore = require("../site/quiz-core.js");
+const QuizRecognition = require("../site/quiz-recognition.js");
 
 const source = fs.readFileSync(path.join(__dirname, "../site/quiz.js"), "utf8");
 const schedule = JSON.parse(fs.readFileSync(path.join(__dirname, "../site/data/quiz-schedule.json"), "utf8"));
@@ -75,7 +76,7 @@ function loadQuiz(storage, today) {
   };
   const localStorage = memoryStorage({ quizSeries: EPOCH, ...storage });
   const context = vm.createContext({
-    CORE_DB: browser.index, DB: browser.index, QuizCore,
+    CORE_DB: browser.index, DB: browser.index, QuizCore, QuizRecognition,
     corePostings: browser.postings, postings: browser.postings,
     intersect: browser.intersect, coreLeagueCC: browser.leagueCC,
     coreClub: name => name, coreStature: () => 1,

@@ -33,6 +33,17 @@ class RefreshWorkflowTests(unittest.TestCase):
         self.assertIn("actions: read", text)
         self.assertNotIn("pipeline.py popularity", text)
 
+    def test_club_sources_share_bounded_maintenance_and_do_not_run_during_releases(self):
+        maintenance = (ROOT / ".github/workflows/refresh-popularity.yml").read_text()
+        self.assertIn("scripts/club-recognition.py --max-requests 600 --max-seconds 600", maintenance)
+        self.assertIn("steps.club_restore.outcome == 'success'", maintenance)
+        for kind in ("checkpoint", "snapshot"):
+            self.assertIn(f"quiz-club-recognition-{kind}-v1-", maintenance)
+            self.assertIn(f"popularity-artifacts.py {kind} --scope clubs", maintenance)
+        release = WORKFLOW.read_text()
+        self.assertIn("popularity-artifacts.py snapshot --scope clubs", release)
+        self.assertNotIn("club-recognition.py", release)
+
     def test_deployment_uses_the_refreshed_head_as_its_cache_version(self):
         text = WORKFLOW.read_text()
 

@@ -9,6 +9,7 @@ let qCoreApi = null;
 const qCore = () => qCoreApi ||= QuizCore.createQuizCore({
   DB: CORE_DB, postings: corePostings, intersect,
   leagueCC: coreLeagueCC, coreClub,
+  recognition: QuizRecognition.createAdapter(CORE_DB, QuizCore.EASY_QIDS),
 });
 const qFmt = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

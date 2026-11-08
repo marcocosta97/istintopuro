@@ -63,6 +63,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/popularity-artifacts.py snapshot
 
+      - name: Restore optional club recognition snapshot
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/popularity-artifacts.py snapshot --scope clubs
+
       # the validate stage rejects the candidate if the new index is malformed or
       # shrank >3% vs the deployed one; the recovery step below retains the baseline
       - name: Refresh dataset from Wikidata + Wikipedia (revision-aware after first run)

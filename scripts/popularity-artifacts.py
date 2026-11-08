@@ -19,9 +19,15 @@ WORKFLOW = "refresh-popularity.yml"
 FILES = {"checkpoint": "state.jsonl", "snapshot": "snapshot.json"}
 
 
-def validate_file(path, kind):
+def validate_file(path, kind, scope="players"):
     if kind == "snapshot":
-        P.validate_snapshot(json.loads(path.read_text()))
+        saved = json.loads(path.read_text())
+        if scope == "clubs":
+            if saved.get("kind") != "club-recognition-sources" or not isinstance(saved.get("clubs"), dict):
+                raise ValueError("Invalid club recognition snapshot")
+            saved = {**saved, "kind": "recognition-snapshot", "players": saved["clubs"],
+                     "candidate_count": len(saved["clubs"])}
+        P.validate_snapshot(saved)
     else:
         journal = P.Journal(path)
         for qid, record in journal.records.items():
@@ -30,7 +36,7 @@ def validate_file(path, kind):
                 raise ValueError("Invalid recognition checkpoint record")
 
 
-def restore(session, repo, branch, kind, destination):
+def restore(session, repo, branch, kind, destination, scope="players"):
     api = "https://api.github.com"
     base = f"{api}/repos/{repo}/actions"
     invalid = False
@@ -51,7 +57,7 @@ def restore(session, repo, branch, kind, destination):
             response = session.get(f"{base}/runs/{run['id']}/artifacts", params={"per_page": 100}, timeout=30)
             response.raise_for_status()
             artifacts = sorted(response.json()["artifacts"], key=lambda a: a["created_at"], reverse=True)
-            prefix = f"quiz-recognition-{kind}-v1-"
+            prefix = f"quiz-{'club-' if scope == 'clubs' else ''}recognition-{kind}-v1-"
             for artifact in artifacts:
                 if artifact.get("expired") or not artifact["name"].startswith(prefix):
                     continue
@@ -66,7 +72,7 @@ def restore(session, repo, branch, kind, destination):
                     with tempfile.TemporaryDirectory() as tmp:
                         candidate = Path(tmp) / FILES[kind]
                         candidate.write_bytes(contents)
-                        validate_file(candidate, kind)
+                        validate_file(candidate, kind, scope)
                         destination.parent.mkdir(parents=True, exist_ok=True)
                         staged = destination.with_suffix(destination.suffix + ".tmp")
                         staged.write_bytes(candidate.read_bytes())
@@ -89,20 +95,22 @@ def restore(session, repo, branch, kind, destination):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("kind", choices=FILES)
+    parser.add_argument("--scope", choices=("players", "clubs"), default="players")
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY"))
     parser.add_argument("--branch", default=os.environ.get("GITHUB_REF_NAME"))
     parser.add_argument("--destination", type=Path)
     args = parser.parse_args(argv)
     if not args.repo or not args.branch:
         parser.error("--repo and --branch are required outside GitHub Actions")
-    destination = args.destination or ROOT / "data/popularity" / FILES[args.kind]
+    directory = "data/club-recognition" if args.scope == "clubs" else "data/popularity"
+    destination = args.destination or ROOT / directory / FILES[args.kind]
     with requests.Session() as session:
         session.headers.update({"Accept": "application/vnd.github+json", "User-Agent": P.UA,
                                 "X-GitHub-Api-Version": "2022-11-28"})
         token = os.environ.get("GH_TOKEN")
         if token:
             session.headers["Authorization"] = f"Bearer {token}"
-        restore(session, args.repo, args.branch, args.kind, destination)
+        restore(session, args.repo, args.branch, args.kind, destination, args.scope)
     return 0
 
 

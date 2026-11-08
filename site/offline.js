@@ -5,7 +5,7 @@
 })(typeof globalThis === "object" ? globalThis : this, function () {
   "use strict";
   function coreFiles(index, version) {
-    return ["./", ...["packs.js", "offline.js", "app.js", "quiz-core.js", "quiz.js", "style.css", "manifest.webmanifest"]
+    return ["./", ...["packs.js", "offline.js", "app.js", "quiz-recognition.js", "quiz-core.js", "quiz.js", "style.css", "manifest.webmanifest"]
       .map(file => `./${file}?v=${version}`),
     "./fonts/barlow-semi-condensed-latin-600-normal.woff2", "./fonts/barlow-semi-condensed-latin-700-italic.woff2",
     "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png",

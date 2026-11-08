@@ -64,7 +64,7 @@ must not require updating a hard-coded score every week.
 ```
 python3 pipeline/pipeline.py            # full fetch first time; later runs reuse unchanged source revisions
 FULL_REFRESH=1 python3 pipeline/pipeline.py  # ignore incremental state and audit every source record
-python3 pipeline/pipeline.py build      # rebuild site/data from checkpoints
+python3 pipeline/pipeline.py build recognition  # rebuild data and attach cached recognition
 python3 pipeline/pipeline.py quiz       # regenerate/validate the static quiz horizon
 node scripts/quiz-schedule.js --audit   # deterministic 730-day balance audit
 ```
@@ -201,18 +201,27 @@ run retains the previous snapshot while still saving checkpoint progress. The
 snapshot summary describes retained observations; the audit summary describes
 the latest attempts. Source timestamps always retain the actual observation time.
 
-The Monday data refresh restores this snapshot as an optional step. The normal
-pipeline's `recognition` stage reuses it as `site/data/recognition.json` without
-Wikimedia requests. Missing or invalid input retains the published snapshot, and
-an older artifact cannot replace a newer published snapshot. Snapshot restoration
-never delays the release waiting for the collection workflow. Subsequent data
-validation or release failure uses the existing dataset recovery mechanism.
+The same Sunday workflow also maintains core club observations in
+`data/club-recognition/`, with its own checkpoint and snapshot artifacts. It uses
+the same 90-day TTL and a separate budget of 600 requests or 600 seconds. A failed
+artifact restore does not start a new club backfill. Partial progress survives
+collection errors.
 
-These remain calibration inputs: quiz scoring, accepted answers and the published
-calendar use the existing rules. The browser does not fetch this sidecar. Audit
-coverage and recognised-answer breadth before choosing weights or thresholds;
-language bias and recall of a player's particular club spells remain separate
-concerns.
+The Monday data refresh restores both snapshots as optional steps. The normal
+pipeline's `recognition` stage runs `scripts/quiz-recognition.js` without Wikimedia
+requests. It compiles compact player features and club signals into the core
+index, retaining a QID-keyed copy in `site/data/quiz-recognition.json` for the next
+build. Missing snapshots retain earlier usable compiled observations until their
+90-day source TTL expires; invalid source inputs fail the candidate and use the
+existing dataset recovery mechanism. An incomplete update cannot replace a
+complete observation. Snapshot restoration never waits for a collection run.
+
+Browser and calendar generation share the same frozen inputs and implementation.
+Popularity adjusts the career prior in both directions; the weakest clue's
+measured recall applies once to the bridge. Accepted guesses, hint ranking and
+representative players keep their career-based rules. Already distributed quiz
+dates remain locked. The [generator guide](quiz-generator.md) describes weights,
+neutral missing data and further calibration tooling.
 
 ## Offline play
 

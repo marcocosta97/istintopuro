@@ -7,6 +7,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 const { shiftDate, EPOCH, loadRuntime, createRuntime } = require("../scripts/quiz-schedule.js");
 const QuizCore = require("../site/quiz-core.js");
+const QuizRecognition = require("../site/quiz-recognition.js");
 
 const source = fs.readFileSync(path.join(__dirname, "../site/quiz.js"), "utf8");
 
@@ -21,7 +22,7 @@ function runtime(days) {
       return { date, stages: [1, 2, 3, 4] };
     },
   };
-  const context = vm.createContext({ CORE_DB: { quizSchedule: days === null ? null : { days } },
+  const context = vm.createContext({ QuizRecognition, CORE_DB: { quizSchedule: days === null ? null : { days } },
     QuizCore: { createQuizCore: () => core }, corePostings() {}, intersect() {},
     coreStature() {}, coreLeagueCC() {}, coreClub() {}, MARQUEE: new Set(),
     localStorage: { quizSeries: EPOCH },
@@ -78,7 +79,7 @@ test("browser fallback agrees with the writer after locked published history", (
   const expected = node.core.serializeStages(node.core.generate(date, { previousDays }).stages);
   const browser = createRuntime(structuredClone(node.index));
   browser.index.quizSchedule = asset;
-  const context = vm.createContext({ CORE_DB: browser.index, QuizCore,
+  const context = vm.createContext({ CORE_DB: browser.index, QuizCore, QuizRecognition,
     corePostings: browser.postings, intersect: browser.intersect,
     coreLeagueCC: browser.leagueCC, coreClub: name => name,
     localStorage: { quizSeries: EPOCH, quizHistory: '{"days":{}}' },
@@ -100,7 +101,7 @@ test("runtime preserves locked levels but repairs invalid future classifications
   [corrupted.days[date][0], corrupted.days[date][1]] = [corrupted.days[date][1], corrupted.days[date][0]];
   const browser = createRuntime(structuredClone(node.index));
   browser.index.quizSchedule = corrupted;
-  const context = vm.createContext({ CORE_DB: browser.index, QuizCore,
+  const context = vm.createContext({ CORE_DB: browser.index, QuizCore, QuizRecognition,
     corePostings: browser.postings, intersect: browser.intersect,
     coreLeagueCC: browser.leagueCC, coreClub: name => name,
     localStorage: { quizSeries: EPOCH },
@@ -113,7 +114,7 @@ test("runtime preserves locked levels but repairs invalid future classifications
 test("browser and schedule use the same recognition model independently of solver ranking", () => {
   const node = loadRuntime();
   const browser = createRuntime(structuredClone(node.index));
-  const context = vm.createContext({ CORE_DB: browser.index, QuizCore,
+  const context = vm.createContext({ CORE_DB: browser.index, QuizCore, QuizRecognition,
     corePostings: browser.postings, intersect: browser.intersect,
     coreLeagueCC: browser.leagueCC, coreClub: name => name,
     MARQUEE: new Set(), coreStature() { throw new Error("solver ranking leaked into quiz"); },

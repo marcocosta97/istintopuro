@@ -16,7 +16,7 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -32,7 +32,35 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/popularity-artifacts.py snapshot
       - name: Collect a bounded portion of the core quiz candidate pool
+        id: players
         run: python3 pipeline/pipeline.py popularity
+      - name: Restore club source checkpoint and snapshot
+        id: club_restore
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/popularity-artifacts.py checkpoint --scope clubs
+          python3 scripts/popularity-artifacts.py snapshot --scope clubs
+      - name: Collect cached club recognition sources
+        if: always() && steps.club_restore.outcome == 'success'
+        run: python3 scripts/club-recognition.py --max-requests 600 --max-seconds 600
+      - name: Preserve club checkpoint
+        if: always() && hashFiles('data/club-recognition/state.jsonl') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: quiz-club-recognition-checkpoint-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/club-recognition/state.jsonl
+          compression-level: 6
+          retention-days: 90
+      - name: Preserve club snapshot
+        if: always() && hashFiles('data/club-recognition/snapshot.json') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: quiz-club-recognition-snapshot-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/club-recognition/snapshot.json
+          compression-level: 6
+          retention-days: 90
       - name: Preserve source results, including partial progress
         if: always() && hashFiles('data/popularity/state.jsonl') != ''
         uses: actions/upload-artifact@v7

@@ -126,6 +126,22 @@ class ArtifactRestoreTests(unittest.TestCase):
         A.P.publish_snapshot(self.destination, published)
         self.assertEqual(json.loads(published.read_text())["players"], snapshot["players"])
 
+    def test_club_artifacts_are_isolated_and_validate_their_own_snapshot_schema(self):
+        journal = A.P.Journal(Path(self.tmp.name) / "clubs.jsonl")
+        report = A.P.audit({"Q1": {"name": "Club", "club_count": 1}}, journal,
+                           A.P.month_window(), "2026-01-01", 0, 0, True)
+        saved = A.P.make_snapshot(report)
+        saved["kind"] = "club-recognition-sources"
+        saved["clubs"] = saved.pop("players")
+        club_artifact = {**artifact(kind="snapshot"), "name": "quiz-club-recognition-snapshot-v1-10-1"}
+        self.session.get.side_effect = [response({"workflow_runs": [run()]}),
+            response({"artifacts": [artifact(kind="snapshot"), club_artifact]}),
+            response(content=archive(json.dumps(saved), "snapshot.json"))]
+        self.assertTrue(A.restore(self.session, "owner/repo", "master", "snapshot", self.destination, "clubs"))
+        self.assertEqual(json.loads(self.destination.read_text())["clubs"], saved["clubs"])
+        with self.assertRaises(ValueError):
+            A.validate_file(self.destination, "snapshot", "players")
+
 
 if __name__ == "__main__":
     unittest.main()
