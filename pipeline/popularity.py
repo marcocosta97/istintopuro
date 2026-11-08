@@ -51,7 +51,10 @@ def fresh(signal, days=REFRESH_DAYS):
 
 def retry_ready(record, stage):
     age = age_days(record.get(stage + "_error", {}).get("at"))
-    return age is None or age >= RETRY_DAYS
+    # A failed coverage batch reflects the shared API, not 50 broken players.
+    # Let a later maintenance run retry it without quarantining them for a week.
+    retry_days = 15 / (24 * 60) if stage == "coverage" else RETRY_DAYS
+    return age is None or age >= retry_days
 
 
 def month_window(through=None, today=None):
@@ -277,8 +280,11 @@ def collect(players, journal, client, months, refresh_days=REFRESH_DAYS):
         for start in range(0, len(stale), 50):
             batch = stale[start:start + 50]
             try:
+                # These cacheable entity reads do not use WDQS. Its replication
+                # lag also feeds maxlag, which can reject healthy sitelink reads.
                 payload = client.get(WD_API, {"action": "wbgetentities", "ids": "|".join(batch),
-                                             "props": "sitelinks/urls", "format": "json", "maxlag": 5})
+                                             "props": "sitelinks/urls", "format": "json",
+                                             "maxage": 3600, "smaxage": 3600})
                 # Validate the whole batch before checkpointing any of it.
                 parsed = {qid: language_coverage(payload["entities"][qid]) for qid in batch}
                 for qid, coverage in parsed.items():

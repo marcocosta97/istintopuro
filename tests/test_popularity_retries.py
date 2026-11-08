@@ -33,6 +33,45 @@ class PopularityRetryTests(unittest.TestCase):
         self.addCleanup(client.session.close)
         return client
 
+    def test_entity_reads_progress_while_query_service_replication_is_lagged(self):
+        client = self.client()
+        players = {f"Q{i}": {"name": f"Player {i}", "club_count": 2} for i in range(1, 52)}
+        entities = {qid: {"sitelinks": {"itwiki": {
+            "title": "Giocatore", "url": "https://it.wikipedia.org/wiki/Giocatore"}}} for qid in players}
+
+        def wikidata(url, params, timeout):
+            self.assertEqual(url, P.WD_API)
+            if "maxlag" in params:
+                return response({"error": {"code": "maxlag", "type": "wikibase-queryservice",
+                                          "lag": 11.98, "queryserviceLag": 719}})
+            self.assertLessEqual(len(params["ids"].split("|")), 50)
+            self.assertEqual(params["props"], "sitelinks/urls")
+            self.assertEqual((params["maxage"], params["smaxage"]), (3600, 3600))
+            return response({"entities": {qid: entities[qid] for qid in params["ids"].split("|")}})
+
+        with tempfile.TemporaryDirectory() as temp:
+            journal = P.Journal(Path(temp) / "state.jsonl")
+            journal.put("Q1", {"coverage_error": {
+                "at": "2026-11-08T12:37:21+00:00", "type": "ValueError",
+                "message": 'Wikimedia API error: {"code": "maxlag"}'}})
+            with patch.object(client.session, "get", side_effect=wikidata) as get, \
+                    patch.object(P.time, "sleep"), \
+                    patch.object(P, "utc_now", return_value="2026-11-08T13:00:00+00:00"):
+                self.assertEqual(P.collect(players, journal, client, P.month_window()), (0, False))
+            self.assertEqual(get.call_count, 2)
+            self.assertEqual(len(journal.records), 51)
+            self.assertNotIn("coverage_error", journal.records["Q1"])
+            self.assertTrue(all(row["coverage"]["count"] == 1 for row in journal.records.values()))
+
+    def test_shared_api_failures_retry_after_fifteen_minutes_but_articles_keep_backoff(self):
+        record = {stage + "_error": {"at": "2026-11-08T12:00:00+00:00"}
+                  for stage in ("coverage", "views")}
+        with patch.object(P, "utc_now", return_value="2026-11-08T12:14:59+00:00"):
+            self.assertFalse(P.retry_ready(record, "coverage"))
+        with patch.object(P, "utc_now", return_value="2026-11-08T12:15:00+00:00"):
+            self.assertTrue(P.retry_ready(record, "coverage"))
+            self.assertFalse(P.retry_ready(record, "views"))
+
     def test_http_200_maxlag_can_recover_after_three_failed_attempts(self):
         client = self.client()
         with patch.object(client.session, "get", side_effect=[

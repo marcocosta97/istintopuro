@@ -143,7 +143,9 @@ source timestamps. A new calendar month does not expire fresh observations:
 each player retains their own measured readership window and `through` date.
 All newly needed months are fetched in one request per player, retaining the
 cached overlap. Partial and unavailable responses also wait for the refresh
-interval; failed requests back off for seven days. No missing bucket is treated
+interval; failed article requests back off for seven days. Failed language-coverage
+batches retry after 15 minutes, since an API outage affects the whole batch rather
+than individual players. No missing bucket is treated
 as zero, and a newly created article need not have a complete history yet.
 
 `data/popularity/state.jsonl` journals source results before the next request.
@@ -168,6 +170,10 @@ requested 90 days. The collector does not commit or deploy.
 Language coverage comes from Wikidata's
 [`wbgetentities` API](https://www.mediawiki.org/wiki/Wikibase/API), counting only
 Wikipedia editions and retaining their language codes and English article title.
+These serial, 50-entity reads allow one hour of HTTP caching and omit `maxlag`:
+Wikidata includes query-service replication lag in that gate, but sitelink reads
+do not depend on the query service. HTTP throttling, `Retry-After`, exponential
+backoff and the per-run request/time budgets still apply.
 A missing entity has an unknown count, distinct from an existing entity with no
 Wikipedia editions. `period` records the UTC month of observation; it does not
 control expiry. A failed refresh retains the prior observation with its original
