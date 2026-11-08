@@ -119,4 +119,4 @@ if (require.main === module) {
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }
 
-module.exports = { buildReport, formatMarkdown, main };
+module.exports = { buildReport, formatMarkdown, main, PROBES };

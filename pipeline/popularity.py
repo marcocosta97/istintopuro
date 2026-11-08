@@ -11,6 +11,7 @@ import copy
 from collections import Counter
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
+import hashlib
 import json
 from pathlib import Path
 import statistics
@@ -493,12 +494,25 @@ def positive_int(value):
     return number
 
 
+def sample_players(source, site_data, players):
+    sample = json.loads(source.read_text())
+    rows = sample.get("players")
+    if (sample.get("version") != 1 or sample.get("kind") != "recognition-calibration-sample"
+            or not isinstance(rows, list) or not rows
+            or sample.get("indexFileDigest") != hashlib.sha256((site_data / "index.json").read_bytes()).hexdigest()):
+        raise ValueError("Calibration sample is invalid or belongs to a different core index")
+    qids = [row.get("qid") for row in rows if isinstance(row, dict)]
+    if len(qids) != len(rows) or len(set(qids)) != len(qids) or any(qid not in players for qid in qids):
+        raise ValueError("Calibration sample must contain unique core candidate QIDs")
+    return {qid: players[qid] for qid in qids}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site-data", type=Path, default=ROOT / "site/data")
     parser.add_argument("--state", type=Path, default=ROOT / "data/popularity/state.jsonl")
-    parser.add_argument("--output", type=Path, default=ROOT / "data/popularity/metrics.json")
-    parser.add_argument("--snapshot", type=Path, default=ROOT / "data/popularity/snapshot.json")
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--snapshot", type=Path)
     parser.add_argument("--publish", action="store_true", help="reuse a validated snapshot at --output, without collection")
     parser.add_argument("--refresh-days", type=positive_int, default=REFRESH_DAYS)
     parser.add_argument("--through", help="last complete month, YYYY-MM (default: previous UTC month)")
@@ -506,12 +520,24 @@ def main(argv=None):
     parser.add_argument("--max-seconds", type=positive_int, default=3000)
     parser.add_argument("--limit", type=positive_int, help="collect a deterministic subset for a smoke test")
     parser.add_argument("--qids", help="comma-separated core candidate QIDs for a targeted smoke test")
+    parser.add_argument("--sample", type=Path, help="collect a frozen calibration sample; outputs stay separate from release snapshots")
     args = parser.parse_args(argv)
+    if args.sample and (args.qids or args.limit or args.publish):
+        parser.error("--sample cannot be combined with --qids, --limit or --publish")
+    directory = ROOT / ("data/recognition-calibration" if args.sample else "data/popularity")
+    args.output = args.output or directory / "metrics.json"
+    args.snapshot = args.snapshot or directory / "snapshot.json"
+    if args.sample and (args.snapshot.resolve() == (ROOT / "data/popularity/snapshot.json").resolve()
+                        or (ROOT / "site").resolve() in args.snapshot.resolve().parents
+                        or (ROOT / "site").resolve() in args.output.resolve().parents):
+        parser.error("calibration outputs must be separate from production snapshots and published assets")
     if args.publish:
         publish_snapshot(args.snapshot, args.output)
         return 0
     months = month_window(args.through)
     built, players = candidates(args.site_data)
+    if args.sample:
+        players = sample_players(args.sample, args.site_data, players)
     if args.qids:
         wanted = set(args.qids.split(","))
         if wanted - players.keys():
@@ -527,9 +553,12 @@ def main(argv=None):
     finally:
         journal.compact()
         report = audit(players, journal, months, built, client.count, errors, stopped, args.refresh_days)
+        if args.sample:
+            report["scope"] = "frozen calibration sample, not the complete quiz candidate pool"
+            report["sample_digest"] = hashlib.sha256(args.sample.read_bytes()).hexdigest()
         atomic_json(args.output, report)
         client.session.close()
-    if not errors and not args.qids and not args.limit:
+    if (args.sample or not errors) and not args.qids and not args.limit:
         previous = validate_snapshot(json.loads(args.snapshot.read_text())) if args.snapshot.exists() else None
         atomic_json(args.snapshot, make_snapshot(report, previous), compact=True)
     print(f"popularity: {len(players)} candidates; {client.count} requests; "

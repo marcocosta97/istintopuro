@@ -1,0 +1,12 @@
+{
+  "description": "Synthetic observations for behaviour tests, not empirical player measurements or calibrated thresholds.",
+  "asOf": "2026-11-04T20:00:00Z",
+  "through": "2026-10",
+  "fetchedAt": "2026-11-04T19:00:00Z",
+  "cases": {
+    "broad": { "languages": ["en", "it", "es", "fr", "de", "ro", "hi"], "monthlyViews": 100000 },
+    "local": { "languages": ["en", "it"], "monthlyViews": 100 },
+    "zero": { "languages": ["en", "it"], "monthlyViews": 0 },
+    "old": { "languages": ["en", "it", "es", "fr", "de"], "monthlyViews": 100000, "fetchedAt": "2026-06-01T19:00:00Z" }
+  }
+}

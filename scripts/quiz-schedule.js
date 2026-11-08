@@ -64,7 +64,7 @@ function intersect(lists) {
   return acc;
 }
 
-function createRuntime(index) {
+function createRuntime(index, { recognition, stature } = {}) {
   const coreModule = require(CORE_PATH);
   if (typeof coreModule.createQuizCore !== "function") {
     throw new Error("site/quiz-core.js does not export createQuizCore");
@@ -86,8 +86,10 @@ function createRuntime(index) {
     return club[5] >= 0 ? index.leagues[club[5]][2] : club[1];
   };
   const byQid = new Map(index.clubs.map((club, i) => [club[3], i]));
+  if (recognition === undefined)
+    recognition = require("../site/quiz-recognition.js").createAdapter(index, coreModule.EASY_QIDS);
   const core = coreModule.createQuizCore({
-    DB: index, postings, intersect, marquee, leagueCC,
+    DB: index, postings, intersect, marquee, leagueCC, recognition, stature,
     coreClub: name => name,
   });
   return { index, core, postings, intersect, leagueCC, byQid };

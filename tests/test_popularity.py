@@ -1,4 +1,5 @@
 import copy
+import hashlib
 from datetime import date
 import importlib.util
 import json
@@ -322,6 +323,49 @@ class PopularityTests(unittest.TestCase):
         (root / "career/0.json").write_text(json.dumps({"0": [42, []], "1": [43, []], "2": [44, []]}))
         _, selected = P.candidates(root)
         self.assertEqual(set(selected), {"Q42", "Q44"})
+
+    def test_frozen_sample_rejects_other_datasets_and_duplicate_or_unavailable_candidates(self):
+        root = Path(self.temp.name) / "site"
+        root.mkdir()
+        index = root / "index.json"
+        index.write_text('{"built":"2025-12-01"}')
+        source = Path(self.temp.name) / "sample.json"
+        sample = {"version": 1, "kind": "recognition-calibration-sample",
+                  "indexFileDigest": hashlib.sha256(index.read_bytes()).hexdigest(), "players": [{"qid": "Q1"}]}
+        source.write_text(json.dumps(sample))
+        self.assertEqual(P.sample_players(source, root, PLAYERS), PLAYERS)
+        for qids in (["Q1", "Q1"], ["Q2"]):
+            source.write_text(json.dumps({**sample, "players": [{"qid": qid} for qid in qids]}))
+            with self.assertRaisesRegex(ValueError, "unique core candidate"):
+                P.sample_players(source, root, PLAYERS)
+        source.write_text(json.dumps(sample))
+        index.write_text('{"built":"2025-12-02"}')
+        with self.assertRaisesRegex(ValueError, "different core index"):
+            P.sample_players(source, root, PLAYERS)
+
+    def test_sample_collection_reuses_checkpoint_and_writes_an_isolated_snapshot(self):
+        self.seed()
+        root = Path(self.temp.name) / "site"
+        root.mkdir()
+        (root / "index.json").write_text('{}')
+        source = Path(self.temp.name) / "sample.json"
+        source.write_text(json.dumps({"version": 1, "kind": "recognition-calibration-sample",
+                          "indexFileDigest": hashlib.sha256((root / "index.json").read_bytes()).hexdigest(),
+                          "players": [{"qid": "Q1"}]}))
+        output = Path(self.temp.name) / "sample-metrics.json"
+        snapshot = Path(self.temp.name) / "sample-snapshot.json"
+        args = ["--sample", str(source), "--site-data", str(root), "--state", str(self.path),
+                "--output", str(output), "--snapshot", str(snapshot), "--through", "2025-12"]
+        with patch.object(P, "candidates", return_value=("2025-12-01", PLAYERS)), \
+                patch.object(requests.Session, "get") as get:
+            self.assertEqual(P.main(args), 0)
+        get.assert_not_called()
+        saved = P.validate_snapshot(json.loads(snapshot.read_text()))
+        self.assertEqual(set(saved["players"]), {"Q1"})
+        self.assertIn("frozen calibration sample", saved["scope"])
+        self.assertEqual(saved["sample_digest"], hashlib.sha256(source.read_bytes()).hexdigest())
+        with self.assertRaises(SystemExit):
+            P.main(["--sample", str(source), "--snapshot", str(ROOT / "data/popularity/snapshot.json")])
 
     def test_cli_writes_a_partial_audit_and_resumes_it_to_completion(self):
         output = Path(self.temp.name) / "metrics.json"

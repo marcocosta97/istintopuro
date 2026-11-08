@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "kind": "recognition-qualitative-feedback",
+  "source": "Explicit user feedback during model review; lower bounds, not exact difficulty labels",
+  "items": [
+    { "qids": ["Q1153687", "Q483020"], "minimumDifficulty": "hard", "reason": "Remembering the connection with AlzanoCene requires specialist recall despite the player's global fame." },
+    { "qids": ["Q19573", "Q18736"], "minimumDifficulty": "hard", "reason": "Bury's historical archive and a famous player do not establish a familiar contemporary clue." }
+  ]
+}
