@@ -209,6 +209,9 @@ test("career cache keys isolate stages, reuse club order, and identify stale vie
 test("search tiers preserve recognition floors for pairs and triples", () => {
   const { core } = runtime();
   const { QEASY, QEASY3, QMEDIUM, QMEDIUM3, QHARD, QHARD3, QIMPOSSIBLE, QIMP3, QBOUNDARIES: b } = core.constants;
+  for (const tier of [...QEASY, ...QEASY3, ...QMEDIUM, ...QMEDIUM3, ...QHARD, ...QHARD3, ...QIMPOSSIBLE, ...QIMP3]) {
+    assert.deepEqual(tier.size, [1, Infinity], "search must not reintroduce raw answer-count exclusions");
+  }
   for (const tier of [...QEASY, ...QEASY3]) {
     assert.ok(tier.ease[0] >= b.easy);
     assert.ok(tier.p.every(pool => pool === "easy"));
@@ -223,6 +226,16 @@ test("search tiers preserve recognition floors for pairs and triples", () => {
   for (const tier of [...QIMPOSSIBLE, ...QIMP3]) {
     assert.ok(tier.ease[0] >= 0 && tier.ease[1] <= b.hard);
   }
+});
+
+test("every usable core pair has a difficulty and a matching normal search tier", { timeout: 30_000 }, () => {
+  const { analyse } = require("../scripts/quiz-eligibility.js");
+  const report = analyse(runtime());
+  assert.ok(report.valid > 0);
+  assert.equal(report.levels.unclassified.classified, 0);
+  assert.equal(report.unreachable, 0);
+  for (const level of ["easy", "medium", "hard", "impossible"])
+    assert.equal(report.levels[level].reachable, report.levels[level].classified, level);
 });
 
 test("generated and restored slates agree on audience, face and difficulty", () => {
@@ -240,7 +253,7 @@ test("generated and restored slates agree on audience, face and difficulty", () 
   assert.equal(core.validateEntry(rows, { requireBands: true }).ok, true);
   const localEasy = ["Q18739", "Q18662"]; // Sunderland / Cardiff
   const invalid = [localEasy, ...rows.slice(1)];
-  assert.ok(core.validateEntry(invalid, { requireBands: true }).errors.some(error => error.includes("globally familiar")));
+  assert.ok(core.validateEntry(invalid, { requireBands: true }).errors.some(error => error.includes("known clubs")));
 });
 
 test("history older than the cooldown influences novelty but does not ban a combination", () => {

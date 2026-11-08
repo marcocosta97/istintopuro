@@ -151,7 +151,7 @@ test("adding a third required club cannot inflate ease or recognised breadth", (
   }
 });
 
-test("classification recovers high scores without promoting single routes or unknown clues", () => {
+test("classification admits an obvious single route and assigns unfamiliar clues to a valid harder tier", () => {
   const { core } = runtime();
   const resolve = qids => core.stagesFromQids([qids])[0];
   const easy = resolve(["Q1543", "Q2052"]); // Milan / Fiorentina
@@ -163,16 +163,16 @@ test("classification recovers high scores without promoting single routes or unk
   assert.equal(core.classifyStage(easy), 0);
   assert.ok(medium.ease >= core.constants.QBOUNDARIES.easy);
   assert.equal(core.qFamiliarAnswers(medium.clubs, medium.effective).length, 1);
-  assert.equal(core.classifyStage(medium), 1);
+  assert.equal(core.classifyStage(medium), 0);
   assert.equal(core.qFamiliarAnswers(triple.clubs, triple.effective).length, 0);
   assert.equal(core.classifyStage(triple), 2);
   assert.equal(core.qFamiliarAnswers(mediumTriple.clubs, mediumTriple.effective).length, 1);
   assert.equal(core.classifyStage(mediumTriple), 1);
   assert.ok(cameo.ease >= core.constants.QBOUNDARIES.medium);
-  assert.equal(core.classifyStage(cameo), 2);
+  assert.equal(core.classifyStage(cameo), 1);
   assert.ok(unknownClue);
   assert.ok(core.qFamiliarAnswers(unknownClue.clubs, unknownClue.effective).length > 0);
-  assert.equal(core.classifyStage(unknownClue), 2);
+  assert.equal(core.classifyStage(unknownClue), 1);
   for (const stage of [easy, medium, triple, mediumTriple, cameo, unknownClue]) {
     assert.equal(core.stageDiagnostics(stage).level, core.classifyStage(stage));
     assert.equal(core.qComboInfo(stage.clubs).level, core.classifyStage(stage));
@@ -210,10 +210,10 @@ test("a general fan's easy excludes the rejected domestic week and admits obviou
     assert.ok(core.qFamiliarAnswers(stage.clubs, stage.effective).length >= 2);
   }
   const seregno = DB.byQid.get("Q1637277");
-  assert.equal(core.qPools().field.includes(seregno), false);
+  assert.equal(core.qPools().any.includes(seregno), true, "lower-division history is not an eligibility veto");
 });
 
-test("a single familiar bridge cannot bypass the easy familiarity requirement", () => {
+test("a merely familiar single bridge cannot bypass the stronger solo easy requirement", () => {
   const { core } = runtime();
   const [stage] = core.stagesFromQids([["Q1543", "Q9616"]]);
   const pid = core.qFamiliarAnswers(stage.clubs, stage.effective)[0];

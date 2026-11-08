@@ -21,17 +21,18 @@
     "Q8682", "Q7156", "Q8701", "Q15789", "Q41420", "Q483020",
     "Q18656", "Q50602", "Q1130849", "Q9617", "Q9616", "Q18741",
   ];
-  // Clue recognition can widen without widening the player-exposure baseline.
-  const EASY_QIDS = MARQUEE_QIDS;
   const KNOWN_LEGACY_QIDS = ["Q19521", "Q19446", "Q8760", "Q172476", "Q19481", "Q2693", "Q1457"];
+  // Familiar historic clues survive relegation without widening the player-exposure prior.
+  const EASY_QIDS = [...new Set([...MARQUEE_QIDS, ...KNOWN_LEGACY_QIDS])];
   const QLEVELS = ["easy", "medium", "hard", "impossible"];
+  const QELIGIBILITY_VERSION = 2;
 
   const QEPOCH = Date.UTC(2026, 7, 21);
   const QT = 240;
   const QCOMBO_DAYS = 30;
   const QMAX_ATTEMPTS = 64;
   const Q3ODDS = 0.5;
-  // Easy has few triples with multiple familiar answers; keep them occasional.
+  // Keep easy triples occasional even when one very obvious route is sufficient.
   const QEASY3ODDS = 0.15;
   const QMEDIUM3ODDS = 0.3;
   const QBRIDGE_FULL_APPS = 25;
@@ -40,50 +41,31 @@
   const QBREADTH_FULL_FAME = 350;
   const QFACE_GUARD_DAYS = 14;
   const QCLUB_SOFT_DAYS = 7;
-  // The impossible tier anchors on its first (obscure) club, and the 730-day audit
-  // reads the day's country from that club. A flat posting cutoff starves a bimodal
-  // league like England — dozens of clubs at 300+ postings but only three below 200 —
-  // so its impossible share becomes a knife-edge that flips between refreshes while
-  // denser leagues keep theirs. Every covered country is guaranteed a floor of
-  // anchors instead.
-  const QOBS_MAX_POSTINGS = 250;
-  const QOBS_MIN_ANCHORS = 6;
+  const QCOUNTRY_PRESSURE_POWER = 4;
   // Recognition thresholds are lower bounds. The shared classifier assigns
   // each intersection once, including high scores with only one familiar route.
   const QBOUNDARIES = { easy: 550, medium: 400, hard: 180 };
-  const QEASY_MIN_FAMILIAR = 2;
+  const QEASY_MIN_FAMILIAR = 1;
+  const QEASY_SOLO_MIN_FAME = 550;
   const QFAMILIAR_MIN_FAME = 400;
-  const QFAMILIAR_MIN_GLOBAL_APPS = 100;
-  const QFAMILIAR_MIN_BRIDGE_APPS = 15;
+  // Classifier and search share the same universe and score floors. Raw answer
+  // counts and archive size do not determine whether a puzzle is eligible.
   const QEASY = [
-    { p: ["easy", "easy"], size: [2, 1e9], ease: [600, 1e9], familiar: QEASY_MIN_FAMILIAR },
-    { p: ["easy", "easy"], size: [2, 1e9], ease: [QBOUNDARIES.easy, 1e9], familiar: QEASY_MIN_FAMILIAR },
+    { p: ["easy", "easy"], size: [1, Infinity], ease: [QBOUNDARIES.easy, Infinity], familiar: QEASY_MIN_FAMILIAR },
   ];
-  const QEASY3 = QEASY.map(tier => ({ ...tier, p: ["easy", "easy", "easy"] }));
+  const QEASY3 = QEASY.map(tier => ({ ...tier, p: [...tier.p, "easy"] }));
   const QMEDIUM = [
-    { p: ["easy", "marquee"], size: [3, 1e9], ease: [450, 1e9], familiar: 1 },
-    { p: ["marquee", "marquee"], size: [3, 1e9], ease: [425, 1e9], familiar: 1 },
-    { p: ["easy", "field"], size: [2, 1e9], ease: [QBOUNDARIES.medium, 1e9], familiar: 1 },
+    { p: ["any", "any"], size: [1, Infinity], ease: [QBOUNDARIES.medium, Infinity], familiar: 1 },
   ];
-  const QMEDIUM3 = QMEDIUM.map(tier => ({ ...tier, p: [...tier.p, "marquee"] }));
+  const QMEDIUM3 = QMEDIUM.map(tier => ({ ...tier, p: [...tier.p, "any"] }));
   const QHARD = [
-    { p: ["marquee", "field"], size: [2, 12], ease: [QBOUNDARIES.hard, 1e9] },
-    { p: ["marquee", "field"], size: [2, 15], ease: [QBOUNDARIES.hard, 1e9] },
-    { p: ["marquee", "field"], size: [2, 20], ease: [QBOUNDARIES.hard, 1e9] },
+    { p: ["any", "any"], size: [1, Infinity], ease: [QBOUNDARIES.hard, Infinity] },
   ];
+  const QHARD3 = QHARD.map(tier => ({ ...tier, p: [...tier.p, "any"] }));
   const QIMPOSSIBLE = [
-    { p: ["obs", "any300"], size: [1, 2], ease: [0, QBOUNDARIES.hard], birth: 1 },
-    { p: ["obs", "any300"], size: [1, 2], ease: [0, QBOUNDARIES.hard] },
-    { p: ["obs", "any100"], size: [1, 3], ease: [0, QBOUNDARIES.hard] },
+    { p: ["any", "any"], size: [1, Infinity], ease: [0, QBOUNDARIES.hard] },
   ];
-  const QHARD3 = [
-    { p: ["marquee", "field", "field"], size: [2, 12], ease: [QBOUNDARIES.hard, 1e9] },
-    { p: ["marquee", "field", "field"], size: [2, 15], ease: [QBOUNDARIES.hard, 1e9] },
-  ];
-  const QIMP3 = [
-    { p: ["obs", "any300", "any300"], size: [1, 2], ease: [0, QBOUNDARIES.hard], birth: 1 },
-    { p: ["obs", "any300", "any100"], size: [1, 3], ease: [0, QBOUNDARIES.hard] },
-  ];
+  const QIMP3 = QIMPOSSIBLE.map(tier => ({ ...tier, p: [...tier.p, "any"] }));
 
   function createClubStature(DB, leagueCC, marquee) {
     const byCountry = {};
@@ -106,7 +88,7 @@
     const { DB, postings, intersect, leagueCC } = deps;
     const marquee = deps.marquee || new Set(MARQUEE_QIDS);
     const elite = new Set(ELITE_QIDS);
-    const easyClues = new Set(EASY_QIDS), knownLegacy = new Set(KNOWN_LEGACY_QIDS);
+    const easyClues = new Set(EASY_QIDS);
     if (!DB || !postings || !intersect || !leagueCC)
       throw new TypeError("createQuizCore requires DB, postings, intersect and leagueCC");
     const stature = deps.stature || createClubStature(DB, leagueCC, marquee);
@@ -166,45 +148,14 @@
         let a = 0;
         for (const d of DB.gks || []) DB.gkSet.add(a += d);
       }
-      const star = [], sub = [], obs = [], any300 = [], any100 = [], eliteClubs = [], marqueeClubs = [], easyClubs = [];
-      const topFlightMask = [...DB.topLeagues].reduce((mask, league) => mask | (1 << league), 0);
-      const covered = new Set(DB.leagues.map(league => league[2]));
-      const anchorCandidates = {};
-      DB.clubs.forEach((c, i) => {
-        const n = DB.postings[i].length;
-        const topDiv = !c[4] && DB.topLeagues.has(c[5] ?? -1);
-        if (n < 30) return;
-        if (elite.has(c[3])) eliteClubs.push(i);
-        if (easyClues.has(c[3])) easyClubs.push(i);
-        if (marquee.has(c[3])) marqueeClubs.push(i);
-        const prominent = (topDiv && n >= 400) || (!c[4] && marquee.has(c[3]) && n >= 120);
-        if (prominent) star.push(i);
-        // Retain historical top-flight careers after relegation, but do not
-        // mistake a well-documented minor-league club for familiar football.
-        if (!prominent && !c[4] && n >= 120 && (c[2] & topFlightMask)) sub.push(i);
-        if (n < QOBS_MAX_POSTINGS) obs.push(i);
-        if (n >= 300) any300.push(i);
-        if (n >= 100) any100.push(i);
-        const cc = leagueCC(i);
-        if (covered.has(cc)) (anchorCandidates[cc] ??= []).push(i);
+      const any = [], eliteClubs = [], marqueeClubs = [], known = [];
+      DB.clubs.forEach((club, ci) => {
+        if (!DB.postings[ci].length) return;
+        any.push(ci);
+        if (elite.has(club[3])) eliteClubs.push(ci);
+        if (marquee.has(club[3])) marqueeClubs.push(ci);
+        if (easyClues.has(club[3])) known.push(ci);
       });
-      // Top every covered country up to the anchor floor. This only ever widens the
-      // sparse leagues, and the impossible tier's size and ease caps keep the
-      // promoted clubs just as hard; a marquee club would never read as obscure.
-      const starSet = new Set(star);
-      const anchorCount = new Map();
-      for (const ci of obs) anchorCount.set(leagueCC(ci), (anchorCount.get(leagueCC(ci)) || 0) + 1);
-      const obsSet = new Set(obs);
-      for (const [cc, clubs] of Object.entries(anchorCandidates)) {
-        let have = anchorCount.get(cc) || 0;
-        if (have >= QOBS_MIN_ANCHORS) continue;
-        clubs.sort((a, b) => DB.postings[a].length - DB.postings[b].length);
-        for (const ci of clubs) {
-          if (obsSet.has(ci) || starSet.has(ci)) continue;
-          obsSet.add(ci); obs.push(ci);
-          if (++have >= QOBS_MIN_ANCHORS) break;
-        }
-      }
       DB.qMApps = new Float32Array(DB.names.length);
       DB.qMGoals = new Float32Array(DB.names.length);
       DB.qGlobalApps = new Float32Array(DB.names.length);
@@ -219,9 +170,8 @@
           if (goals[i] > 0 && !DB.gkSet.has(arr[i])) DB.qMGoals[arr[i]] += weight * goals[i];
         }
       });
-      return DB.qPools = { star, sub, field: star.concat(sub), obs, any300, any100,
-        elite: eliteClubs, marquee: marqueeClubs, easy: easyClubs,
-        known: [...new Set([...star, ...DB.clubs.flatMap((c, i) => knownLegacy.has(c[3]) ? [i] : [])])] };
+      // field remains an inspection alias; it no longer restricts eligibility.
+      return DB.qPools = { any, field: any, elite: eliteClubs, marquee: marqueeClubs, easy: known, known };
     }
 
     // Birth year is only a recency proxy, not evidence of a famous career. Smooth
@@ -272,20 +222,42 @@
         * Math.sqrt(Math.min(weakest, QBRIDGE_FULL_APPS) / QBRIDGE_FULL_APPS);
       return qFame(pid, clubs, audience) * confidence;
     }
+    // Popularity and club recall affect difficulty only. Hint targets,
+    // representatives and saved-answer ranking keep using qBridgeFame.
+    function qDifficultyFame(pid, clubs, audience = "european") {
+      if (!deps.recognition?.adjustBridge) return qBridgeFame(pid, clubs, audience);
+      if (clubs.length > 2) {
+        let weakest = Infinity;
+        for (let a = 0; a < clubs.length; a++) for (let b = a + 1; b < clubs.length; b++)
+          weakest = Math.min(weakest, qDifficultyFame(pid, [clubs[a], clubs[b]], audience));
+        return weakest;
+      }
+      return deps.recognition.adjustBridge({ pid, clubQids: clubs.map(ci => DB.clubs[ci][3]), baseFame: qFame(pid, clubs, audience),
+        bridgeFame: qBridgeFame(pid, clubs, audience) });
+    }
+    function qRecognitionAnswers(clubs, answers, audience) {
+      const best = new Map();
+      for (const pid of answers) {
+        const key = choiceIdentity(pid), previous = best.get(key);
+        if (previous === undefined || qDifficultyFame(pid, clubs, audience) > qDifficultyFame(previous, clubs, audience))
+          best.set(key, pid);
+      }
+      return [...best.values()];
+    }
     const qRecognitionWeight = (fame) => Math.max(0,
       Math.min((fame - QBREADTH_MIN_FAME) / (QBREADTH_FULL_FAME - QBREADTH_MIN_FAME), 1));
     const qUsableName = (pid) => {
       const name = DB.names[pid] || "";
       return !!name && !/^[a-z][a-z0-9_.-]{2,}$/.test(name);
     };
-    const qRecognisableBreadth = (clubs, answers, audience = "european") => answers.reduce((sum, pid) =>
-      sum + (qUsableName(pid) ? qRecognitionWeight(qBridgeFame(pid, clubs, audience)) : 0), 0);
+    const qRecognisableBreadth = (clubs, answers, audience = "european") => qRecognitionAnswers(clubs, answers, audience)
+      .reduce((sum, pid) => sum + (qUsableName(pid) ? qRecognitionWeight(qDifficultyFame(pid, clubs, audience)) : 0), 0);
     function qEase(clubs, answers, audience = "european") {
       const top = [0, 0, 0, 0];
       let breadth = 0;
-      for (const pid of answers) {
+      for (const pid of qRecognitionAnswers(clubs, answers, audience)) {
         if (!qUsableName(pid)) continue;
-        let fame = qBridgeFame(pid, clubs, audience);
+        let fame = qDifficultyFame(pid, clubs, audience);
         breadth += qRecognitionWeight(fame);
         for (let k = 0; k < 4 && fame; k++) if (fame > top[k]) {
           const old = top[k]; top[k] = fame; fame = old;
@@ -332,14 +304,18 @@
     const qComboKey = (clubs) => clubs.slice().sort((a, b) => a - b).join(",");
     function qFamiliarAnswers(clubs, answers) {
       qPools();
-      return answers.filter(pid => qUsableName(pid)
-        && DB.qGlobalApps[pid] >= QFAMILIAR_MIN_GLOBAL_APPS
-        && clubs.every(ci => qApps(ci, pid) >= QFAMILIAR_MIN_BRIDGE_APPS)
-        && qBridgeFame(pid, clubs) >= QFAMILIAR_MIN_FAME);
+      const familiar = answers.filter(pid => qUsableName(pid)
+        // Unknown totals remain neutral in the score, but are not positive
+        // evidence of an accessible connection. Cameos use the continuous discount.
+        && clubs.every(ci => qApps(ci, pid) > 0)
+        && qDifficultyFame(pid, clubs) >= QFAMILIAR_MIN_FAME);
+      return qRecognitionAnswers(clubs, familiar);
     }
-    const qEasyEligible = (clubs, answers) => (clubs.length === 2 || clubs.length === 3)
-      && clubs.every(ci => easyClues.has(DB.clubs[ci][3]))
-      && qFamiliarAnswers(clubs, answers).length >= QEASY_MIN_FAMILIAR;
+    const qEasyEligible = (clubs, answers) => {
+      if ((clubs.length !== 2 && clubs.length !== 3) || !clubs.every(ci => easyClues.has(DB.clubs[ci][3]))) return false;
+      const familiar = qFamiliarAnswers(clubs, answers);
+      return familiar.length >= 2 || familiar.some(pid => qDifficultyFame(pid, clubs) >= QEASY_SOLO_MIN_FAME);
+    };
     function classifyStage(stage) {
       const clubs = stage.clubs;
       if (!Array.isArray(clubs) || clubs.length < 2 || clubs.length > 3
@@ -349,12 +325,8 @@
       if (!effective.length || !effective.some(qUsableName)) return -1;
       const ease = stage.ease ?? qEase(clubs, effective);
       if (ease >= QBOUNDARIES.easy && qEasyEligible(clubs, effective)) return 0;
-      const pools = qPools();
-      const anchored = clubs.some(ci => marquee.has(DB.clubs[ci][3])) && clubs.every(ci => pools.field.includes(ci));
-      if (anchored && clubs.every(ci => pools.known.includes(ci))
-          && ease >= QBOUNDARIES.medium && qFamiliarAnswers(clubs, effective).length) return 1;
-      if (anchored && ease >= QBOUNDARIES.hard) return 2;
-      return ease < QBOUNDARIES.hard ? 3 : -1;
+      if (ease >= QBOUNDARIES.medium && qFamiliarAnswers(clubs, effective).length) return 1;
+      return ease >= QBOUNDARIES.hard ? 2 : 3;
     }
     const comboCache = new Map();
     function qComboInfo(clubs, audience = "european") {
@@ -467,7 +439,13 @@
     const coveredCountries = new Set(DB.leagues.map(league => league[2]));
     const countryStratum = (ci) => {
       const country = leagueCC(ci);
-      return coveredCountries.has(country) ? country : "other";
+      if (coveredCountries.has(country)) return country;
+      // Historical participants may now be located outside the covered countries.
+      // Their covered league affiliation supplies a sampling stratum, not a new
+      // restriction on their eligibility (e.g. Rijeka's historical Italian link).
+      const mask = DB.clubs[ci][2];
+      const league = DB.leagues.find((_, i) => mask & (1 << i));
+      return league?.[2] || "other";
     };
     function chooseWeightedCountry(countries, clubCount, rng) {
       const total = countries.reduce((sum, country) => sum + Math.sqrt(clubCount(country)), 0);
@@ -493,7 +471,7 @@
         const countryPressure = candidate.clubs.reduce((sum, ci) =>
           sum + (countryUse.get(countryStratum(ci)) || 0), 0) / candidate.clubs.length;
         const previousUses = comboUse.get(qComboKey(candidate.clubs)) || 0;
-        return 1 / ((1 + 2 * clubPressure) * Math.pow(1 + countryPressure, 2) * Math.pow(1 + previousUses, 2));
+        return 1 / ((1 + 2 * clubPressure) * Math.pow(1 + countryPressure, QCOUNTRY_PRESSURE_POWER) * Math.pow(1 + previousUses, 2));
       });
       const total = weights.reduce((sum, weight) => sum + weight, 0);
       let draw = rng() * total, chosen = choices.at(-1);
@@ -516,8 +494,7 @@
         (byCountry[stratum] ??= []).push(ci);
       }
       const allCountries = Object.keys(byCountry).sort();
-      const countries = allCountries.some(country => country !== "other")
-        ? allCountries.filter(country => country !== "other") : allCountries;
+      const countries = allCountries;
       for (const clubs of Object.values(byCountry)) clubs.sort((left, right) => left - right);
       return { byCountry, countries };
     }
@@ -558,9 +535,16 @@
           const clubs = slots.slice(0, 2).map(pool => drawClubCountryFirst(pool, rng));
           if (new Set(clubs).size !== clubs.length) continue;
           if (slots.length === 3) {
+            // An extra required club cannot create a familiar route that the pair
+            // lacks. Avoid spending the draw budget on ineligible third clues.
+            if (tier.familiar) {
+              const pair = qComboInfo(clubs, tier.audience);
+              if (pair.familiar < tier.familiar || pair.ease < tier.ease[0]) continue;
+            }
             // Sample a third clue that can retain enough answers. Independent
             // draws disproportionately lose triples as historical pools widen.
-            const third = thirdClubPool(clubs, available[2], tier.size[0]);
+            let third = thirdClubPool(clubs, available[2], tier.size[0]);
+            if (tier.familiar) third = third.filter(ci => qComboInfo([...clubs, ci], tier.audience).level === level);
             if (!third.length) continue;
             clubs.push(drawClubCountryFirst(countryPool(third), rng));
           }
@@ -585,10 +569,10 @@
       }
       if (!allowFallback) return null;
       const pairs = [];
-      for (let x = 0; x < pools.star.length; x++) for (let y = x + 1; y < pools.star.length; y++) {
-        const clubs = [pools.star[x], pools.star[y]];
-        if (DB.clubs[clubs[0]][1] === DB.clubs[clubs[1]][1] && !used.has(clubs[0]) && !used.has(clubs[1])
-            && !banned.has(qComboKey(clubs))) pairs.push(clubs);
+      const available = pools.any.filter(ci => !used.has(ci));
+      for (let x = 0; x < available.length; x++) for (let y = x + 1; y < available.length; y++) {
+        const clubs = [available[x], available[y]];
+        if (!banned.has(qComboKey(clubs))) pairs.push(clubs);
       }
       for (let i = pairs.length - 1; i > 0; i--) {
         const j = rng() * (i + 1) | 0;
@@ -743,9 +727,9 @@
             if (classifyStage(stage) === i) return;
             errors.push(`stage ${i + 1} does not meet the ${QLEVELS[i]} requirements`);
             if (i === 0)
-              errors.push("easy stage needs globally familiar clubs and at least two familiar bridges");
+              errors.push("easy stage needs known clubs and one very obvious or multiple familiar bridges");
             if (i === 1)
-              errors.push("medium stage needs recognisable clubs and at least one familiar bridge, and must not be easy");
+              errors.push("medium stage needs at least one familiar bridge and must not be easy");
           });
         }
         const date = options.date;
@@ -768,16 +752,16 @@
       generate, qGen: generate, generateSlate: generate,
       validateEntry, validateScheduleEntry: validateEntry, stagesFromQids, serializeStages, stageDiagnostics,
       qHash, qRng, qNum, qShift, qPools, qApps, qGoals, appearanceGaps, qFame, qBridgeFame,
-      qRecognitionWeight, qRecognisableBreadth, qUsableName, qEase,
+      qRecognitionWeight, qRecognisableBreadth, qUsableName, qEase, qDifficultyFame,
       qEffective, effectiveAnswers: qEffective, qAnswerSet, answerSet: qAnswerSet,
       qComboInfo, qComboKey, qFamiliarAnswers, qEasyEligible, classifyStage, qRanked, rankedAnswers: qRanked,
       qFace, face: qFace, playerIdentity, choiceIdentity, uniqueChoices, resolveAnswer, answerMatches, nextHintTarget, migrateState, restoreHistoryState,
       careerCacheKey, careerViewKey, clubCountry: leagueCC,
       resetCaches: () => comboCache.clear(),
-      constants: { QEPOCH, QT, QCOMBO_DAYS, QMAX_ATTEMPTS, Q3ODDS, QEASY3ODDS, QMEDIUM3ODDS, QLEVELS,
+      constants: { QELIGIBILITY_VERSION, QEPOCH, QT, QCOMBO_DAYS, QMAX_ATTEMPTS, Q3ODDS, QEASY3ODDS, QMEDIUM3ODDS, QLEVELS,
         QBRIDGE_FULL_APPS, QBRIDGE_FLOOR, QBREADTH_MIN_FAME, QBREADTH_FULL_FAME,
-        QFACE_GUARD_DAYS, QCLUB_SOFT_DAYS, QBOUNDARIES, QEASY_MIN_FAMILIAR,
-        QFAMILIAR_MIN_FAME, QFAMILIAR_MIN_GLOBAL_APPS, QFAMILIAR_MIN_BRIDGE_APPS,
+        QFACE_GUARD_DAYS, QCLUB_SOFT_DAYS, QCOUNTRY_PRESSURE_POWER, QBOUNDARIES, QEASY_MIN_FAMILIAR,
+        QFAMILIAR_MIN_FAME, QEASY_SOLO_MIN_FAME,
         QEASY, QEASY3, QMEDIUM, QMEDIUM3, QHARD, QIMPOSSIBLE, QHARD3, QIMP3 },
     };
   }
