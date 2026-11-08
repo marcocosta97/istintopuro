@@ -201,7 +201,8 @@ class Client:
 
     def get(self, url, params=None, missing_ok=False):
         last_error = None
-        for attempt in range(3):
+        attempts = 5
+        for attempt in range(attempts):
             if self.count >= self.maximum or time.monotonic() >= self.deadline:
                 if last_error is not None:
                     raise last_error
@@ -222,25 +223,32 @@ class Client:
                     return None
                 response.raise_for_status()
                 payload = response.json()
-                if not isinstance(payload, dict) or "error" in payload:
-                    raise ValueError("Wikimedia returned an API error or invalid object")
+                if not isinstance(payload, dict):
+                    raise ValueError("Wikimedia returned an invalid JSON object")
+                if "error" in payload:
+                    detail = json.dumps(payload["error"], ensure_ascii=False)[:300]
+                    raise ValueError(f"Wikimedia API error: {detail}")
                 return payload
             except (requests.RequestException, ValueError) as exc:
                 last_error = exc
-                if attempt == 2 or self.count >= self.maximum:
+                if attempt == attempts - 1 or self.count >= self.maximum:
                     raise
-                delay = 2 ** (attempt + 1)
+                # MediaWiki can report maxlag with HTTP 200. Give upstream load
+                # time to clear, even when Retry-After repeats a short minimum.
+                delay = 5 * 2 ** attempt
                 if response is not None and response.headers.get("Retry-After"):
                     retry = response.headers["Retry-After"]
                     try:
-                        delay = float(retry)
+                        delay = max(delay, float(retry))
                     except ValueError:
                         try:
-                            delay = parsedate_to_datetime(retry).timestamp() - time.time()
+                            delay = max(delay, parsedate_to_datetime(retry).timestamp() - time.time())
                         except (TypeError, ValueError, OverflowError):
                             pass
                 try:
-                    self.pause(max(1, min(delay, 120)))
+                    print(f"popularity: request failed ({attempt + 1}/{attempts}): "
+                          f"{str(exc)[:300]}; retrying in {delay:g}s", flush=True)
+                    self.pause(delay)
                 except BudgetExhausted:
                     raise last_error
 
