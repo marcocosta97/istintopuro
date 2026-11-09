@@ -161,6 +161,9 @@ class WikipediaOverlayTests(unittest.TestCase):
         self.assertEqual(PIPELINE.common_name("elpisha", "Joaquín (footballer, born 1981)"), "Joaquín")
         self.assertEqual(PIPELINE.common_name("Nolito", "Nolito"), "Nolito")
 
+    def test_andorra_has_a_stable_name_when_the_source_label_is_vandalised(self):
+        self.assertEqual(PIPELINE.CLUB_NAMES["Q1386854"], "FC Andorra")
+
     def test_infobox_excludes_youth_clubs_from_the_senior_career(self):
         text = """{{Infobox football biography
             | youthclubs1 = [[Udinese Calcio|Udinese]]

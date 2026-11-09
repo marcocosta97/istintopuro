@@ -505,7 +505,8 @@ BLOCKLIST = {
 
 # Incorrect source labels observed during pack verification; keep stable club names.
 CLUB_NAMES = {"Q2469894": "Barracas Central", "Q1022938": "San Martín de Tucumán",
-              "Q338285": "América Mineiro", "Q482262": "América de Natal"}
+              "Q338285": "América Mineiro", "Q482262": "América de Natal",
+              "Q1386854": "FC Andorra"}
 
 _session = requests.Session()
 _session.headers.update({"User-Agent": UA, "Accept": "application/sparql-results+json"})
