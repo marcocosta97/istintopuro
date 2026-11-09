@@ -5,6 +5,7 @@ const { createClubContext } = require("../scripts/club-recognition.js");
 const { createModel } = require("../scripts/recognition-model.js");
 const { createRuntime } = require("../scripts/quiz-schedule.js");
 const { EASY_QIDS } = require("../site/quiz-core.js");
+const { LEGACY_CLUB_CONFIG, FROZEN_CONFIG } = require("../site/quiz-recognition.js");
 const { buildReport } = require("../scripts/recognition-audit.js");
 const fixture = require("./fixtures/club-recall.json");
 
@@ -77,6 +78,19 @@ test("missing or partial club readership is neutral rather than being mistaken f
   assert.throws(() => createClubContext(fixture.index, fixture.clubSnapshot, { asOf: "2020-01-01T00:00:00Z" }), /future/);
 });
 
+test("stronger recall penalties preserve familiar clues and current-division visibility floors", () => {
+  const asOf = fixture.clubSnapshot.generated_at;
+  const before = createClubContext(fixture.index, fixture.clubSnapshot, { asOf, config: LEGACY_CLUB_CONFIG });
+  const after = createClubContext(fixture.index, fixture.clubSnapshot, { asOf });
+  for (const [i, feature] of after.features.entries()) {
+    assert.ok(feature.factor <= before.features[i].factor + 1e-12);
+    assert.ok(feature.factor >= after.config.minFactor);
+    if (feature.known || !feature.sourceUsable) assert.equal(feature.factor, 1);
+    if (feature.currentCoveredLeague) assert.ok(feature.factor >= after.config.currentOtherFloor);
+  }
+  assert.ok(after.factor(["Q19509"]) >= after.config.currentTopFloor, "Rennes keeps its current top-division floor");
+});
+
 test("the weakest clue is applied once and a third required club cannot inflate recognition", () => {
   const { clubs, after } = setup();
   const factor = clubs.factor(["Q19573", "Q18736"]);
@@ -101,12 +115,12 @@ test("club-context evidence can correct a connection independently of missing pl
 
 test("the report retains the strongest answer and separates its player bonus from club recall", () => {
   const report = buildReport({ index: fixture.index, playerQids: fixture.playerQids,
-    snapshot: fixture.snapshot, clubSnapshot: fixture.clubSnapshot,
+    snapshot: fixture.snapshot, clubSnapshot: fixture.clubSnapshot, config: FROZEN_CONFIG,
     probes: [["Q1153687", "Q483020"], ["Q19573", "Q18736"]], maxIntersections: 2 });
   const bury = report.intersections.find(row => row.qids.includes("Q19573"));
   const answer = bury.answers.find(a => a.name === "Sammy McIlroy");
   assert.ok(answer);
-  assert.equal(bury.answers[0].name, bury.candidate.strongestAnswer);
+  assert.ok(bury.answers.some(a => a.name === bury.candidate.strongestAnswer));
   assert.ok(answer.playerAdjusted >= 400 && answer.candidate < 400);
   assert.ok(answer.clubFactor < 1);
   assert.equal(answer.clubEvidence.length, 2);

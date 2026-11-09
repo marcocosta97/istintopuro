@@ -343,6 +343,49 @@ class PopularityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "different core index"):
             P.sample_players(source, root, PLAYERS)
 
+    def test_quiz_priority_is_bound_to_the_core_index_and_validates_candidate_qids(self):
+        root = Path(self.temp.name) / "priority-input"
+        root.mkdir()
+        (root / "index.json").write_text('{}')
+        source = root / "priority.json"
+        priority = {"version": 1, "kind": "quiz-recognition-priority", "qids": ["Q100"],
+                    "indexFileDigest": hashlib.sha256((root / "index.json").read_bytes()).hexdigest()}
+        source.write_text(json.dumps(priority))
+        players = {**PLAYERS, "Q100": {"name": "Modern Player", "club_count": 2}}
+        self.assertEqual(P.priority_qids(source, root, players), ["Q100"])
+        for qids in (["Q100", "Q100"], ["Q999"]):
+            source.write_text(json.dumps({**priority, "qids": qids}))
+            with self.assertRaises(ValueError):
+                P.priority_qids(source, root, players)
+        source.write_text(json.dumps(priority))
+        (root / "index.json").write_text('{"built":"changed"}')
+        with self.assertRaisesRegex(ValueError, "mismatched"):
+            P.priority_qids(source, root, players)
+
+    def test_quiz_priority_precedes_unattempted_ordinary_readership_without_dropping_it(self):
+        players = {**PLAYERS, "Q100": {"name": "Priority", "club_count": 2}}
+        coverage = {**P.language_coverage(entity()), "fetched_at": P.utc_now(), "period": "2026-01"}
+        self.journal.put("Q1", {"coverage": coverage})
+        self.journal.put("Q100", {"coverage": {**coverage, "enwiki": "Priority"},
+            "views": {"title": "Priority", "months": {}, "fetched_at": "2025-01-01T00:00:00+00:00"}})
+        first = FakeClient(payload(title="Priority"), P.BudgetExhausted())
+        self.assertEqual(P.collect(players, self.journal, first, MONTHS, priority_qids=["Q100"]), (0, True))
+        self.assertIn("/Priority/monthly/", first.calls[0][0])
+        resumed = FakeClient(payload())
+        self.assertEqual(P.collect(players, self.journal, resumed, MONTHS, priority_qids=["Q100"]), (0, False))
+        self.assertIn("/Player/monthly/", resumed.calls[0][0])
+        self.assertEqual(set(self.journal.records), set(players))
+
+    def test_quiz_priority_precedes_older_ordinary_coverage_batches(self):
+        players = {f"Q{i}": {"name": "Player", "club_count": 2} for i in range(1, 52)}
+        self.journal.put("Q51", {"coverage": {**P.language_coverage(entity()),
+            "fetched_at": "2025-01-01T00:00:00+00:00", "period": "2025-01"}})
+        batch = ["Q51", *[f"Q{i}" for i in range(1, 50)]]
+        client = FakeClient({"entities": {qid: entity() for qid in batch}}, P.BudgetExhausted())
+        self.assertEqual(P.collect(players, self.journal, client, MONTHS, priority_qids=["Q51"]), (0, True))
+        self.assertEqual(client.calls[0][1]["ids"].split("|"), batch)
+        self.assertTrue(P.fresh(self.journal.records["Q51"]["coverage"]))
+
     def test_sample_collection_reuses_checkpoint_and_writes_an_isolated_snapshot(self):
         self.seed()
         root = Path(self.temp.name) / "site"

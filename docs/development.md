@@ -136,6 +136,13 @@ Records use Wikidata QIDs, so rebuilding positional player IDs cannot attach
 another player's measurements. `--limit`, `--site-data`, `--state`, `--snapshot`
 and `--output` support isolated checks.
 
+`pipeline.py popularity` prioritises future-calendar answers: the strongest
+routes, hint representatives and usable alternatives scoring at least 150
+(familiarity threshold minus maximum bonus). Priority precedes ordinary backfill;
+oldest/unattempted ordering remains within each group. Zero-app registrations are
+excluded. The QID list is bound to the index hash; `--priority FILE` supplies it
+to direct runs. Other candidates, budgets, TTLs and error backoff remain unchanged.
+
 The first collection backfills 12 complete UTC calendar months. Subsequent runs
 fetch new players and observations at least 90 days old (`--refresh-days` can
 override this interval). Both language coverage and readership have their own
@@ -206,6 +213,16 @@ The same Sunday workflow also maintains core club observations in
 the same 90-day TTL and a separate budget of 600 requests or 600 seconds. A failed
 artifact restore does not start a new club backfill. Partial progress survives
 collection errors.
+
+For partial club readership, redirect recovery verifies the target QID and a
+matching article move through the [MediaWiki API](https://www.mediawiki.org/wiki/API:Redirects).
+One metadata request reads up to 500 titles; at most 16 aliases receive readership
+requests, prioritising the indexed name and recent redirects. The highest-median
+complete series with a verified move is retained without summing aliases or
+filling missing months. Identity verification also limits compiled expiry.
+Alias observations and move checks are checkpointed within the shared budgets;
+incomplete older scans are reconsidered, complete observations reused. Player
+collection keeps its existing title-change behavior.
 
 The Monday data refresh restores both snapshots as optional steps. The normal
 pipeline's `recognition` stage runs `scripts/quiz-recognition.js` without Wikimedia

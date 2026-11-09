@@ -50,6 +50,17 @@ def fresh(signal, days=REFRESH_DAYS):
     return age is not None and age < days
 
 
+def fresh_views(signal, days=REFRESH_DAYS):
+    return fresh(signal, days) and (signal.get("title_mode") != "verified_redirect"
+        or fresh({"fetched_at": signal.get("alias_checked_at")}, days))
+
+
+def matches_title(qid, views, title):
+    return bool(title and (views.get("title") == title or (
+        views.get("title_mode") == "verified_redirect" and views.get("verified_alias_qid") == qid
+        and views.get("sitelink_title") == title)))
+
+
 def retry_ready(record, stage):
     age = age_days(record.get(stage + "_error", {}).get("at"))
     # A failed coverage batch reflects the shared API, not 50 broken players.
@@ -257,10 +268,11 @@ class Client:
                     raise last_error
 
 
-def collect(players, journal, client, months, refresh_days=REFRESH_DAYS):
+def collect(players, journal, client, months, refresh_days=REFRESH_DAYS, priority_qids=()):
     today = utc_now()[:10]
     period = today[:7]
     errors, stopped, consecutive = 0, False, 0
+    priority = set(priority_qids)
 
     def failure(qids, stage, exc):
         nonlocal errors, consecutive
@@ -277,7 +289,8 @@ def collect(players, journal, client, months, refresh_days=REFRESH_DAYS):
         stale = [qid for qid in players
                  if not fresh(journal.records.get(qid, {}).get("coverage"), refresh_days)
                  and retry_ready(journal.records.get(qid, {}), "coverage")]
-        stale.sort(key=lambda qid: journal.records.get(qid, {}).get("coverage", {}).get("fetched_at", ""))
+        stale.sort(key=lambda qid: (qid not in priority,
+            journal.records.get(qid, {}).get("coverage", {}).get("fetched_at", "")))
         for start in range(0, len(stale), 50):
             batch = stale[start:start + 50]
             try:
@@ -309,9 +322,9 @@ def collect(players, journal, client, months, refresh_days=REFRESH_DAYS):
             return max(record.get("views", {}).get("fetched_at", ""),
                        record.get("views_error", {}).get("at", ""))
 
-        # Unattempted players first, then the oldest attempts. Otherwise repeated
-        # 404s early in QID order could consume every maintenance budget indefinitely.
-        for index, qid in enumerate(sorted(players, key=last_attempt)):
+        # Within each priority group, try unattempted players then the oldest
+        # attempts, so repeated 404s cannot consume every maintenance budget.
+        for index, qid in enumerate(sorted(players, key=lambda qid: (qid not in priority, last_attempt(qid)))):
             record = journal.records.get(qid, {})
             coverage = record.get("coverage", {})
             # Never fetch a potentially renamed article using stale metadata.
@@ -319,7 +332,10 @@ def collect(players, journal, client, months, refresh_days=REFRESH_DAYS):
                 continue
             title = coverage["enwiki"]
             views = record.get("views", {})
-            if views.get("title") != title:
+            if matches_title(qid, views, title) and fresh_views(views, refresh_days):
+                continue
+            if (views.get("title") != title or (views.get("title_mode") == "verified_redirect"
+                    and not fresh_views(views, refresh_days))):
                 views = {"title": title, "months": {}}
             if fresh(views, refresh_days) or not retry_ready(record, "views"):
                 continue
@@ -364,7 +380,7 @@ def audit(players, journal, months, built, requests_made, errors, stopped, refre
         summary["current_language_coverage"] += int(current and coverage["count"] is not None)
         stored = record.get("views", {})
         title = coverage.get("enwiki") if coverage else None
-        matching = bool(title and stored.get("title") == title)
+        matching = matches_title(qid, stored, title)
         cached = stored.get("months", {}) if matching else {}
         measured = stored.get("attempted_window", months) if matching else months
         monthly = [[month, cached.get(month)] for month in measured]
@@ -378,15 +394,17 @@ def audit(players, journal, months, built, requests_made, errors, stopped, refre
         else:
             status = stored.get("status", "pending") if matching else "pending"
         summary["pageviews_" + status] += 1
-        summary["pageviews_fresh"] += int(matching and fresh(stored, refresh_days))
+        summary["pageviews_fresh"] += int(matching and fresh_views(stored, refresh_days))
         values = [n for _, n in monthly if n is not None]
         rows[qid] = {**player, "language_coverage": {**coverage, "current": current} if coverage else None,
-                     "pageviews": {"title": title, "status": status, "monthly": monthly,
-                                   "through": measured[-1], "current": matching and fresh(stored, refresh_days),
+                     "pageviews": {"title": stored.get("title", title) if matching else title, "status": status, "monthly": monthly,
+                                   "through": measured[-1], "current": matching and fresh_views(stored, refresh_days),
                                    "observed_months": observed,
                                    "total_views": sum(values) if status == "complete" else None,
                                    "median_monthly_views": statistics.median(values) if status == "complete" else None,
-                                   "fetched_at": stored.get("fetched_at") if matching else None},
+                                   "fetched_at": stored.get("fetched_at") if matching else None,
+                                   **{key: stored[key] for key in ("title_mode", "verified_alias_qid", "sitelink_title", "alias_checked_at", "alias_move_at", "resolved_title")
+                                      if matching and key in stored}},
                      "errors": {stage: record[stage + "_error"] for stage in ("coverage", "views")
                                 if stage + "_error" in record}}
     return {"version": VERSION, "generated_at": utc_now(), "dataset_built": built,
@@ -417,6 +435,12 @@ def validate_snapshot(snapshot):
                     or age_days(coverage.get("fetched_at")) is None):
                 raise ValueError(f"Invalid language coverage for {qid}")
         views = row.get("pageviews", {})
+        if views.get("title_mode") == "verified_redirect" and (
+                views.get("verified_alias_qid") != qid or not coverage
+                or views.get("sitelink_title") != coverage.get("enwiki")
+                or age_days(views.get("alias_checked_at")) is None
+                or age_days(views.get("alias_move_at")) is None):
+            raise ValueError(f"Invalid readership redirect identity for {qid}")
         monthly = views.get("monthly")
         if not isinstance(monthly, list) or len(monthly) != 12:
             raise ValueError(f"Invalid readership window for {qid}")
@@ -449,7 +473,7 @@ def make_snapshot(report, previous=None):
         if (row["pageviews"]["status"] != "complete"
                 and old.get("pageviews", {}).get("status") == "complete"):
             row["pageviews"] = copy.deepcopy(old["pageviews"])
-            row["pageviews"]["current"] = fresh(row["pageviews"], snapshot["refresh_days"])
+            row["pageviews"]["current"] = fresh_views(row["pageviews"], snapshot["refresh_days"])
         if ((row["language_coverage"] or {}).get("count") is None
                 and (old.get("language_coverage") or {}).get("count") is not None):
             row["language_coverage"] = copy.deepcopy(old["language_coverage"])
@@ -507,6 +531,17 @@ def sample_players(source, site_data, players):
     return {qid: players[qid] for qid in qids}
 
 
+def priority_qids(source, site_data, players):
+    priority = json.loads(source.read_text())
+    qids = priority.get("qids")
+    if (priority.get("version") != 1 or priority.get("kind") != "quiz-recognition-priority"
+            or priority.get("indexFileDigest") != hashlib.sha256((site_data / "index.json").read_bytes()).hexdigest()
+            or not isinstance(qids, list) or any(not isinstance(q, str) for q in qids)
+            or len(set(qids)) != len(qids) or any(q not in players for q in qids)):
+        raise ValueError("Invalid quiz recognition priority list or mismatched core index")
+    return qids
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site-data", type=Path, default=ROOT / "site/data")
@@ -520,6 +555,7 @@ def main(argv=None):
     parser.add_argument("--max-seconds", type=positive_int, default=3000)
     parser.add_argument("--limit", type=positive_int, help="collect a deterministic subset for a smoke test")
     parser.add_argument("--qids", help="comma-separated core candidate QIDs for a targeted smoke test")
+    parser.add_argument("--priority", type=Path, help="prioritise likely published quiz answers before the ordinary backfill")
     parser.add_argument("--sample", type=Path, help="collect a frozen calibration sample; outputs stay separate from release snapshots")
     args = parser.parse_args(argv)
     if args.sample and (args.qids or args.limit or args.publish):
@@ -536,6 +572,7 @@ def main(argv=None):
         return 0
     months = month_window(args.through)
     built, players = candidates(args.site_data)
+    priority = priority_qids(args.priority, args.site_data, players) if args.priority else []
     if args.sample:
         players = sample_players(args.sample, args.site_data, players)
     if args.qids:
@@ -549,7 +586,7 @@ def main(argv=None):
     client = Client(args.max_requests, args.max_seconds)
     errors, stopped = 0, False
     try:
-        errors, stopped = collect(players, journal, client, months, args.refresh_days)
+        errors, stopped = collect(players, journal, client, months, args.refresh_days, priority)
     finally:
         journal.compact()
         report = audit(players, journal, months, built, client.count, errors, stopped, args.refresh_days)

@@ -23,7 +23,7 @@ function runtime(days) {
     },
   };
   const context = vm.createContext({ QuizRecognition, CORE_DB: { quizSchedule: days === null ? null : { days } },
-    QuizCore: { createQuizCore: () => core }, corePostings() {}, intersect() {},
+    QuizCore: { createQuizCore: () => core, easyQidsFor: QuizCore.easyQidsFor }, corePostings() {}, intersect() {},
     coreStature() {}, coreLeagueCC() {}, coreClub() {}, MARQUEE: new Set(),
     localStorage: { quizSeries: EPOCH },
   });

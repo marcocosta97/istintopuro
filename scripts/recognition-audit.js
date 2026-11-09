@@ -154,7 +154,8 @@ function buildReport({ index, snapshot, playerQids, asOf, config, clubSnapshot, 
         const cs = [a, b], base = runtimes.baseline.core.qFame(pid, cs), bridge = runtimes.baseline.core.qBridgeFame(pid, cs);
         return { clubs: cs.map(ci => index.clubs[ci][0]), appearances: cs.map(ci => runtimes.baseline.core.qApps(ci, pid)),
           careerWithClues: base, spellFactor: base > 0 ? bridge / base : 1, baselineBridge: bridge,
-          adjustment: model.adjustment(pid, base), playerAdjustedBridge: model.adapter.adjustBridge({ pid, baseFame: base, bridgeFame: bridge }),
+          adjustment: model.adjustment(pid, base), playerAdjustedBridge: model.adapter.adjustBridge({ pid, baseFame: base, bridgeFame: bridge,
+            spellApps: cs.map(ci => runtimes.baseline.core.qApps(ci, pid)), birth: index.births[pid], year: Number(index.built.slice(0, 4)) }),
           clubFactor: clubContext?.factor(cs.map(ci => index.clubs[ci][3])) ?? 1,
           candidateBridge: runtimes.candidate.core.qDifficultyFame(pid, cs) };
       }));

@@ -81,8 +81,8 @@ function renderReport(report) {
   const cases = report.cases.filter(c => c.split === "calibration");
   const count = model => report.cases.filter(c => c.models[model].level !== c.baseline.level).length;
   const total = report.cases.length, coverage = report.coverage, percentage = coverage.requested ? 100 * coverage.usable / coverage.requested : 0;
-  const modelNames = { reference: "Solo bonus · riferimento", gradual: "Solo bonus · graduale", conservative: "Malus prudenti · v3", bidirectional: "Malus rivisti · v4", contextual: "Notorietà + ricordo del club" };
-  const initialModel = report.reports.contextual ? "contextual" : report.reports.bidirectional ? "bidirectional" : "gradual";
+  const modelNames = { reference: "Solo bonus · riferimento", gradual: "Solo bonus · graduale", conservative: "Malus prudenti · v3", bidirectional: "Malus rivisti · v4", recalibrated: "Traffico e permanenza · attuale", contextual: "Notorietà + ricordo del club" };
+  const initialModel = report.reports.contextual ? "contextual" : report.reports.recalibrated ? "recalibrated" : report.reports.bidirectional ? "bidirectional" : "gradual";
   const directions = name => ({ up: report.cases.filter(c => c.models[name].delta > 0).length,
     down: report.cases.filter(c => c.models[name].delta < 0).length,
     same: report.cases.filter(c => c.models[name].delta === 0).length });
@@ -97,7 +97,7 @@ function renderReport(report) {
   const clubInfo = report.reports.contextual?.clubContext;
   const clubNote = clubInfo ? `<div class="diagnostic-scope"><div class="eyebrow">Riconoscibilità dei club</div><p><strong>${clubInfo.usable} / ${clubInfo.features.length}</strong> club con fonti utilizzabili. La notorietà del giocatore e il ricordo del suo passaggio sono stimati separatamente.</p><p class="table-note">I club storici riconoscibili restano protetti. Le dimensioni dell'archivio e un fallimento non determinano la fascia.</p></div>` : "";
   const feedbackPanel = report.feedback?.length ? `<section class="feedback-section"><div class="section-head"><div><h2>Gli esempi che hai segnalato</h2><p>Vincoli qualitativi: almeno Hard. Sono separati dalle etichette di revisione e non vengono usati come prova di accuratezza sul resto del catalogo.</p></div></div>${report.feedback.map(f => {
-    const player = f.models.bidirectional, context = f.models.contextual;
+    const player = f.models.recalibrated || f.models.bidirectional, context = f.models.contextual;
     const answer = context?.answers.find(a => a.name === context.strongestAnswer);
     return `<article class="panel feedback-case"><h3>${esc(f.clubs.join(" / "))}</h3><div class="feedback-levels"><span><small>Regole attuali</small>${badge(f.baseline.level)}</span><span><small>Notorietà del giocatore</small>${badge(player.level)}</span><span><small>Con ricordo del club</small>${context ? badge(context.level) : "Da confrontare"}</span></div>${answer ? `<p><strong>${esc(answer.name)}</strong>: ${number(answer.baseline)} → ${number(answer.playerAdjusted)} dopo la popolarità → <strong>${number(answer.candidate)}</strong> per il collegamento. Fattore del club meno riconoscibile: ×${Number(answer.clubFactor).toLocaleString("it-IT", { maximumFractionDigits: 3 })}.</p><p class="table-note">${context.familiar ? "Rimangono risposte riconoscibili dopo la correzione." : "Nessuna risposta raggiunge la soglia di riconoscibilità 400: il set non soddisfa i requisiti Medium, anche se le alternative possono sostenere lo score totale."}</p>` : ""}</article>`;
   }).join("")}</section>` : "";

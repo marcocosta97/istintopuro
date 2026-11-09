@@ -87,7 +87,7 @@ function createRuntime(index, { recognition, stature } = {}) {
   };
   const byQid = new Map(index.clubs.map((club, i) => [club[3], i]));
   if (recognition === undefined)
-    recognition = require("../site/quiz-recognition.js").createAdapter(index, coreModule.EASY_QIDS);
+    recognition = require("../site/quiz-recognition.js").createAdapter(index, coreModule.easyQidsFor(index));
   const core = coreModule.createQuizCore({
     DB: index, postings, intersect, marquee, leagueCC, recognition, stature,
     coreClub: name => name,

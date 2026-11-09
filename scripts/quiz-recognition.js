@@ -5,15 +5,32 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { DEFAULT_CONFIG, DEFAULT_CLUB_CONFIG, validate } = require("../site/quiz-recognition.js");
+const { DEFAULT_CONFIG, DEFAULT_CLUB_CONFIG, strongClue, validate } = require("../site/quiz-recognition.js");
 const { createModel, observation, configuration } = require("./recognition-model.js");
 const { createClubContext } = require("./club-recognition.js");
 const { loadPlayerQids } = require("./recognition-audit.js");
+const { EASY_QIDS } = require("../site/quiz-core.js");
 const ROOT = path.resolve(__dirname, "..");
 const read = file => JSON.parse(fs.readFileSync(file, "utf8"));
 const digest = data => crypto.createHash("sha256").update(data).digest("hex");
-const expiry = row => Math.min(Date.parse(row.language_coverage.fetched_at), Date.parse(row.pageviews.fetched_at))
-  + DEFAULT_CONFIG.maxAgeDays * 864e5;
+function expiry(row) {
+  const timestamps = [row.language_coverage.fetched_at, row.pageviews.fetched_at];
+  if (row.pageviews.title_mode === "verified_redirect") timestamps.push(row.pageviews.alias_checked_at);
+  return Math.min(...timestamps.map(Date.parse)) + DEFAULT_CONFIG.maxAgeDays * 864e5;
+}
+
+function migratePlayer(row, from) {
+  if (JSON.stringify(from) === JSON.stringify(DEFAULT_CONFIG)) return row;
+  if ((from.viewsTargetPower ?? 1) === DEFAULT_CONFIG.viewsTargetPower) return row;
+  // v4 persisted readership^2 and the mixed score. Recover its two components
+  // to change the target curve without re-fetching still-fresh source data.
+  const views = Math.pow(row[2], 1 / from.readershipPower);
+  const language = Math.max(0, Math.min(1, (row[1] - from.viewsWeight * Math.pow(views, from.viewsTargetPower ?? 1))
+    / (1 - from.viewsWeight)));
+  const score = DEFAULT_CONFIG.viewsWeight * Math.pow(views, DEFAULT_CONFIG.viewsTargetPower)
+    + (1 - DEFAULT_CONFIG.viewsWeight) * language;
+  return [row[0], score, row[2], row[3], row[4]];
+}
 
 function compile(index, playerQids, { previous, snapshots = [], clubSnapshot, asOf = new Date().toISOString() } = {}) {
   const time = Date.parse(asOf);
@@ -25,16 +42,22 @@ function compile(index, playerQids, { previous, snapshots = [], clubSnapshot, as
     if (Date.parse(previous.asOf) > time) throw new Error("cannot compile before the previous release time");
   }
   const bundle = { v: 1, kind: "quiz-recognition", asOf: new Date(time).toISOString(),
-    config: DEFAULT_CONFIG, clubConfig: DEFAULT_CLUB_CONFIG, players: {}, clubs: {},
+    config: DEFAULT_CONFIG, clubConfig: DEFAULT_CLUB_CONFIG, easyClubQids: EASY_QIDS, players: {}, clubs: {},
     sources: previous?.sources || {} };
   const byQid = new Map(playerQids.map((qid, pid) => [qid, pid]));
   for (const [qid, row] of Object.entries(previous?.players || {}))
-    if (byQid.has(qid) && row[4] > time) bundle.players[qid] = [byQid.get(qid), ...row.slice(1)];
+    if (byQid.has(qid) && row[4] > time)
+      bundle.players[qid] = [byQid.get(qid), ...migratePlayer(row, previous.config).slice(1)];
   const clubs = new Set(index.clubs.map(c => c[3]));
   for (const [qid, row] of Object.entries(previous?.clubs || {}))
     if (clubs.has(qid) && row[2] > time) bundle.clubs[qid] = row;
   const provenance = snapshot => ({ generatedAt: snapshot.generated_at, digest: digest(JSON.stringify(snapshot)) });
-  if (snapshots.length) bundle.sources = { ...bundle.sources, players: snapshots.map(provenance) };
+  if (snapshots.length) {
+    const retained = (bundle.sources.players || []).filter(s =>
+      Date.parse(s.generatedAt) + DEFAULT_CONFIG.maxAgeDays * 864e5 > time);
+    const sources = new Map([...retained, ...snapshots.map(provenance)].map(s => [s.digest, s]));
+    bundle.sources = { ...bundle.sources, players: [...sources.values()] };
+  }
   for (const snapshot of snapshots) {
     const model = createModel(snapshot, playerQids, { asOf });
     model.features.forEach((f, pid) => {
@@ -49,14 +72,22 @@ function compile(index, playerQids, { previous, snapshots = [], clubSnapshot, as
     createClubContext(index, clubSnapshot, { asOf }); // Validate the source envelope.
     const config = configuration({ viewsCap: DEFAULT_CLUB_CONFIG.viewsCap });
     for (const qid of clubs) {
-      const row = clubSnapshot.clubs[qid], feature = observation(row, config, time);
+      const row = clubSnapshot.clubs[qid], feature = observation(row, config, time, qid);
       if (!feature.eligible) continue;
       const until = expiry(row);
       if (!bundle.clubs[qid] || until >= bundle.clubs[qid][2])
         bundle.clubs[qid] = [feature.viewsScore, feature.languageScore, until];
     }
-    bundle.sources = { ...bundle.sources, clubs: provenance(clubSnapshot) };
+    const previousSources = Array.isArray(bundle.sources.clubs) ? bundle.sources.clubs
+      : bundle.sources.clubs ? [bundle.sources.clubs] : [];
+    const sources = new Map([...previousSources.filter(s => Date.parse(s.generatedAt)
+      + DEFAULT_CONFIG.maxAgeDays * 864e5 > time), provenance(clubSnapshot)].map(s => [s.digest, s]));
+    bundle.sources = { ...bundle.sources, clubs: [...sources.values()] };
   }
+  bundle.easyClubQids = [...new Set([...EASY_QIDS, ...index.clubs.flatMap(club => {
+    const row = bundle.clubs[club[3]];
+    return strongClue(row && { viewsScore: row[0], languageScore: row[1] }, bundle.clubConfig) ? [club[3]] : [];
+  })])];
   validate(bundle, index.names.length);
   return bundle;
 }

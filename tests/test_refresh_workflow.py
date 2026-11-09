@@ -44,6 +44,13 @@ class RefreshWorkflowTests(unittest.TestCase):
         self.assertIn("popularity-artifacts.py snapshot --scope clubs", release)
         self.assertNotIn("club-recognition.py", release)
 
+    def test_recognition_maintenance_can_prioritise_the_published_calendar(self):
+        maintenance = (ROOT / ".github/workflows/refresh-popularity.yml").read_text()
+        self.assertIn("actions/setup-node@v7", maintenance)
+        pipeline = (ROOT / "pipeline/pipeline.py").read_text()
+        self.assertIn('"recognition-priority.js"', pipeline)
+        self.assertIn('"--priority", str(priority)', pipeline)
+
     def test_deployment_uses_the_refreshed_head_as_its_cache_version(self):
         text = WORKFLOW.read_text()
 

@@ -23,7 +23,10 @@
   ];
   const KNOWN_LEGACY_QIDS = ["Q19521", "Q19446", "Q8760", "Q172476", "Q19481", "Q2693", "Q1457"];
   // Familiar historic clues survive relegation without widening the player-exposure prior.
-  const EASY_QIDS = [...new Set([...MARQUEE_QIDS, ...KNOWN_LEGACY_QIDS])];
+  const LEGACY_EASY_QIDS = [...new Set([...MARQUEE_QIDS, ...KNOWN_LEGACY_QIDS])];
+  const EASY_QIDS = [...LEGACY_EASY_QIDS, "Q4512"]; // Stuttgart: clue recognition, not a new elite exposure prior.
+  const easyQidsFor = index => index.quizRecognition?.easyClubQids
+    ?? (index.quizRecognition ? LEGACY_EASY_QIDS : EASY_QIDS);
   const QLEVELS = ["easy", "medium", "hard", "impossible"];
   const QELIGIBILITY_VERSION = 2;
 
@@ -88,7 +91,7 @@
     const { DB, postings, intersect, leagueCC } = deps;
     const marquee = deps.marquee || new Set(MARQUEE_QIDS);
     const elite = new Set(ELITE_QIDS);
-    const easyClues = new Set(EASY_QIDS);
+    const easyClues = new Set(deps.easyClubQids ?? deps.recognition?.easyClubQids ?? easyQidsFor(DB));
     if (!DB || !postings || !intersect || !leagueCC)
       throw new TypeError("createQuizCore requires DB, postings, intersect and leagueCC");
     const stature = deps.stature || createClubStature(DB, leagueCC, marquee);
@@ -233,7 +236,8 @@
         return weakest;
       }
       return deps.recognition.adjustBridge({ pid, clubQids: clubs.map(ci => DB.clubs[ci][3]), baseFame: qFame(pid, clubs, audience),
-        bridgeFame: qBridgeFame(pid, clubs, audience) });
+        bridgeFame: qBridgeFame(pid, clubs, audience), spellApps: clubs.map(ci => qApps(ci, pid)),
+        birth: DB.births[pid], year: DB.qYear });
     }
     function qRecognitionAnswers(clubs, answers, audience) {
       const best = new Map();
@@ -766,5 +770,5 @@
     };
   }
 
-  return { createQuizCore, MARQUEE_QIDS, ELITE_QIDS, EASY_QIDS, KNOWN_LEGACY_QIDS };
+  return { createQuizCore, MARQUEE_QIDS, ELITE_QIDS, EASY_QIDS, LEGACY_EASY_QIDS, easyQidsFor, KNOWN_LEGACY_QIDS };
 });

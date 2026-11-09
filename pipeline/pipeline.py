@@ -2014,7 +2014,9 @@ def stage_quiz():
 
 def stage_popularity():
     """Collect audit signals separately from the release pipeline and quiz scores."""
-    subprocess.run([sys.executable, str(ROOT / "pipeline" / "popularity.py")], cwd=ROOT, check=True)
+    priority = DATA / "popularity" / "priority.json"
+    subprocess.run(["node", str(ROOT / "scripts" / "recognition-priority.js"), "--output", str(priority)], cwd=ROOT, check=True)
+    subprocess.run([sys.executable, str(ROOT / "pipeline" / "popularity.py"), "--priority", str(priority)], cwd=ROOT, check=True)
 
 def stage_recognition():
     """Compile cached QID-keyed sources into the shared quiz index, without requests."""

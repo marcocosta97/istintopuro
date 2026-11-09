@@ -2,19 +2,25 @@
 
 // Source validation and controls for the shared production recognition model.
 const crypto = require("node:crypto");
-const { DEFAULT_CONFIG, playerAdjustment } = require("../site/quiz-recognition.js");
+const { DEFAULT_CONFIG, PREVIOUS_CONFIG, FROZEN_CONFIG, LEGACY_CONFIG, playerAdjustment, applySpellRecall, legacyRecallFame } = require("../site/quiz-recognition.js");
+const BIDIRECTIONAL_CONFIG = Object.freeze({ ...LEGACY_CONFIG, viewsTargetPower: 1, spellRecallPower: 0.5, legacyRecallMaxFraction: 0 });
 // Frozen bonus-only controls; they are comparisons, not the current hypothesis.
-const REFERENCE_CONFIG = Object.freeze({ ...DEFAULT_CONFIG,
+const REFERENCE_CONFIG = Object.freeze({ ...BIDIRECTIONAL_CONFIG,
   version: "recognition-experiment-v1", readershipPower: 0, maxDrop: 0 });
-const GRADUAL_CONFIG = Object.freeze({ ...DEFAULT_CONFIG,
+const GRADUAL_CONFIG = Object.freeze({ ...BIDIRECTIONAL_CONFIG,
   version: "recognition-trial-gradual-v2", readershipPower: 2, maxDrop: 0 });
-const CONSERVATIVE_CONFIG = Object.freeze({ ...DEFAULT_CONFIG,
+const CONSERVATIVE_CONFIG = Object.freeze({ ...BIDIRECTIONAL_CONFIG,
   version: "recognition-experiment-v3", downwardBlend: 0.6, downwardFade: 1, downwardEditionProtection: 1 });
 
 function configuration(overrides = {}) {
   for (const key of Object.keys(overrides)) if (!(key in DEFAULT_CONFIG)) throw new Error(`unknown model parameter: ${key}`);
   const config = { ...DEFAULT_CONFIG, ...overrides,
     languageWeights: { ...DEFAULT_CONFIG.languageWeights, ...overrides.languageWeights } };
+  if ([LEGACY_CONFIG.version, PREVIOUS_CONFIG.version].includes(overrides.version)
+      && overrides.spellRecallPower === undefined) config.spellRecallPower = 0.5;
+  if (overrides.version === LEGACY_CONFIG.version && overrides.viewsTargetPower === undefined) config.viewsTargetPower = 1;
+  if ([LEGACY_CONFIG.version, PREVIOUS_CONFIG.version, FROZEN_CONFIG.version].includes(overrides.version)
+      && overrides.legacyRecallMaxFraction === undefined) config.legacyRecallMaxFraction = 0;
   if (typeof config.version !== "string" || !config.version) throw new Error("model version must be a nonempty string");
   for (const [key, value] of Object.entries(config)) {
     if (key === "version" || key === "languageWeights") continue;
@@ -23,7 +29,9 @@ function configuration(overrides = {}) {
   for (const [language, weight] of Object.entries(config.languageWeights))
     if (!/^[a-z][a-z-]*$/.test(language) || !Number.isFinite(weight) || weight < 0)
       throw new Error(`invalid language weight: ${language}`);
-  if (config.viewsCap <= 0 || config.maxAgeDays <= 0 || config.targetFame <= 0
+  if (config.viewsCap <= 0 || config.maxAgeDays <= 0 || config.targetFame <= 0 || config.viewsTargetPower <= 0
+      || config.spellRecallPower <= 0 || config.spellFullApps <= 0 || config.spellFloor > 1
+      || config.legacyRecallSpan <= 0 || config.legacyRecallFade <= 0 || config.legacyRecallFade > 1 || config.legacyRecallMaxFraction > 1
       || config.viewsWeight > 1 || config.blend > 1 || config.anchorScore > 1 || config.maxDropFraction > 1
       || config.downwardBlend > 1 || config.downwardFade <= 0 || config.downwardFade > 1
       || !Number.isInteger(config.minAnchorLanguages)
@@ -63,7 +71,7 @@ function completeMedian(views, asOf) {
   return median;
 }
 
-function observation(row, config, asOf) {
+function observation(row, config, asOf, expectedQid) {
   const reasons = [], coverage = row?.language_coverage, views = row?.pageviews;
   const languages = Array.isArray(coverage?.languages) ? [...new Set(coverage.languages)] : [];
   const validLanguages = coverage?.status === "available" && Number.isInteger(coverage.count)
@@ -73,6 +81,11 @@ function observation(row, config, asOf) {
   const median = completeMedian(views, asOf);
   if (median === null) reasons.push("complete readership missing or invalid");
   else if (!current(views, asOf, config.maxAgeDays)) reasons.push("readership stale or future-dated");
+  if (views?.title_mode === "verified_redirect" && (
+      (expectedQid && views.verified_alias_qid !== expectedQid) || views.sitelink_title !== coverage?.enwiki
+      || !current({ fetched_at: views.alias_checked_at }, asOf, config.maxAgeDays)
+      || !Number.isFinite(Date.parse(views.alias_move_at)) || Date.parse(views.alias_move_at) > asOf))
+    reasons.push("redirect identity or verification invalid");
   let primary = 0, other = 0, primaryLanguages = 0;
   for (const language of validLanguages ? languages : []) {
     const weight = config.languageWeights[language];
@@ -84,7 +97,8 @@ function observation(row, config, asOf) {
   const languageScore = Math.min(1, weightedLanguages / languageScale);
   const viewsScore = median === null ? null : Math.min(1, Math.log1p(median) / Math.log1p(config.viewsCap));
   const eligible = reasons.length === 0;
-  const score = eligible ? config.viewsWeight * viewsScore + (1 - config.viewsWeight) * languageScore : null;
+  const score = eligible ? config.viewsWeight * Math.pow(viewsScore, config.viewsTargetPower)
+    + (1 - config.viewsWeight) * languageScore : null;
   // Readership and editions already determine the target. The revised downside
   // does not discount them a second time throughout the entire range. It fades
   // only near capped readership, where a censored value is a lower bound. The
@@ -105,7 +119,7 @@ function createModel(snapshot, playerQids, { asOf = snapshot?.generated_at, conf
       || snapshot.pageviews_source?.project !== "en.wikipedia.org" || snapshot.pageviews_source?.agent !== "user"
       || snapshot.pageviews_source?.access !== "all-access") throw new Error("unsupported recognition snapshot");
   if (instant(snapshot.generated_at) > time) throw new Error("snapshot was generated after the audit's as-of time");
-  const features = playerQids.map(qid => observation(snapshot.players[qid], config, time));
+  const features = playerQids.map(qid => observation(snapshot.players[qid], config, time, qid));
   function adjustment(pid, baseFame) {
     return playerAdjustment(features[pid], baseFame, config);
   }
@@ -114,12 +128,14 @@ function createModel(snapshot, playerQids, { asOf = snapshot?.generated_at, conf
     id: `${config.version}:${crypto.createHash("sha256").update(JSON.stringify(config)).digest("hex").slice(0, 12)}`,
     adjustedBase, adjustment,
     adapter: {
-      adjustBridge: ({ pid, baseFame, bridgeFame }) => {
-        const adjusted = adjustedBase(pid, baseFame);
-        if (adjusted === baseFame || baseFame <= 0) return bridgeFame;
-        return bridgeFame + (adjusted - baseFame) * (bridgeFame / baseFame);
+      adjustBridge: ({ pid, baseFame, bridgeFame, spellApps, birth, year }) => {
+        const adjusted = legacyRecallFame(adjustedBase(pid, baseFame), baseFame, birth, year, features[pid], config);
+        const bridge = adjusted === baseFame || baseFame <= 0 ? bridgeFame
+          : bridgeFame + (adjusted - baseFame) * (bridgeFame / baseFame);
+        return applySpellRecall(bridge, spellApps, config);
       } },
   };
 }
 
-module.exports = { DEFAULT_CONFIG, REFERENCE_CONFIG, GRADUAL_CONFIG, CONSERVATIVE_CONFIG, configuration, createModel, observation, completeMedian };
+module.exports = { DEFAULT_CONFIG, BIDIRECTIONAL_CONFIG, REFERENCE_CONFIG, GRADUAL_CONFIG,
+  CONSERVATIVE_CONFIG, configuration, createModel, observation, completeMedian };

@@ -7,7 +7,7 @@ const path = require("node:path");
 const test = require("node:test");
 const { createRuntime } = require("../scripts/quiz-schedule.js");
 const { recognitionIndex } = require("./helpers/quiz-data.js");
-const { createModel, configuration, CONSERVATIVE_CONFIG } = require("../scripts/recognition-model.js");
+const { createModel, configuration, CONSERVATIVE_CONFIG, BIDIRECTIONAL_CONFIG } = require("../scripts/recognition-model.js");
 const { buildReport, formatMarkdown, formatHtml, loadPlayerQids, main } = require("../scripts/recognition-audit.js");
 const fixture = require("./fixtures/recognition-signals.json");
 
@@ -220,7 +220,7 @@ test("downside revision preserves every positive correction exactly while streng
   for (const viewCount of [0, 100, 1000, 10000, 50000, 99999, 100000]) {
     const source = snapshot({ Q1: { languages: ["en", "it", "es", "fr", "de"], monthlyViews: viewCount } });
     const previous = createModel(source, ["Q1"], { config: CONSERVATIVE_CONFIG });
-    const revised = createModel(source, ["Q1"]);
+    const revised = createModel(source, ["Q1"], { config: BIDIRECTIONAL_CONFIG });
     for (let base = 0; base <= 1000; base += 20) {
       const old = previous.adjustment(0, base), current = revised.adjustment(0, base);
       if (old.delta >= 0) assert.equal(current.delta, old.delta, "accepted bonuses must not drift");

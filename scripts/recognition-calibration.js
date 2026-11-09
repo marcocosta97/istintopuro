@@ -7,7 +7,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { createRuntime } = require("./quiz-schedule.js");
 const { buildReport, loadPlayerQids, writeReport } = require("./recognition-audit.js");
-const { DEFAULT_CONFIG, REFERENCE_CONFIG, GRADUAL_CONFIG, CONSERVATIVE_CONFIG } = require("./recognition-model.js");
+const { DEFAULT_CONFIG, BIDIRECTIONAL_CONFIG, REFERENCE_CONFIG, GRADUAL_CONFIG, CONSERVATIVE_CONFIG } = require("./recognition-model.js");
 const ROOT = path.resolve(__dirname, "..");
 const LEVELS = ["easy", "medium", "hard", "impossible"];
 const QUALITATIVE_FEEDBACK = require("./recognition-examples.json");
@@ -47,7 +47,8 @@ function buildCalibration({ index, sample, snapshot, playerQids, clubSnapshot, a
     reference: buildReport({ ...options, config: REFERENCE_CONFIG }),
     gradual: buildReport({ ...options, config: GRADUAL_CONFIG }),
     conservative: buildReport({ ...options, config: CONSERVATIVE_CONFIG }),
-    bidirectional: buildReport({ ...options, config: DEFAULT_CONFIG }),
+    bidirectional: buildReport({ ...options, config: BIDIRECTIONAL_CONFIG }),
+    recalibrated: buildReport({ ...options, config: DEFAULT_CONFIG }),
     ...(clubSnapshot ? { contextual: buildReport({ ...options, config: DEFAULT_CONFIG, clubSnapshot }) } : {}),
   };
   const runtime = createRuntime(structuredClone(index), {
