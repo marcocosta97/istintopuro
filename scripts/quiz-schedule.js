@@ -424,10 +424,13 @@ function main(argv = process.argv.slice(2)) {
       expectedBuilt: runtime.index.built, expectedThrough: scheduleThrough(runtime.index.built, asset.horizonThrough),
     });
     if (!checked.ok) throw new Error(`quiz schedule validation failed:\n  ${checked.errors.join("\n  ")}`);
+    const bonuses = require("./quiz-bonuses.js").buildBonuses(runtime, asset, asset, path.join(path.dirname(options.index), "career"));
+    if (JSON.stringify(bonuses) !== JSON.stringify(asset.bonuses)) throw new Error("quiz bonus metadata is missing or stale");
     console.log(`quiz schedule: OK (${Object.keys(readJson(options.output).days).length} days)`);
   } else if (!options.audit) {
     const existing = fs.existsSync(options.output) ? readJson(options.output) : null;
     const asset = buildSchedule(runtime, existing, { through: options.through, regenerateFrom: options.regenerateFrom });
+    asset.bonuses = require("./quiz-bonuses.js").buildBonuses(runtime, asset, existing || {}, path.join(path.dirname(options.index), "career"));
     writeAsset(options.output, asset);
     console.log(`quiz schedule: wrote ${Object.keys(asset.days).length} days through ${asset.through}`);
   }
