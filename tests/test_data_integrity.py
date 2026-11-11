@@ -15,6 +15,50 @@ SPEC.loader.exec_module(PIPELINE)
 
 
 class DataIntegrityTests(unittest.TestCase):
+    def test_source_name_corrections_reach_core_and_pack_careers(self):
+        league = "Q1"
+        player = "Q17403497"
+        club = "Q1386854"
+        spells = [[club, 2024, 2025, 33, 6, 0],
+                  ["Q704857", 2025, None, 21, 3, 0]]
+        pack = {"cc": "IT", "leagues": {league: ("League", 1, "IT")},
+                "current": {league: [club]}}
+        data = {
+            "clubs": {club: {"name": "Bad indexed name", "cc": "IT", "leagues": [league]}},
+            "attrs": {player: ["Gianluca Turchetta", 1991, "IT", None, None]},
+            "teams": {"Q704857": "Bad career-only name"},
+            "wp_titles": {"SP Tre Penne": "Q704857", "S.P. Tre Penne": "Q704857"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "checkpoint.json").write_text("{}")
+            with patch.object(PIPELINE, "DATA", root), \
+                    patch.object(PIPELINE, "STATE", root / "state"), \
+                    patch.object(PIPELINE, "SITE_DATA", root / "site"), \
+                    patch.object(PIPELINE, "load", side_effect=data.get), \
+                    patch.object(PIPELINE, "load_members", return_value={club: [player]}), \
+                    patch.object(PIPELINE, "load_careers", return_value={player: spells}), \
+                    patch.object(PIPELINE, "CORE_LEAGUE_ORDER", [league]), \
+                    patch.object(PIPELINE, "CURRENT", {league: [club]}), \
+                    patch.object(PIPELINE, "LEAGUES", pack["leagues"]), \
+                    patch.object(PIPELINE, "PACKS", {"test": pack}), \
+                    patch("builtins.print"):
+                PIPELINE.save_state("wp", {}, {
+                    f"Q{i}": [f"Player {i}", [[title, 2025, None, 1, 0, 0]]]
+                    for i, title in enumerate(["SP Tre Penne", "S.P. Tre Penne", "SP Tre Penne"])
+                })
+                PIPELINE.stage_build()
+
+            core = json.loads((root / "site/career/0.json").read_text())["0"]
+            shard = int(player[1:]) % PIPELINE.PACK_NSHARDS
+            packed = json.loads((root / f"site/packs/test/career/{shard}.json").read_text())[player[1:]]
+            expected = [int(player[1:]), [["FC Andorra", 2024, 2025, 33, 6],
+                                        ["SP Tre Penne", 2025, None, 21, 3]]]
+            self.assertEqual(core, expected)
+            self.assertEqual(packed, expected)
+            index = json.loads((root / "site/index.json").read_text())
+            self.assertEqual(index["clubs"][0][0], "FC Andorra")
+
     def test_missing_flags_warn_without_rejecting_valid_nationalities(self):
         with patch.object(PIPELINE, "SOURCE_WARNINGS", set()):
             self.assertEqual(PIPELINE.nationality_errors(["IT", "SU,RU", "ZZ", ""], "core"), [])

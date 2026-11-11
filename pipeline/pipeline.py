@@ -60,6 +60,8 @@ site/data/packs/<id>/index.json — optional country pack. It has the same club,
   files by club QID, keeping both routes stable when the core dataset changes.
 """
 import hashlib, json, os, re, subprocess, sys, time, gzip
+import unicodedata
+from collections import Counter, defaultdict
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import unquote
@@ -503,7 +505,7 @@ BLOCKLIST = {
     "Q48780921", "Q2137538", "Q16967366", "Q16848750", "Q130302376",  # TZ/BW/RO junk
 }
 
-# Incorrect source labels observed during pack verification; keep stable club names.
+# Incorrect source labels; keep stable names for indexed and career-only clubs.
 CLUB_NAMES = {"Q2469894": "Barracas Central", "Q1022938": "San Martín de Tucumán",
               "Q338285": "América Mineiro", "Q482262": "América de Natal",
               "Q1386854": "FC Andorra"}
@@ -564,9 +566,9 @@ def save(name, obj):
     (DATA / f"{name}.json").write_text(json.dumps(obj, ensure_ascii=False))
     (DATA / f"{name}.jsonl").unlink(missing_ok=True)  # batch log superseded by the stage checkpoint
 
-def load_state(name):
+def load_state(name, *, reuse_on_full_refresh=False):
     """Return (source revisions, parsed records) from a compatible validated run."""
-    if os.environ.get("FULL_REFRESH") == "1": return {}, {}
+    if os.environ.get("FULL_REFRESH") == "1" and not reuse_on_full_refresh: return {}, {}
     p = STATE / f"{name}.json"
     if not p.exists(): return {}, {}
     try: obj = json.loads(p.read_text())
@@ -1420,11 +1422,133 @@ def common_name(label, page):
     if HANDLE_NAME.fullmatch(label): return short
     return short if len(short.split()) < len(label.split()) else label
 
+CLUB_NAME_MIN_PAGES = 3
+CLUB_NAME_CONSENSUS = .8
+
+def club_name_key(name):
+    """Group punctuation, spacing, case and accent variants, keeping non-Latin names."""
+    text = unicodedata.normalize("NFKD", name.casefold())
+    return "".join(c for c in text if c.isalnum())
+
+def club_names_compatible(name, alternatives):
+    """Err on the side of retaining legal names, acronyms and historical variants.
+
+    This is only a warning filter within ONE QID, never an identity/merge rule.
+    A shared meaningful word is enough to abstain from an automatic correction.
+    """
+    def tokens(text):
+        text = "".join(c for c in unicodedata.normalize("NFKD", text.casefold())
+                       if not unicodedata.combining(c)).replace(".", "")
+        return [t for t in re.findall(r"[^\W_]+", text)
+                if t not in STOP_TOKENS | {"sp"} and not t.isdigit()]
+    left = tokens(name)
+    for other in alternatives:
+        if club_name_key(name) == club_name_key(other): return True
+        right = tokens(other)
+        if set(left) & set(right): return True
+        if left and right:
+            if "".join(t[0] for t in left) in right: return True
+            if "".join(t[0] for t in right) in left: return True
+            if any(min(len(a), len(b)) >= 4 and (a.startswith(b) or b.startswith(a))
+                   for a in left for b in right): return True
+    return False
+
+def club_name_evidence(records, title_qids):
+    """One vote per Wikipedia player PAGE and club, regardless of spells or QIDs.
+
+    A page using multiple non-equivalent names for the same club abstains; it
+    still counts in the denominator. Redirect titles resolved to the same QID
+    are evidence about that club, not additional independent votes.
+    """
+    pages = defaultdict(lambda: defaultdict(set))
+    for page, spells in records.values():
+        page = page.replace("_", " ").strip()
+        for title, *_ in spells:
+            team = title_qids.get(title)
+            if team and club_name_key(title): pages[team][page].add(title)
+    evidence = {}
+    for team, by_page in pages.items():
+        votes, variants = Counter(), defaultdict(set)
+        for titles in by_page.values():
+            keys = {club_name_key(t) for t in titles}
+            for title in titles: variants[club_name_key(title)].add(title)
+            if len(keys) == 1: votes[next(iter(keys))] += 1
+        winner = min(votes, key=lambda k: (-votes[k], k)) if votes else None
+        support = votes[winner] if winner else 0
+        evidence[team] = {
+            "pages": len(by_page), "support": support,
+            "strong": support >= CLUB_NAME_MIN_PAGES
+                      and support / len(by_page) >= CLUB_NAME_CONSENSUS,
+            "winner": min(variants[winner], key=lambda t: (len(t), t)) if winner else None,
+            "winning_variants": sorted(variants[winner]) if winner else [],
+            "variants": sorted({t for ts in variants.values() for t in ts}),
+            "candidates": [{"names": sorted(variants[k]), "votes": votes[k]}
+                           for k in sorted(variants, key=lambda k: (-votes[k], k))],
+            "examples": sorted(by_page)[:5],
+        }
+    return evidence
+
+def resolve_club_names(labels, evidence, previous, overrides):
+    """Return display labels, trusted memory and reviewable source conflicts.
+
+    Trust a new name only with Wikipedia consensus or a curated correction.
+    Sparse/missing evidence cannot authorize an unrelated change to a trusted
+    name. Strong evidence can authorize a real rename on both sources.
+    """
+    names, accepted, conflicts = {}, dict(previous), []
+    for team, raw in sorted(labels.items()):
+        old, ev = previous.get(team), evidence.get(team, {})
+        strong = ev.get("strong", False)
+        variants, winning = ev.get("variants", []), ev.get("winning_variants", [])
+        chosen, reason = raw, None
+        if team in overrides:
+            chosen = overrides[team]
+            if not club_names_compatible(raw, [chosen]): reason = "curated_correction"
+        elif old and not club_names_compatible(raw, [old]) and not (
+                strong and club_names_compatible(raw, winning)):
+            if strong and not club_names_compatible(old, winning):
+                chosen, reason = ev["winner"], "wikipedia_consensus"
+            else:
+                chosen, reason = old, "retained_previous"
+        elif strong and not club_names_compatible(raw, variants):
+            chosen = old if old and club_names_compatible(old, winning) else ev["winner"]
+            reason = "retained_previous" if chosen == old else "wikipedia_consensus"
+        elif variants and not club_names_compatible(raw, variants):
+            reason = "needs_review"
+        names[team] = chosen
+        if team in overrides or (strong and club_names_compatible(chosen, winning)):
+            accepted[team] = chosen
+        if reason:
+            conflicts.append({"qid": team, "wikidata": raw, "previous": old,
+                              "selected": chosen, "reason": reason, "evidence": ev})
+    return names, accepted, conflicts
+
+def validated_club_names(labels):
+    # Full refresh must fetch all sources but retain our independent name memory.
+    # stage_wp has already saved this run's validated records, even on a full run.
+    _, records = load_state("wp", reuse_on_full_refresh=True)
+    _, previous = load_state("club_names", reuse_on_full_refresh=True)
+    evidence = club_name_evidence(records, load("wp_titles") or {})
+    names, accepted, conflicts = resolve_club_names(labels, evidence, previous, CLUB_NAMES)
+    save_state("club_names", {}, accepted)
+    (DATA / "reports").mkdir(exist_ok=True)
+    save("reports/club-name-conflicts", {"version": 1,
+         "thresholds": {"min_pages": CLUB_NAME_MIN_PAGES, "agreement": CLUB_NAME_CONSENSUS},
+         "conflicts": conflicts})
+    for row in conflicts:
+        ev = row["evidence"]
+        source_warning(f"club name {row['qid']}: Wikidata {row['wikidata']!r}, "
+                       f"selected {row['selected']!r} ({row['reason']}; "
+                       f"Wikipedia agreement {ev.get('support', 0)}/{ev.get('pages', 0)} pages)")
+    return names
+
 def stage_build():
     clubs, members, attrs = load("clubs"), load_members(), load("attrs")
     careers, teams = load_careers(), load("teams")
-    for q, name in CLUB_NAMES.items():
+    names = validated_club_names({q: c["name"] for q, c in clubs.items()} | teams)
+    for q, name in names.items():
         if q in clubs: clubs[q]["name"] = name
+        if q in teams: teams[q] = name
 
     # data freshness = newest Wikidata checkpoint, not build time. Read up here because
     # spells_at closes over its year, as the end of an open-ended spell.

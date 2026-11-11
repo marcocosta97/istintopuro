@@ -96,6 +96,29 @@ Missing nationality flags produce a source warning, while the client shows the
 country code with its accessible country name. This also covers newly introduced
 historical nationalities such as `SU`, without substituting a modern successor.
 Malformed nationality fields still fail validation in both core and pack data.
+
+Club names are checked against the original Wikipedia link targets in cached
+player infoboxes before building indexes and careers. Each distinct player page
+gets at most one vote per club QID, across repeated spells and duplicate player
+items. Punctuation, spacing, case and accents are normalized; a page with several
+non-equivalent names abstains but remains in the denominator. Consensus requires
+at least three supporting pages and 80% agreement. Legal names, acronyms and
+shared meaningful name words are treated conservatively to avoid replacing
+ordinary aliases. This checks names within a QID; it never merges club identities.
+
+A discordant source label keeps the previously accepted name when available;
+on a cold cache, strong consensus supplies a Wikipedia name. Sparse conflicts
+without a trusted name keep the source label and are flagged for review. A new,
+unrelated name needs strong Wikipedia support to replace an accepted name, so
+real renames can still propagate. Accepted names live in
+`data/state/club_names.json`, survive `FULL_REFRESH=1`, and share the existing
+successful-run cache lifecycle. Raw source checkpoints are preserved. The report
+at `data/reports/club-name-conflicts.json` includes source/selected names, decision,
+vote counts, variants and sample player pages. Conflicts appear in source warnings
+in the job summary; the weekly workflow uploads the JSON report for seven days.
+Disagreement can mean a rename, transliteration, a bad redirect or vandalism;
+the vote is a consistency check, not independent verification of every source.
+
 One list needs a human:
 `CURRENT` in `pipeline.py` (each league's clubs this season) — refresh it
 every August, and at the start of the calendar-year seasons for Brazil and Argentina.

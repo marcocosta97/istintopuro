@@ -97,8 +97,21 @@ jobs:
           cp /tmp/index-baseline.json /tmp/refresh-diagnostics/baseline-index.json
           cp -R /tmp/pack-baselines /tmp/refresh-diagnostics/pack-baselines
           cp /tmp/refresh-pipeline.log /tmp/refresh-diagnostics/pipeline.log
+          if [ -f data/reports/club-name-conflicts.json ]; then
+            cp data/reports/club-name-conflicts.json /tmp/refresh-diagnostics/
+          fi
           node scripts/refresh-report.js --baseline /tmp/index-baseline.json --candidate /tmp/refresh-diagnostics/candidate/index.json --output /tmp/refresh-diagnostics
           cat /tmp/refresh-diagnostics/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save club name conflict report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: club-name-conflicts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/reports/club-name-conflicts.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       # Remote APIs and community-edited source data can fail independently of this
       # repository. Keep the last validated dataset in that case, while leaving the
