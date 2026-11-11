@@ -31,6 +31,18 @@ progress persists in `localStorage`. See [the generator](quiz-generator.md)
 for the rules and schedule controls. `quizDebug(30)` previews the next month
 in the browser console.
 
+Console reset helpers:
+
+```js
+quizReset();                              // reset live progress; keep archived results and stats
+quizReset({ archive: true });             // also remove today's archived result to play again
+quizReset({ archive: true, stats: true }); // also clear aggregate statistics
+quizReset(true);                          // legacy shorthand for { stats: true }
+```
+
+Archive removal affects today only; other archived dates and practice saves
+remain available. Resetting from an open quiz returns to today's board.
+
 ## Local development
 
 ```

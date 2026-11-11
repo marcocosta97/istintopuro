@@ -38,6 +38,17 @@ shows when the complete game and all enabled country packs are ready.
   Player mode finds shared clubs and historical teammates.
 - The daily quiz has four stages of rising difficulty and uses the core dataset.
   Optional country packs never change its puzzles.
+- Easy, Medium and Hard secure the daily streak, including hinted answers.
+  Impossible is an extra and cannot remove an earned day. At most one optional
+  purple criterion rewards a matching answer to an existing stage, preferring
+  Easy then Medium. It can use nationality, a birth interval or a documented
+  career spell; there is no additional attempt. Shared results show per-stage
+  attempts without revealing players or clubs and link to the same dated quiz.
+- Optional criteria compare answer selectivity and recognition contrast on the
+  same scale for nationality and career. A reproducible draw with a gentle
+  recency preference resolves similar quality, without fixed type sequences.
+  Birth intervals are used only when no suitable nationality or career
+  criterion exists across Easy, Medium and Hard.
 - The published schedule extends 90 days after the dataset build. Normal
   refreshes preserve playable published dates, including future ones. Beyond
   the saved schedule, locally generated puzzles can differ from a newer online

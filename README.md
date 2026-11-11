@@ -17,7 +17,9 @@ clubs, explore shared careers, or test your football memory with a new puzzle
 every day. Everything runs in your browser, with no account or tracking.
 
 - **Daily quiz** — four club intersections, from easy to impossible. The same
-  puzzle for everyone, with an archive to replay past days.
+  puzzle for everyone, with an archive to replay past days. Clear the first three
+  to keep your streak; Impossible is an extra. A purple clue can reward a less
+  obvious answer on one of the daily stages.
 - **Club solver** — combine clubs, leagues and countries to find matching players.
 - **Player connections** — find shared clubs or discover former teammates.
 - **Extra leagues** — enable country packs for Portugal, the Netherlands,

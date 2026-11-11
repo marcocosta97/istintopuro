@@ -92,6 +92,71 @@ CI budgets are documented in [development.md](development.md).
 
 ## Calendar and selection
 
+### Result rules and optional purple clues
+
+Easy, Medium and Hard all solved secures the daily streak as soon as Hard is
+cleared. Hints are allowed. Skipping any of those stages does not count as a
+daily success, even if Impossible is solved. Impossible is an extra: failing it,
+ending the run or leaving it unfinished past midnight preserves an earned day.
+Archive practice never changes official statistics. Existing four-stage streaks
+remain valid; summary-only archive rows cannot reconstruct exact attempts.
+
+`site/quiz-result.js` supplies shared result and streak semantics. The end screen
+and text sharing show attempts by stage, with separate hint counts and a purple
+mark for an earned criterion. Shared URLs include `?day=YYYY-MM-DD#quiz` and open
+that day's puzzle, without carrying any answers.
+
+After the schedule is generated, `scripts/quiz-bonuses.js` annotates it with
+optional `bonuses`, keyed by date. It never changes club selections, accepted
+answers, difficulty or generation randomness. The schedule writer and its
+`--check` command also compile and validate this metadata using local career
+shards; no source requests or additional browser downloads are needed.
+
+Each date has at most one criterion. Nationality and career criteria are sought
+on Easy, then Medium, then Hard. Birth decades are a last resort: only if none of
+those three stages has a suitable nationality or career condition is the first
+usable birth criterion selected, again preferring Easy.
+Stages need at least three distinct usable answers with positive appearances.
+Candidates restrict the answers by nationality, birth decade or another senior
+career spell, excluding the strongest ordinary answer. Zero-appearance
+registrations cannot supply the candidate player. Career clues prefer documented spells
+outside familiar clubs; exact years appear only when both ends are usable.
+All accepted answers matching the selected condition receive the reward, with
+name/birth-year grouping preserved. Nationality clues name one country and also
+accept qualifying players with multiple nationalities. Historical country names
+use the same localized labels as the player lists. Selection evaluates the actual answer
+subset on the same 0–1 scale for every family: the mean of selectivity
+(`1 - targetCount / effectiveChoiceCount`) and recognition contrast with the
+strongest ordinary answer (`max(0, 1 - strongestTargetFame / ordinaryFame)`).
+There are no fixed points for a criterion family. These are local heuristics,
+not measured human difficulty.
+
+Each family contributes one finalist, chosen by exact subset quality. Supporting
+detail, such as usable dates and substantial appearances, then chooses between
+equally good clues within that family; it cannot boost the family itself.
+The two finalists are compared in 0.1-wide quality bands; a weaker band cannot
+win. Within the best band, a seeded weighted draw favors the higher exact quality
+and gently discounts recent use. Each past use contributes `0.5 ** (ageDays - 1)`
+pressure to its family, and its weight is
+`exp(2 * (quality - bestQuality)) / (1 + 0.25 * pressure)`. Recency therefore fades
+continuously with calendar distance, with no weekly cutoff or balancing target.
+Repeats remain possible; there is no required alternation or fixed run length.
+
+The RNG is local to the tie-break, seeded from the quiz date, so repeated builds
+agree without consuming puzzle-generator state. Each family has one finalist,
+avoiding extra tie-break chances for careers with more spells. There are no
+date-based type quotas. Repeated evidence for the same condition
+retains its strongest supporting spell. Dates without a suitable condition
+store `null`.
+
+Published conditions, including an absent condition, remain pinned while the
+matchup is unchanged. Targets remap by name/birth-year choice at release time.
+A new game copies its criterion into the saved state; started older games gain
+no new condition midway through play. Purple is earned only by the normal
+answer to that question, with no extra attempt or requirement for the streak.
+
+### Published horizon
+
 `site/data/quiz-schedule.json` locks distributed dates through `through`. Normal
 refresh appends through 90 days after the dataset build and retains an explicitly
 longer horizon. To deliberately replace future dates while preserving earlier games:
