@@ -8,6 +8,7 @@ const vm = require("node:vm");
 const { EPOCH, createRuntime, loadRuntime } = require("../scripts/quiz-schedule.js");
 const QuizCore = require("../site/quiz-core.js");
 const QuizRecognition = require("../site/quiz-recognition.js");
+const QuizResult = require("../site/quiz-result.js");
 
 const source = fs.readFileSync(path.join(__dirname, "../site/quiz.js"), "utf8");
 const schedule = JSON.parse(fs.readFileSync(path.join(__dirname, "../site/data/quiz-schedule.json"), "utf8"));
@@ -76,18 +77,19 @@ function loadQuiz(storage, today) {
   };
   const localStorage = memoryStorage({ quizSeries: EPOCH, ...storage });
   const context = vm.createContext({
-    CORE_DB: browser.index, DB: browser.index, QuizCore, QuizRecognition,
+    CORE_DB: browser.index, DB: browser.index, QuizCore, QuizRecognition, QuizResult,
     corePostings: browser.postings, postings: browser.postings,
     intersect: browser.intersect, coreLeagueCC: browser.leagueCC,
     coreClub: name => name, coreStature: () => 1,
     MARQUEE: new Set(),
     localStorage, document, window: { requestIdleCallback: null },
-    location: { hash: "" }, history: { replaceState() {} },
+    location: { hash: "", href: "https://game.test/" }, history: { replaceState() {} }, URL,
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     navigator: {}, addEventListener() {},
     $, lang: "it", langSel: $("langsel"), mode: "club",
     clubIds: [], leagueIds: [], countryIds: [], playerIds: [],
-    flag: (cc) => cc || "", esc: (s) => String(s), norm: (s) => String(s).toLowerCase(),
+    flag: (cc) => cc || "", countryFlag: (cc) => cc || "", natName: cc => cc, defunct: () => "",
+    esc: (s) => String(s), norm: (s) => String(s).toLowerCase(),
     careerOf: async () => [], suggOpen() {}, browseOpen() {}, syncHash() {},
     parseSelectionHash: () => ({ clubs: [], leagues: [], countries: [] }),
     setMode() {}, renderChips() {}, solve() {},
@@ -97,7 +99,7 @@ function loadQuiz(storage, today) {
   vm.runInContext(`${source}
 globalThis.__quizTest = {
   qGen, qStagesFromQids, qStagesFor, qLoad, qGuess, qResign, qFinish, qCore, qToday, qSave,
-  qForfeitRolled, qUtcMonth, qUtcWeekday, qRenderCal,
+  qForfeitRolled, qUtcMonth, qUtcWeekday, qRenderCal, qRenderEnd, qGetStats, qStartReplay, qShareText, qSkipStage, quizReset, qBonusText,
   get qs() { return qs; }, set qs(v) { qs = v; },
   get qPz() { return qPz; }, set qPz(v) { qPz = v; },
   get qHold() { return qHold; },
@@ -408,4 +410,241 @@ test("archive results place four squares directly in each calendar grid box", ()
   assert.ok(results, "played day contains result squares");
   assert.doesNotMatch(results, /<(?:span|div)\b/, "nested wrappers break the two-by-two grid");
   assert.deepEqual([...results.matchAll(/class="rsq r(\d)"/g)].map(match => Number(match[1])), [0, 1, 2, 3]);
+});
+
+test("archive shows an earned purple bonus without changing persisted outcome codes", () => {
+  const today = pickToday(), { api, context, localStorage } = loadQuiz({}, today);
+  api.qLoad();
+  const pid = api.qPz.stages[0].answers[0];
+  api.qs.bonus = { stage: 0, kind: "nationality", value: "DZ", targets: [api.qCore().choiceIdentity(pid)] };
+  api.qGuess(pid); api.qResign();
+  const saved = localStorage.quizHistory;
+  const res = JSON.parse(saved).days[today].res;
+  context.$("qcal").querySelector = () => el("back");
+  api.qRenderCal();
+  assert.match(context.$("qcal").innerHTML, /class="rsq rb"/);
+  assert.match(context.$("qcal").innerHTML, /aria-label="Schedina #1 · 1\/4 · Risposta bonus"/);
+  assert.deepEqual(res, [0, 2, 3, 3]);
+  assert.equal(localStorage.quizHistory, saved);
+});
+
+function clearDaily(api) {
+  for (let i = 0; i < 3; i++) assert.equal(api.qGuess(api.qPz.stages[i].answers[0]), "stage");
+}
+
+test("daily streak is saved before Impossible, survives reload, failure and repeated finishes", () => {
+  const today = pickToday();
+  const first = loadQuiz({}, today);
+  first.api.qLoad();
+  first.api.qs.hints.nat = 1;
+  clearDaily(first.api);
+  assert.equal(first.api.qs.done, false);
+  assert.equal(first.api.qGetStats().streak, 1);
+  assert.equal(first.api.qGetStats().played, 0);
+  const restored = loadQuiz(first.localStorage._data, today);
+  restored.api.qLoad();
+  assert.equal(restored.api.qs.stage, 3);
+  assert.equal(restored.api.qGetStats().streak, 1);
+  for (let n = 0; n < 5; n++) {
+    const wrong = restored.browser.index.names.findIndex((_name, pid) => !restored.api.qPz.stages[3].answers.includes(pid)
+      && !restored.api.qs.guesses.some(g => g.stage === 3 && g.pid === pid));
+    restored.api.qGuess(wrong);
+  }
+  assert.equal(restored.api.qs.done, true);
+  assert.equal(restored.api.qs.won, false);
+  assert.equal(restored.api.qGetStats().streak, 1);
+  assert.equal(restored.api.qGetStats().played, 1);
+  restored.api.qFinish();
+  assert.equal(restored.api.qGetStats().streak, 1);
+  assert.equal(restored.api.qGetStats().played, 1);
+});
+
+test("closing an unfinished Impossible after midnight keeps the secured daily streak", () => {
+  const today = pickToday(), ctx = loadQuiz({}, today);
+  ctx.api.qLoad(); clearDaily(ctx.api);
+  ctx.context.Date = frozenDate(dayAfter(today));
+  assert.equal(ctx.api.qForfeitRolled(), true);
+  assert.equal(ctx.api.qGetStats().streak, 1);
+  ctx.api.qLoad(); clearDaily(ctx.api);
+  assert.equal(ctx.api.qGetStats().streak, 2);
+  ctx.api.qResign();
+  assert.equal(ctx.api.qGetStats().streak, 2);
+});
+
+test("closing Impossible without guessing shares no invented wrong attempt", () => {
+  const { api } = loadQuiz({}, pickToday());
+  api.qLoad(); clearDaily(api); api.qResign();
+  const share = api.qShareText();
+  assert.match(share, /impossibile \(extra\)  ⬜/);
+  assert.doesNotMatch(share, /🟥/);
+  assert.match(share, /0 errori/);
+});
+
+test("a rolled-back third answer cannot secure the day", () => {
+  const { api, localStorage } = loadQuiz({}, pickToday());
+  api.qLoad();
+  api.qGuess(api.qPz.stages[0].answers[0]);
+  api.qGuess(api.qPz.stages[1].answers[0]);
+  Object.defineProperty(localStorage, "quiz", { configurable: true,
+    get() { return localStorage._data.quiz; }, set() { throw new Error("QuotaExceededError"); } });
+  assert.equal(api.qGuess(api.qPz.stages[2].answers[0]), null);
+  assert.equal(api.qs.stage, 2);
+  assert.equal(localStorage.quizStats, undefined);
+});
+
+test("purple is earned only by an accepted matching answer and survives restore", () => {
+  const ctx = loadQuiz({}, pickToday()), { api } = ctx;
+  api.qLoad();
+  const pid = api.qPz.stages[0].answers[0];
+  api.qs.bonus = { stage: 0, kind: "nationality", value: "DZ", targets: [api.qCore().choiceIdentity(pid)] };
+  api.qGuess(pid);
+  assert.equal(api.qs.guesses[0].bonus, true);
+  assert.equal(api.qs.stage, 1, "bonus gives no extra attempt");
+  const restored = loadQuiz(ctx.localStorage._data, ctx.today);
+  restored.api.qLoad();
+  assert.equal(restored.api.qs.guesses[0].bonus, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(restored.api.qs.bonus)), JSON.parse(JSON.stringify(api.qs.bonus)));
+  const normal = loadQuiz({}, pickToday()); normal.api.qLoad();
+  normal.api.qs.bonus = { stage: 0, kind: "nationality", value: "DZ", targets: ["Another player\u00001990"] };
+  assert.equal(normal.api.qGuess(normal.api.qPz.stages[0].answers[0]), "stage");
+  assert.equal(normal.api.qs.guesses[0].bonus, false);
+});
+
+test("updating published bonus selection does not replace a criterion already shown", () => {
+  const today = pickToday(), initial = loadQuiz({}, today);
+  initial.api.qLoad();
+  const pid = initial.api.qPz.stages[0].answers[0];
+  const shown = { stage: 0, kind: "birth", from: 1990, to: 1999,
+    targets: [initial.api.qCore().choiceIdentity(pid)] };
+  initial.api.qs.bonus = shown;
+  initial.api.qSave();
+  const restored = loadQuiz(initial.localStorage._data, today);
+  restored.browser.index.quizSchedule.bonuses[today] = { stage: 0, kind: "career", value: "Different Club",
+    targets: shown.targets };
+  restored.api.qLoad();
+  assert.deepEqual(JSON.parse(JSON.stringify(restored.api.qs.bonus)), shown);
+});
+
+test("practice never increments an official streak and sharing names no answers", () => {
+  const today = dayAfter(pickToday()), ctx = loadQuiz({}, today);
+  ctx.api.qLoad(); clearDaily(ctx.api); ctx.api.qResign();
+  const before = ctx.localStorage.quizStats;
+  ctx.api.qStartReplay(pickToday()); clearDaily(ctx.api); ctx.api.qResign();
+  assert.equal(ctx.localStorage.quizStats, before);
+  const share = ctx.api.qShareText();
+  assert.match(share, /\?day=2026-08-21#quiz/);
+  assert.doesNotMatch(share, /giorn[oi] di serie/);
+  for (const guess of ctx.api.qs.guesses) assert.equal(share.includes(guess.name), false);
+});
+
+test("quizReset archive option removes only today's result and preserves stats and other days", () => {
+  const earlier = pickToday(), today = dayAfter(earlier), ctx = loadQuiz({}, today);
+  ctx.api.qLoad(); clearDaily(ctx.api); ctx.api.qResign();
+  const h = JSON.parse(ctx.localStorage.quizHistory);
+  h.days[earlier] = { num: 1, res: [0, 1, 2, 3] };
+  ctx.localStorage.quizHistory = JSON.stringify(h);
+  const stats = ctx.localStorage.quizStats;
+  ctx.localStorage.quizReplays = JSON.stringify({ v: 1, days: { [earlier]: { stage: 1 } } });
+  const replays = ctx.localStorage.quizReplays;
+  assert.equal(ctx.api.quizReset({ archive: true }), "quiz reset");
+  const after = JSON.parse(ctx.localStorage.quizHistory);
+  assert.equal(after.days[today], undefined);
+  assert.deepEqual(after.days[earlier], h.days[earlier]);
+  assert.equal(ctx.localStorage.quizStats, stats);
+  assert.equal(ctx.localStorage.quizReplays, replays);
+  assert.equal(ctx.localStorage.quiz, undefined);
+  ctx.api.qLoad();
+  assert.equal(ctx.api.qs.date, today);
+  assert.equal(ctx.api.qs.done, false);
+  assert.equal(ctx.api.qs.guesses.length, 0);
+});
+
+test("quizReset retains its boolean stats option and can combine stats and archive removal", () => {
+  const ctx = loadQuiz({}, pickToday());
+  ctx.api.qLoad(); clearDaily(ctx.api); ctx.api.qResign();
+  const stats = ctx.localStorage.quizStats, archive = ctx.localStorage.quizHistory;
+  ctx.api.quizReset();
+  assert.equal(ctx.localStorage.quizStats, stats);
+  assert.equal(ctx.localStorage.quizHistory, archive);
+  ctx.api.qLoad();
+  assert.equal(ctx.api.qs.done, true, "default reset still respects a completed archived day");
+  ctx.api.quizReset(true);
+  assert.equal(ctx.localStorage.quizStats, undefined);
+  assert.equal(ctx.localStorage.quizHistory, archive);
+  ctx.api.qLoad();
+  assert.equal(ctx.api.qs.done, true);
+  ctx.api.quizReset({ archive: true, stats: true });
+  assert.equal(ctx.localStorage.quizStats, undefined);
+  ctx.api.qLoad();
+  assert.equal(ctx.api.qs.done, false);
+  assert.equal(ctx.localStorage.quizStats, undefined);
+});
+
+test("quizReset from the open archive returns to today's fresh board and dated URL", () => {
+  const earlier = pickToday(), today = dayAfter(earlier), ctx = loadQuiz({}, today);
+  ctx.api.qLoad(); clearDaily(ctx.api); ctx.api.qResign();
+  ctx.api.qStartReplay(earlier);
+  vm.runInContext(`qReplayDate = qShift(qToday(), -1); qConfirm = "leave"; qLeaveMode = "club";`, ctx.context);
+  const classes = new Set(["quiz", "qcal"]), cl = ctx.context.document.body.classList;
+  cl.contains = name => classes.has(name);
+  cl.remove = (...names) => names.forEach(name => classes.delete(name));
+  ctx.context.location.href = `https://game.test/?day=${earlier}#quiz`;
+  let nextUrl;
+  ctx.context.history.replaceState = (_state, _title, url) => { nextUrl = url; };
+  ctx.api.quizReset({ archive: true });
+  assert.equal(ctx.api.qs.date, today);
+  assert.equal(ctx.api.qs.done, false);
+  assert.equal(classes.has("qcal"), false);
+  assert.equal(new URL(nextUrl).searchParams.get("day"), today);
+  assert.equal(vm.runInContext("qReplaying", ctx.context), false);
+  assert.equal(vm.runInContext("qReplayDate", ctx.context), null);
+  assert.equal(vm.runInContext("qConfirm", ctx.context), null);
+});
+
+test("nationality bonus labels preserve historic countries and localize legacy multi-country clues", () => {
+  const { api, context } = loadQuiz({}, pickToday());
+  const app = fs.readFileSync(path.join(__dirname, "../site/app.js"), "utf8");
+  vm.runInContext(app.slice(app.indexOf("const HIST_NAME ="), app.indexOf("// defunct marker:")), context);
+  assert.equal(api.qBonusText({ kind: "nationality", value: "YU" }), "Nazionalità: Jugoslavia");
+  assert.equal(api.qBonusText({ kind: "nationality", value: "FR,SN" }), "Nazionalità: Francia / Senegal");
+  context.lang = "en";
+  assert.equal(api.qBonusText({ kind: "nationality", value: "YU" }), "Nationality: Yugoslavia");
+});
+
+test("answer disclosure includes every unguessed bonus option outside the first six without awarding it", () => {
+  const { api, context, localStorage } = loadQuiz({}, "2026-11-11");
+  api.qLoad();
+  const stage = api.qPz.stages[0], core = api.qCore();
+  const choices = core.uniqueChoices([...core.qRanked(stage), ...stage.answers]);
+  assert.ok(choices.length > 8);
+  const extra = choices.slice(-2);
+  api.qs.bonus = { stage: 0, kind: "nationality", value: "DZ", targets: extra.map(core.choiceIdentity) };
+  api.qGuess(choices[0]); api.qResign();
+  const state = JSON.stringify(api.qs), stats = localStorage.quizStats, history = localStorage.quizHistory;
+  api.qRenderEnd();
+  const reveal = context.$("qend").innerHTML.match(/<div class="qreveal">([\s\S]*?)<\/div>/)[1];
+  assert.equal([...reveal.matchAll(/class="qrp"/g)].length, 8);
+  assert.equal([...reveal.matchAll(/class="qbonus-hit"/g)].length, 2);
+  for (const pid of extra) assert.equal([...reveal.matchAll(new RegExp(`data-p="${pid}"`, "g"))].length, 1);
+  const remaining = choices.length - 8;
+  assert.ok(reveal.includes(vm.runInContext(`QSTR[lang].qOthers(${remaining})`, context)));
+  assert.equal(JSON.stringify(api.qs), state);
+  assert.equal(localStorage.quizStats, stats);
+  assert.equal(localStorage.quizHistory, history);
+  assert.ok(api.qs.guesses.every(g => !g.bonus));
+  assert.equal(api.qShareText().includes("🟪"), false);
+});
+
+test("a bonus option already among the first six is marked once without duplication", () => {
+  const { api, context } = loadQuiz({}, "2026-11-11");
+  api.qLoad();
+  const stage = api.qPz.stages[0], core = api.qCore();
+  const choices = core.uniqueChoices([...core.qRanked(stage), ...stage.answers]), pid = choices[1];
+  api.qs.bonus = { stage: 0, kind: "nationality", value: "DZ", targets: [core.choiceIdentity(pid)] };
+  api.qGuess(pid); api.qResign();
+  const reveal = context.$("qend").innerHTML.match(/<div class="qreveal">([\s\S]*?)<\/div>/)[1];
+  assert.equal([...reveal.matchAll(/class="qrp"/g)].length, 6);
+  assert.equal([...reveal.matchAll(/class="qbonus-hit"/g)].length, 1);
+  assert.equal([...reveal.matchAll(new RegExp(`data-p="${pid}"`, "g"))].length, 1);
+  assert.equal(api.qs.guesses[0].bonus, true);
 });

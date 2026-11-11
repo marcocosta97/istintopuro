@@ -38,7 +38,7 @@ function runtime() {
     $: id => elements[id], document: { createElement: element },
     flag: value => value, hilite: value => value, lang: "it", QSTR: { it: { qsProbe: "Type a name" } },
     qPick: pid => picks.push(pid), qRolled: () => false,
-    qSave: () => true, qFinish() {},
+    qSave: () => true, qFinish() {}, qUpdateDaily() {}, qReplaying: false,
     qs: { stage: 0, lives: 5, guesses: [], done: false }, qPz: { stages: [{ answers: [0] }] },
   });
   const identities = source.slice(source.indexOf("const qIdentity ="), source.indexOf("function qMigrateState"));

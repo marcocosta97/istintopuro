@@ -175,7 +175,10 @@ const qIdentity = (pid) => qCore().playerIdentity(pid);
 const qGuessIdentity = (guess) => (guess.key || guess.identity
   || `${guess.name}\u0000${guess.birth || ""}`).split("\u0000").slice(0, 2).join("\u0000");
 function qMigrateState(state, stages) {
-  return qCore().migrateState(state, stages, QHINTS);
+  const migrated = qCore().migrateState(state, stages, QHINTS);
+  // Never introduce a new criterion midway through a saved game.
+  if (migrated && !Object.prototype.hasOwnProperty.call(migrated, "bonus")) migrated.bonus = null;
+  return migrated;
 }
 
 function qRunStarted(state) {
@@ -214,7 +217,8 @@ function qFresh(today, puzzle) {
   qs = { v: 2, date: today, num: puzzle.num, built: DB.built,
          stages: qQidsOf(puzzle.stages),
          stage: 0, lives: 5, guesses: [], hints: Object.fromEntries(QHINTS.map(k => [k, null])),
-         hintTargets: {}, skipped: [], startedAt: Date.now(), done: false, won: false };
+         hintTargets: {}, skipped: [], startedAt: Date.now(), done: false, won: false,
+         bonus: qBonusFor(today, puzzle.stages) };
   if (!qSave()) qNoteStorage();
 }
 function qRestoreLive(state) {
@@ -227,7 +231,7 @@ function qRestoreLive(state) {
   const saved = qSave();
   // A done live game whose stats write never landed still needs the aggregate.
   // qStats no-ops when this date is already on the cursor.
-  if (qs.done && !qReplaying) qStats();
+  if (saved && !qReplaying) { qUpdateDaily(); if (qs.done) qStats(); }
   // backfill: a game finished before the calendar shipped has no history row
   if (qs.done && !qHistory().days[qs.date]) qRecordDay();
   if (!saved) qNoteStorage();
@@ -242,6 +246,7 @@ function qAdoptRecorded(hist, today) {
   if (!rebuilt) { qHoldRetired(hist); return; }
   qHold = null; qHoldRes = null; qHoldNum = null;
   qs = rebuilt; qPz = { stages };
+  qs.resultDetailsMissing = true;
   if (!qSave()) qNoteStorage();
   if (!qReplaying) qStats();
 }
@@ -338,10 +343,11 @@ function qStartReplay(date) {
   const stageQids = stages.map(st => st.clubs.map(ci => DB.clubs[ci][3]));
   qs = rec && qCore().restoreHistoryState(rec, stages,
     { date, num: qNum(date), built: DB.built, stageQids }, QHINTS);
+  if (qs) qs.resultDetailsMissing = true;
   qs ||= { v: 2, date, num: qNum(date), built: DB.built,
            stages: stageQids, stage: 0, lives: 5, guesses: [],
            hints: Object.fromEntries(QHINTS.map(k => [k, null])), hintTargets: {},
-           skipped: [], startedAt: Date.now(), done: false, won: false };
+           skipped: [], startedAt: Date.now(), done: false, won: false, bonus: qBonusFor(date, stages) };
   qSave();
 }
 
@@ -357,7 +363,8 @@ function qGuess(pid) {
   if (ok) pid = answer;
   const snapshot = JSON.parse(JSON.stringify(qs));
   qs.guesses.push({ name: DB.names[pid], birth: DB.births[pid] || 0, nat: DB.nats[pid] || "",
-    key: qIdentity(pid), pid, stage: qs.stage, ok });
+    key: qIdentity(pid), pid, stage: qs.stage, ok,
+    bonus: ok && qs.bonus?.stage === qs.stage && qs.bonus.targets.includes(qCore().choiceIdentity(pid)) });
   let ev;
   if (ok) {
     if (qs.stage === 3) { qs.done = qs.won = true; ev = "won"; }
@@ -367,6 +374,7 @@ function qGuess(pid) {
   // A failed write rolls the guess back. Stats and history run only after the
   // terminal blob is durable, so a full disk cannot close the aggregate early.
   if (!qSave()) { qs = snapshot; qNoteStorage(); return null; }
+  if (!qReplaying) qUpdateDaily();
   if (qs.done) qFinish();
   return ev;
 }
@@ -391,34 +399,46 @@ function qHint(kind) {  // a QHINTS key — each usable once per run
 }
 
 // daily streak + histogram, updated exactly once as a run reaches done
+function qUpdateDaily() {
+  if (!qs || qReplaying || !QuizResult.dailyWon(qs)) return;
+  const st = QuizResult.updateStreak(qGetStats(), qs);
+  try { localStorage.quizStats = JSON.stringify(st); } catch {}
+}
+
 function qStats() {
   const existing = qGetStats();
-  const st = existing ||
-    { v: 1, played: 0, streak: 0, maxStreak: 0, lastWinDate: null, byStage: [0, 0, 0, 0, 0] };
-  if (st.lastPlayDate === qs.date) return st;
+  const st = QuizResult.updateStreak(existing, qs);
+  if (st.lastPlayDate === qs.date) {
+    try { localStorage.quizStats = JSON.stringify(st); } catch {}
+    return st;
+  }
   // Saves from before the cursor already include a finished day once history has
   // it. A cursor sitting on an earlier day means today's aggregate write never
   // landed, even when the calendar row did.
-  if (existing && !Object.prototype.hasOwnProperty.call(existing, "lastPlayDate") && qHistory().days[qs.date]) {
+  if (existing && existing.played > 0 && !Object.prototype.hasOwnProperty.call(existing, "lastPlayDate") && qHistory().days[qs.date]) {
     st.lastPlayDate = qs.date;
     try { localStorage.quizStats = JSON.stringify(st); } catch {}
     return st;
   }
   st.played++;
   st.byStage[qSolved()]++;
-  if (qs.won) {  // UTC day numbers: "yesterday" survives DST shifts
-    const dayN = (ds) => { const [y, m, d] = ds.split("-").map(Number); return Date.UTC(y, m - 1, d) / 864e5; };
-    st.streak = st.lastWinDate && dayN(qs.date) - dayN(st.lastWinDate) === 1 ? st.streak + 1 : 1;
-    st.maxStreak = Math.max(st.maxStreak, st.streak);
-    st.lastWinDate = qs.date;
-  } else st.streak = 0;
   st.lastPlayDate = qs.date;
   try { localStorage.quizStats = JSON.stringify(st); } catch {}
   return st;
 }
 function qGetStats() {
-  try { const s = JSON.parse(localStorage.quizStats || ""); if (s && s.v === 1) return s; } catch {}
+  try { const s = JSON.parse(localStorage.quizStats || ""); if (s && s.v === 1) return QuizResult.streakStats(s); } catch {}
   return null;
+}
+
+function qBonusFor(date, stages) {
+  const schedule = CORE_DB.quizSchedule, bonus = schedule?.bonuses?.[date];
+  if (!bonus || !Number.isInteger(bonus.stage) || bonus.stage < 0 || bonus.stage > 2
+      || !["career", "nationality", "birth"].includes(bonus.kind) || !Array.isArray(bonus.targets)
+      || !qSameQids(schedule.days[date], stages)) return null;
+  const valid = new Set(stages[bonus.stage].answers.map(pid => qCore().choiceIdentity(pid)));
+  const targets = bonus.targets.filter(key => valid.has(key));
+  return targets.length ? { ...bonus, targets } : null;
 }
 
 // Per-day archive for the calendar: summary codes for its tile, club QIDs that pin
@@ -438,8 +458,29 @@ function qRecordDay() {
 // ---------------------------------------------------------------- i18n
 const QSTR = {
   it: {
-    qTag: "la schedina del giorno — quattro sfide, cinque tentativi",
+    qTag: "la schedina del giorno — tre sfide e un’impossibile",
     qNum: (n) => `Schedina #${n}`,
+    qDailyWon: "Schedina in tasca.", qDailyLost: "Ci riproviamo domani.",
+    qDailySub: "Facile, media e difficile risolte.", qDailyUnit: "sfide del giorno",
+    qDailyPartial: (n) => `${n} delle tre sfide del giorno risolte.`,
+    qSeriesDays: (n) => `${n} giorn${n === 1 ? "o" : "i"} di serie`,
+    qSecured: "Giornata conquistata. L’impossibile è un extra.",
+    qSeriesRule: "La serie si conquista con le prime tre sfide.",
+    qBonusTitle: "Da intenditore", qBonusOptional: "· facoltativa", qBonusWon: "Risposta bonus",
+    qBonusNat: (n) => `Nazionalità: ${n}`,
+    qBonusBirth: (a, b) => `Nato tra il ${a} e il ${b}`,
+    qBonusCareer: (club, years) => `Ha giocato nel ${club}${years ? ` · ${years}` : ""}`,
+    qExtra: "extra", qExtraWon: "Impossibile risolta", qExtraMiss: "Non risolta · giornata conquistata",
+    qFirstTry: "Al primo colpo", qSolvedLabel: "Risolta", qMissed: "Non risolta",
+    qSkipped: "Saltata", qUnreached: "Non giocata", qUnknownDetails: "Dettagli dei tentativi non disponibili",
+    qErrors: (n) => `${n} error${n === 1 ? "e" : "i"}`,
+    qHintsUsed: (n) => `${n} aiut${n === 1 ? "o" : "i"}`,
+    qAttempts: "Tentativi", qCorrect: "Risposta corretta", qWrong: "Tentativo sbagliato", qHintedHit: "Risolta con aiuto",
+    qExploreAnswers: "Scopri le risposte", qPersonalStats: "Le tue statistiche",
+    qAllGuesses: "I tuoi tentativi", qClose: "concludi schedina",
+    qCloseWarn: "Concludere la schedina? La giornata è già conquistata.",
+    qShareLegend: "🟥 errore · 🟩 risolta · 🟨 con aiuto · 🟪 bonus · ⬜ non giocata",
+    qShareStatus: "Risultato copiato negli appunti.",
     qStages: ["facile", "media", "difficile", "impossibile"],
     qQ: (n) => n === 2 ? "Chi ha giocato in entrambe?" : "Chi ha giocato in tutte e tre?",
     qPh: "Il tuo giocatore…",
@@ -458,12 +499,12 @@ const QSTR = {
     qNoZero: (l) => `No… risulta tesserato per ${l.join(" e ")}, ma con 0 presenze`,
     qNoMixed: (m, z) => `No… mai in ${m.join(" o ")}; tesserato ma con 0 presenze in ${z.join(" e ")}`,
     qWon: "Schedina completata!", qLost: "Tentativi finiti.",
-    qNewDay: "È mezzanotte: la schedina non finita è abbandonata", qPlay: "gioca",
+    qNewDay: "È iniziata una nuova schedina. La precedente resta in archivio.", qPlay: "gioca",
     qScheduleMiss: "La schedina di oggi non si è caricata.", qRetry: "riprova",
     qStorage: "Memoria piena: la giocata non è stata salvata.",
     qRetired: "Questa schedina resta in archivio, ma il tabellone non si può riaprire.",
     qSq: ["pulita", "con aiuto", "sbagliata", "non raggiunta"],
-    qLegend: "✓ pulita · ✦ con aiuto · × sbagliata · – non raggiunta",
+    qLegend: "✓ pulita · ✦ con aiuto · ◆ bonus · × sbagliata · – non raggiunta",
     qStartsOn: (d) => `La schedina del giorno inizia ${d}. Torna a giocare!`,
     qErrS: (n) => `Errori ${n}/5`, qHintS: (n) => `Aiuti ${n}/3`,
     qStreakS: (n) => `Serie ${n}`,
@@ -482,8 +523,29 @@ const QSTR = {
     qCalHint: "rigioca una schedina passata",
   },
   en: {
-    qTag: "the daily quiz — four challenges, five guesses",
+    qTag: "the daily quiz — three stages and an impossible",
     qNum: (n) => `Quiz #${n}`,
+    qDailyWon: "Daily quiz secured.", qDailyLost: "There’s always tomorrow.",
+    qDailySub: "Easy, medium and hard cleared.", qDailyUnit: "daily stages",
+    qDailyPartial: (n) => `${n} of the three daily stages cleared.`,
+    qSeriesDays: (n) => `${n}-day streak`,
+    qSecured: "Daily quiz secured. Impossible is an extra.",
+    qSeriesRule: "Clear the first three stages to keep your streak.",
+    qBonusTitle: "For the football nerds", qBonusOptional: "· optional", qBonusWon: "Bonus answer",
+    qBonusNat: (n) => `Nationality: ${n}`,
+    qBonusBirth: (a, b) => `Born between ${a} and ${b}`,
+    qBonusCareer: (club, years) => `Played for ${club}${years ? ` · ${years}` : ""}`,
+    qExtra: "extra", qExtraWon: "Impossible cleared", qExtraMiss: "Not solved · daily quiz secured",
+    qFirstTry: "First try", qSolvedLabel: "Cleared", qMissed: "Not solved",
+    qSkipped: "Skipped", qUnreached: "Not played", qUnknownDetails: "Attempt details unavailable",
+    qErrors: (n) => `${n} miss${n === 1 ? "" : "es"}`,
+    qHintsUsed: (n) => `${n} hint${n === 1 ? "" : "s"}`,
+    qAttempts: "Attempts", qCorrect: "Correct answer", qWrong: "Wrong guess", qHintedHit: "Cleared with a hint",
+    qExploreAnswers: "Explore the answers", qPersonalStats: "Your statistics",
+    qAllGuesses: "Your guesses", qClose: "finish quiz",
+    qCloseWarn: "Finish the quiz? Your daily success is already secured.",
+    qShareLegend: "🟥 miss · 🟩 cleared · 🟨 hinted · 🟪 bonus · ⬜ not played",
+    qShareStatus: "Result copied to clipboard.",
     qStages: ["easy", "medium", "hard", "impossible"],
     qQ: (n) => n === 2 ? "Who played for both?" : "Who played for all three?",
     qPh: "Your guess…",
@@ -503,12 +565,12 @@ const QSTR = {
     qNoZero: (l) => `No… registered with ${l.join(" and ")}, but made 0 appearances`,
     qNoMixed: (m, z) => `No… didn't play for ${m.join(" or ")}; registered but made 0 appearances for ${z.join(" and ")}`,
     qWon: "Quiz completed!", qLost: "Out of guesses.",
-    qNewDay: "It's past midnight: the unfinished quiz is forfeited", qPlay: "play it",
+    qNewDay: "A new daily quiz has started. The previous one stays in the archive.", qPlay: "play it",
     qScheduleMiss: "Today's quiz did not load.", qRetry: "retry",
     qStorage: "Storage is full: that play was not saved.",
     qRetired: "This quiz stays in the archive, but the board cannot be reopened.",
     qSq: ["clean", "hinted", "missed", "unreached"],
-    qLegend: "✓ clean · ✦ hinted · × missed · – unreached",
+    qLegend: "✓ clean · ✦ hinted · ◆ bonus · × missed · – unreached",
     qStartsOn: (d) => `The daily quiz starts ${d}. Come back to play!`,
     qErrS: (n) => `Misses ${n}/5`, qHintS: (n) => `Hints ${n}/3`,
     qStreakS: (n) => `Streak ${n}`,
@@ -541,6 +603,8 @@ function qBuild() {  // static skeleton, rendered once on first entry
     <div id="qcard">
       <div id="qchips"></div>
       <div id="qq"></div>
+      <div id="qbonus" hidden></div>
+      <p id="qdaily" hidden></p>
       <div id="qwrap">
         <input id="qsearch" type="text" autocomplete="off" autocorrect="off" spellcheck="false"
                role="combobox" aria-expanded="false" aria-controls="qsugg" aria-autocomplete="list" enterkeyhint="go">
@@ -563,7 +627,7 @@ function qBuild() {  // static skeleton, rendered once on first entry
       <button id="qresign" type="button"></button>
     </div>
     <ul id="qlog"></ul>
-    <div id="qend" hidden></div>
+    <section id="qend" aria-labelledby="qresult-title" hidden></section>
     <div id="qnewday" hidden></div>
     <div id="qcal"></div>`;
   $("qcal-open").onclick = () => qCalOpen(true);
@@ -726,7 +790,8 @@ function qPick(pid) {
   const ev = qGuess(pid);
   if (ev === null) { qRender(); return; }  // frozen (rolled past midnight)
   const q = QSTR[lang], good = ev === "stage" || ev === "won";
-  qFlash(ev === "dup" ? q.qDup : good ? q.qOk : qWrongMsg(pid, st), good ? "ok" : "no");
+  const bonus = good && qs.guesses.at(-1)?.bonus;
+  qFlash(ev === "dup" ? q.qDup : good ? (bonus ? q.qBonusWon : q.qOk) : qWrongMsg(pid, st), bonus ? "bonus" : good ? "ok" : "no");
   if (ev === "wrong" || ev === "dup") {
     $("qcard").classList.remove("shake");
     void $("qcard").offsetWidth;  // restart the animation
@@ -740,7 +805,8 @@ function qPick(pid) {
 let qMsgGen = 0;
 function qFlash(text, cls) {
   const el = $("qmsg"), g = ++qMsgGen;
-  el.textContent = text;
+  if (cls === "bonus") el.innerHTML = `${qDiamond()} ${esc(text)}`;
+  else el.textContent = text;
   el.className = cls;
   setTimeout(() => { if (g === qMsgGen) { el.textContent = ""; el.className = ""; } }, 3000);
 }
@@ -799,6 +865,7 @@ function qRender() {
   // over; unreached rows stay covered until the run ends, since that's when
   // they close too
   const ol = $("qstages");
+  ol.hidden = qs.done;
   ol.innerHTML = "";
   qPz.stages.forEach((st, i) => {
     const skipped = qs.skipped.includes(i);
@@ -806,12 +873,13 @@ function qRender() {
     const cur = i === qs.stage && !qs.done, fail = qs.done && !qs.won && i === qs.stage;
     const shown = qs.done && !done && !cur && !fail && !skipped;
     const li = document.createElement("li");
-    // a stage cleared with a hint reads amber, a clean clear reads green
+    // Hinted clears are amber; an earned bonus overrides the answer treatment.
     li.className = done ? (qHinted(i) ? "done hinted" : "done")
                 : skipped ? "shown skip"
                 : cur ? "cur" : fail ? "fail" : shown ? "shown" : "todo";
     const hit = done ? qs.guesses.find(g => g.ok && g.stage === i) : null;
-    const info = done ? `${esc(qClubNames(st))} <b>✓ ${esc(hit ? hit.name : "")}${qFaceTag(st)}</b>`
+    if (hit?.bonus) li.className += " bonus";
+    const info = done ? `${esc(qClubNames(st))} <b${hit?.bonus ? ' class="qbonus-hit"' : ""}>${hit?.bonus ? qBonusMark() : "✓"} ${esc(hit ? hit.name : "")}${qFaceTag(st)}</b>`
                : skipped ? `${esc(qClubNames(st))} <b class="qx">✗ ${esc(DB.names[qFace(st)])}${qFaceTag(st)}</b>`
                : fail ? `${esc(qClubNames(st))} <b class="qx">✗ ${esc(DB.names[qFace(st)])}${qFaceTag(st)}</b>`
                : shown ? `${esc(qClubNames(st))} <b>${esc(DB.names[qFace(st)])}${qFaceTag(st)}</b>`
@@ -837,8 +905,14 @@ function qRender() {
       return `<span class="chip" title="${esc(c[0])}">${countryFlag(c[1])} ${esc(coreClub(c[0]))}${defunct(c)}</span>`;
     }).join("");
     $("qq").textContent = q.qQ(st.clubs.length);
+    const bonus = qs.bonus?.stage === qs.stage ? qs.bonus : null;
+    $("qbonus").hidden = !bonus;
+    $("qbonus").innerHTML = bonus ? `<div class="qbonus-heading"><b>${qDiamond()} ${esc(q.qBonusTitle)}</b> <span class="qbonus-optional">${esc(q.qBonusOptional)}</span></div><div>${esc(qBonusText(bonus))}</div>` : "";
+    $("qdaily").hidden = !QuizResult.dailyWon(qs);
+    $("qdaily").textContent = q.qSecured;
     $("qsearch").placeholder = q.qPh;
     $("qsearch").setAttribute("aria-label", q.qPh);
+    $("qsearch").setAttribute("aria-describedby", bonus ? "qq qbonus" : "qq");
     $("qlives").innerHTML = "●".repeat(qs.lives) + `<span class="off">${"●".repeat(5 - qs.lives)}</span>`;
     $("qlives").setAttribute("aria-label", q.qLives(qs.lives));
     for (const kind of QHINTS) {
@@ -861,21 +935,24 @@ function qRender() {
     if (confirming) {
       const resigning = qConfirm === "resign";
       const leaving = qConfirm === "leave";
-      $("qconfirmtext").textContent = leaving ? q.qLeaveWarn : resigning ? q.qResignWarn : q.qSkipWarn;
+      $("qconfirmtext").textContent = leaving ? q.qLeaveWarn : resigning
+        ? (QuizResult.dailyWon(qs) ? q.qCloseWarn : q.qResignWarn) : q.qSkipWarn;
       $("qconfirm-no").textContent = q.qConfirmNo;
       $("qconfirm-yes").textContent = leaving ? q.qConfirmLeave(q.qModes[qLeaveMode])
-        : resigning ? q.qConfirmResign : q.qConfirmSkip;
+        : resigning ? (QuizResult.dailyWon(qs) ? q.qClose : q.qConfirmResign) : q.qConfirmSkip;
     }
-    $("qresign").textContent = qs.stage === 3 ? q.qResignBtn : q.qSkipBtn;
+    $("qresign").textContent = qs.stage === 3 ? (QuizResult.dailyWon(qs) ? q.qClose : q.qResignBtn) : q.qSkipBtn;
   }
   // guess history, newest first
   const log = $("qlog");
+  log.hidden = qs.done;
   log.innerHTML = "";
   [...qs.guesses].reverse().forEach(g => {
     const li = document.createElement("li");
+    const bonus = g.ok && g.bonus;
     const why = g.ok ? "" : `<small class="qwhy">${esc(qWrongMsg(g.pid, qPz.stages[g.stage]))}</small>`;
-    li.innerHTML = `<span class="${g.ok ? "qv" : "qx"}">${g.ok ? "✓" : "✗"}</span>`
-      + `<span class="qguess">${esc(g.name)}${why}</span><small>${q.qStages[g.stage]}</small>`;
+    const mark = bonus ? qBonusMark() : `<span class="${g.ok ? "qv" : "qx"}">${g.ok ? "✓" : "✗"}</span>`;
+    li.innerHTML = mark + `<span class="qguess">${esc(g.name)}${why}</span><small>${q.qStages[g.stage]}</small>`;
     log.appendChild(li);
   });
   qRenderEnd();
@@ -980,84 +1057,125 @@ function qHintText(kind, st) {
 // per-stage outcome for the four squares: 0 clean clear · 1 cleared with a hint
 // · 2 missed (skipped, or the stage that ended the run) · 3 unreached. Shared by
 // the share grid, the end screen and the calendar archive.
-function qResCodes() {
-  const reached = qs.won ? 4 : qs.stage;
-  return [0, 1, 2, 3].map(i =>
-    qs.skipped.includes(i) ? 2
-    : i < reached ? (qHinted(i) ? 1 : 0)
-    : qs.done && !qs.won && i === qs.stage ? 2 : 3);
-}
-const QRESSQ = ["🟩", "🟨", "🟥", "⬛"];  // outcome code → share-grid emoji (share TEXT only)
-// the on-screen squares: one CSS component, used by both the end screen (a row)
-// and the calendar (a 2×2), so the two always read identically — no per-platform
-// emoji drift. Emoji stay only in the copyable share text.
-const qSqCells = (codes) => codes.map(c => `<i class="rsq r${c}" aria-hidden="true"></i>`).join("");
-const qSqLabel = (codes) => codes.map(c => QSTR[lang].qSq[c] || "").join(", ");
+function qResCodes() { return QuizResult.codes(qs); }
+const QRESSQ = ["🟩", "🟨", "🟥", "⬛"];
+const qSqCells = (codes, bonusStage = -1) => codes.map((c, i) => `<i class="rsq ${i === bonusStage && c < 2 ? "rb" : `r${c}`}" aria-hidden="true"></i>`).join("");
+const qSqLabel = codes => codes.map(c => QSTR[lang].qSq[c] || "").join(", ");
 const qSqRow = (codes, named) => `<span class="rsqrow"${named ? ` role="img" aria-label="${esc(qSqLabel(codes))}"` : ` aria-hidden="true"`}>${qSqCells(codes)}</span>`;
-
-function qSummary() {  // shared by the end screen and the share text
+const qDiamond = () => `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m8 2 6 6-6 6-6-6Z"/></svg>`;
+const qBonusMark = () => `<span class="qbonus-hit" role="img" aria-label="${esc(QSTR[lang].qBonusWon)}">${qDiamond()}</span>`;
+function qBonusText(bonus) {
   const q = QSTR[lang];
-  const sq = qResCodes().map(c => QRESSQ[c]).join("");
-  const used = QHINTS.filter(k => qs.hints[k] !== null);
-  const line = `${q.qErrS(qs.guesses.filter(g => !g.ok).length)} · ${q.qHintS(used.length)}`;
-  return { cleared: qSolved(), sq, line };
+  if (bonus.kind === "nationality") {
+    return q.qBonusNat(bonus.value.split(",").map(natName).join(" / "));
+  }
+  if (bonus.kind === "birth") return q.qBonusBirth(bonus.from, bonus.to);
+  return q.qBonusCareer(coreClub(bonus.value), bonus.from ? `${bonus.from}–${bonus.to}` : "");
 }
-
+function qRowText(row, result) {
+  const q = QSTR[lang];
+  if (row.skipped) return q.qSkipped;
+  if (row.code === 3) return q.qUnreached;
+  if (row.stage === 3 && row.code === 2 && result.success) return q.qExtraMiss;
+  if (!result.known) return row.code < 2 ? q.qSolvedLabel : q.qMissed;
+  if (row.firstTry) return q.qFirstTry;
+  const parts = row.code < 2 ? [] : [q.qMissed];
+  if (row.errors) parts.push(q.qErrors(row.errors));
+  if (row.hints) parts.push(q.qHintsUsed(row.hints));
+  return parts.join(" · ") || q.qSolvedLabel;
+}
+function qAttemptCells(row) {
+  const q = QSTR[lang];
+  const labels = { miss: q.qWrong, hit: q.qCorrect, hint: q.qHintedHit, bonus: q.qBonusWon };
+  if (!row.attempts.length && row.errors !== null && row.code >= 2)
+    return `<span class="qattempts" role="img" aria-label="${esc(row.skipped ? q.qSkipped : q.qUnreached)}"><i class="rsq r3" aria-hidden="true"></i></span>`;
+  if (!row.attempts.length) return `<span class="qattempts">${qSqRow([row.code], true)}</span>`;
+  return `<span class="qattempts" role="img" aria-label="${esc(q.qAttempts + ": " + row.attempts.map(x => labels[x]).join(", "))}">`
+    + row.attempts.map(x => `<i class="rsq ${x === "bonus" ? "rb" : x === "miss" ? "r2" : x === "hint" ? "r1" : "r0"}" aria-hidden="true"></i>`).join("") + `</span>`;
+}
+function qSummary(result = QuizResult.describe(qs)) {
+  const q = QSTR[lang];
+  return { cleared: result.cleared, sq: qResCodes().map(c => QRESSQ[c]).join(""),
+    line: result.known ? `${q.qErrors(result.errors)} · ${q.qHintsUsed(result.hints)}` : q.qUnknownDetails };
+}
 function qShareText() {
-  const q = QSTR[lang], { cleared, sq, line } = qSummary(), st = qGetStats();
-  return `Istinto Puro — ${q.qNum(qs.num)} · ${cleared}/4\n${sq}\n`
-    + line + (qs.won && st ? ` · ${q.qStreakS(st.streak)}` : "")
-    + `\nhttps://istintopuro.mcosta.it/#quiz`;  // #quiz opens straight into the game
+  const q = QSTR[lang], result = QuizResult.describe(qs), st = qGetStats();
+  const emoji = { miss: "🟥", hit: "🟩", hint: "🟨", bonus: "🟪" };
+  const streak = !qReplaying && result.success ? QuizResult.visibleStreak(st, qToday()) : 0;
+  const title = `${result.daily}/3` + (streak ? ` · ${q.qSeriesDays(streak)}` : "");
+  const rows = result.rows.map(row => {
+    const marks = row.attempts.length ? row.attempts.map(x => emoji[x]).join("")
+      : row.code === 3 || result.known && row.code === 2 ? "⬜" : QRESSQ[row.code];
+    return `${q.qStages[row.stage]}${row.stage === 3 ? ` (${q.qExtra})` : ""}  ${marks}`;
+  });
+  return `Istinto Puro · ${q.qNum(qs.num)}\n${title}\n\n${rows.join("\n")}\n\n${qSummary(result).line}`
+    + (result.bonus ? `\n🟪 ${q.qBonusWon}` : "")
+    + `\n${QuizResult.quizUrl("https://istintopuro.mcosta.it/", qs.date)}`;
 }
-
 async function qShareOut(e) {
   const btn = e.currentTarget, text = qShareText();
-  // native share sheet only on touch devices — on Safari/Chrome desktop
-  // navigator.share exists but the sheet often no-ops, so desktop always copies
   const touch = navigator.share && matchMedia("(pointer: coarse)").matches;
-  if (touch) { try { await navigator.share({ text }); return; } catch (err) { if (err && err.name === "AbortError") return; } }
-  // feedback goes on the button itself: #qmsg lives in the card, hidden at game end
-  const done = () => {
+  if (touch) { try { await navigator.share({ text }); return; } catch (err) { if (err?.name === "AbortError") return; } }
+  const msg = $("qshare-status");
+  if (await writeClipboard(text)) {
     btn.textContent = QSTR[lang].qCopied; btn.classList.add("qcopied");
+    if (msg) msg.textContent = QSTR[lang].qShareStatus;
     setTimeout(() => { btn.textContent = QSTR[lang].qShare; btn.classList.remove("qcopied"); }, 1500);
-  };
-  if (await writeClipboard(text)) { done(); return; }
-  btn.textContent = QSTR[lang].qCopyFail;
-  status.textContent = QSTR[lang].qCopyFail;
+  } else if (msg) msg.textContent = QSTR[lang].qCopyFail;
 }
-
 function qRenderEnd() {
-  const el = $("qend"), q = QSTR[lang];
+  const el = $("qend"), q = QSTR[lang], newlyFinished = el.hidden && qs.done;
   el.hidden = !qs.done;
   if (el.hidden) return;
-  el.className = qs.won ? "qend-win" : "qend-lost";
-  const { cleared, line } = qSummary(), st = qGetStats();
-  let html = `<div class="qres">${qs.won ? q.qWon : q.qLost}</div>
-    <div class="qsq">${qSqRow(qResCodes(), true)} <b>${cleared}/4</b></div>
-    <div class="qmeta">${esc(line)}</div>`;
-  if (!qs.won) {  // reveal the stage that ended the run, most recognisable first
-    const stg = qPz.stages[qs.stage];
-    // Prefer difficulty representatives, then include registration-only answers.
-    const byFame = qCore().uniqueChoices([...qRanked(stg), ...stg.answers]);
-    html += `<div class="qreveal"><b>${q.qReveal(byFame.length)}</b>`
-      + byFame.slice(0, 10).map(p => `<button type="button" class="qrp" data-p="${p}">${esc(DB.names[p])}</button>`).join(", ")
-      + (byFame.length > 10 ? ` <button type="button" class="qrmore" data-s="${qs.stage}">${q.qOthers(byFame.length - 10)}</button>` : "")
-      + `</div>`;
+  const result = QuizResult.describe(qs), st = qGetStats(), { line } = qSummary(result);
+  el.className = result.success ? "qend-win" : "qend-lost";
+  const streak = !qReplaying ? QuizResult.visibleStreak(st, qToday()) : null;
+  let html = `<div class="qresult-intro"><h2 id="qresult-title" class="qres" tabindex="-1">${result.success ? q.qDailyWon : q.qDailyLost}</h2>
+    <p class="qresult-sub">${result.success ? q.qDailySub : q.qDailyPartial(result.daily)}</p>
+    <div class="qstanding"><span><b>${result.daily}/3</b> ${q.qDailyUnit}</span>`
+    + (streak !== null ? `<span class="qseries">${esc(q.qSeriesDays(streak))}</span>` : "") + `</div></div><ol class="qresult-rows">`;
+  for (const row of result.rows) {
+    const stage = qPz.stages[row.stage], hit = row.hit;
+    const player = hit && Number.isInteger(hit.pid) ? `<button type="button" class="qrp" data-p="${hit.pid}">${esc(hit.name)}</button>`
+      : hit ? esc(hit.name) : "";
+    html += `<li class="qresult-row${row.stage === 3 ? " qresult-extra" : ""}"><div class="qresult-top"><div>
+      <span class="qresult-level">${q.qStages[row.stage]}${row.stage === 3 ? ` <small>${q.qExtra}</small>` : ""}</span>
+      <span class="qresult-outcome">${esc(qRowText(row, result))}</span></div>${qAttemptCells(row)}</div>
+      <button type="button" class="qmatch" data-s="${row.stage}" title="${esc(q.qOpen)}">${esc(qClubNames(stage))}</button>`
+      + (player ? `<div class="qresult-player">${row.bonus ? qBonusMark() + " " : ""}${player}</div>` : "")
+      + (row.bonus ? `<span class="qbonus-earned">${q.qBonusWon}</span>` : "") + `</li>`;
   }
-  if (st) {  // three stat tiles + stages-cleared histogram
+  html += `</ol><p class="qresult-meta">${esc(line)}</p><button id="qsharebtn" type="button">${q.qShare}</button>
+    <p id="qshare-status" role="status"></p><p class="qseries-rule">${q.qSeriesRule}</p>
+    <details class="qanswers"><summary>${q.qExploreAnswers}</summary>`;
+  qPz.stages.forEach((stage, i) => {
+    const answers = qCore().uniqueChoices([...qRanked(stage), ...stage.answers]);
+    const bonusKeys = new Set(qs.bonus?.stage === i ? qs.bonus.targets : []);
+    const shown = answers.slice(0, 6);
+    // Reveal every bonus option after the run, even if it was not guessed or
+    // lies outside the usual first six. Rendering it never awards the bonus.
+    for (const pid of answers.slice(6)) if (bonusKeys.has(qCore().choiceIdentity(pid))) shown.push(pid);
+    html += `<div class="qreveal"><b>${q.qStages[i]} · ${esc(qClubNames(stage))}</b>`
+      + shown.map(pid => {
+        const link = `<button type="button" class="qrp" data-p="${pid}">${esc(DB.names[pid])}</button>`;
+        return bonusKeys.has(qCore().choiceIdentity(pid)) ? `<span class="qbonus-option">${qBonusMark()} ${link}</span>` : link;
+      }).join(", ")
+      + (answers.length > shown.length ? ` <button type="button" class="qrmore" data-s="${i}">${q.qOthers(answers.length - shown.length)}</button>` : "") + `</div>`;
+  });
+  html += `</details>`;
+  if (result.known && qs.guesses.length) html += `<details class="qrun-log"><summary>${q.qAllGuesses}</summary><ul>${$("qlog").innerHTML}</ul></details>`;
+  if (st && !qReplaying) {
     const tile = (n, k) => `<div class="qtile"><span class="n">${n}</span><span class="k">${k}</span></div>`;
-    html += `<div class="qtiles">${tile(st.played, q.qStatPlayed)}${tile(st.streak, q.qStatStreak)}${tile(st.maxStreak, q.qStatBest)}</div>`;
+    html += `<details class="qstatistics"><summary>${q.qPersonalStats}</summary><div class="qtiles">${tile(st.played, q.qStatPlayed)}${tile(st.maxStreak, q.qStatBest)}</div>`;
     const max = Math.max(...st.byStage, 1);
     html += `<div id="qhisto"><span class="qhcap">${q.qHisto}</span>` + st.byStage.map((n, i) =>
-      `<div class="qh${i === cleared ? " me" : ""}"><span class="qhl">${i}</span>`
-      + `<span class="qhb"><span style="width:${n / max * 100}%"></span></span>`
-      + `<span class="qhn">${n}</span></div>`).join("") + `</div>`;
+      `<div class="qh${i === result.cleared ? " me" : ""}"><span class="qhl">${i}</span><span class="qhb"><span style="width:${n / max * 100}%"></span></span><span class="qhn">${n}</span></div>`).join("") + `</div></details>`;
   }
-  el.innerHTML = html + `<button id="qsharebtn" type="button">${q.qShare}</button>`;
+  el.innerHTML = html;
   $("qsharebtn").onclick = qShareOut;
   el.querySelectorAll(".qrp").forEach(b => b.onclick = () => qOpenPlayer(+b.dataset.p));
-  const more = el.querySelector(".qrmore");  // "and N more" opens the stage's clubs in the solver
-  if (more) more.onclick = () => qOpenSolver(qPz.stages[+more.dataset.s].clubs);
+  el.querySelectorAll(".qrmore, .qmatch").forEach(b => b.onclick = () => qOpenSolver(qPz.stages[+b.dataset.s].clubs));
+  if (newlyFinished) $("qresult-title").focus({ preventScroll: true });
 }
 
 // ---------------------------------------------------------------- calendar
@@ -1106,10 +1224,12 @@ function qRenderCal() {
       const cell = (extra, inner) => `<span class="qcell ${extra}"><span class="qcbox">${inner || ""}</span><span class="qcd">${d}</span></span>`;
       if (future || prelaunch) { cells.push({ html: cell("out"), play: false }); continue; }
       const cls = ["play", rec ? "done" : "todo", ds === today ? "today" : "", ds === active ? "current" : ""].filter(Boolean).join(" ");
-      const label = `${q.qNum(num)}${rec ? " · " + rec.res.filter(c => c < 2).length + "/4" : ""}`;
+      const bonusStage = rec?.state?.guesses?.find(g => g.ok && g.bonus && rec.res[g.stage] < 2)?.stage ?? -1;
+      const label = `${q.qNum(num)}${rec ? " · " + rec.res.filter(c => c < 2).length + "/4" : ""}`
+        + (bonusStage >= 0 ? ` · ${q.qBonusWon}` : "");
       cells.push({ play: true, html:
         `<button type="button" class="qcell ${cls}" data-d="${ds}" title="${esc(label)}" aria-label="${esc(label)}">`
-        + `<span class="qcbox">${rec ? qSqCells(rec.res) : ""}</span><span class="qcd">${d}</span></button>` });
+        + `<span class="qcbox">${rec ? qSqCells(rec.res, bonusStage) : ""}</span><span class="qcd">${d}</span></button>` });
     }
     // drop whole weeks holding nothing playable: the pre-launch run-up in the
     // first month, the days still to come in the current one. Three dead rows
@@ -1153,6 +1273,7 @@ function qRenderCal() {
 function qCalPick(ds) {
   if (ds === qToday()) { qReplayDate = null; qReplaying = false; if (!qs || qs.date !== ds) qLoad(); }
   else { qReplayDate = ds; qStartReplay(ds); }
+  if (qs) history.replaceState(null, "", QuizResult.quizUrl(location.href, qs.date));
   qCalOpen(false);
   qRender();
 }
@@ -1179,7 +1300,14 @@ function qOpenPlayer(pid) {
 // app.js assigns onclick properties, these listeners run after them: entering
 // club/player mode (even the mode===m no-op click) closes the quiz view
 function qEnter() {
-  if (!DB || document.body.classList.contains("quiz")) return;
+  if (!DB) return;
+  const url = new URL(location.href);
+  const day = url.hash === "#quiz" ? QuizResult.validDay(url.searchParams.get("day"), QSERIES, qToday()) : null;
+  if (document.body.classList.contains("quiz")) {
+    if (day && day !== qs?.date) qCalPick(day);
+    return;
+  }
+  if (day) qReplayDate = day !== qToday() ? day : null;
   qConfirm = null; qLeaveMode = null;
   pIndex();  // guess box searches all players, like player mode
   if (!qBuilt) { qBuild(); qBuilt = true; }
@@ -1190,7 +1318,7 @@ function qEnter() {
   else { qReplayDate = null; qLoad(); }
   document.body.classList.add("quiz");
   document.body.classList.remove("qcal");  // always (re-)enter on the board, not a stale archive
-  history.replaceState(null, "", "#quiz");  // shareable + survives refresh
+  history.replaceState(null, "", qs ? QuizResult.quizUrl(location.href, qs.date) : "#quiz");
   $("mode-quiz").setAttribute("aria-pressed", "true");
   $("mode-club").setAttribute("aria-pressed", "false");
   $("mode-player").setAttribute("aria-pressed", "false");
@@ -1202,6 +1330,9 @@ function qExit() {
   if (!document.body.classList.contains("quiz")) return;
   qConfirm = null; qLeaveMode = null;
   document.body.classList.remove("quiz");
+  const url = new URL(location.href);
+  url.searchParams.delete("day");
+  history.replaceState(null, "", url.href);
   $("tagline").textContent = mode === "club" ? t.tagline : t.taglineP;  // restore solver tagline
   syncHash();  // drop #quiz, restore the solver's selection hash (or a clean URL)
   $("mode-quiz").setAttribute("aria-pressed", "false");
@@ -1214,6 +1345,7 @@ function qExit() {
 // on the bar runs before the buttons' own setMode/qExit handlers, so it can hold
 // the destination while the in-card confirmation is visible.
 const qInProgress = () => !qReplaying && qs && !qs.done && !qRolled()
+  && !QuizResult.dailyWon(qs)
   && (qs.guesses.length || qs.skipped.length || Object.values(qs.hints).some(h => h !== null));
 $("modebar").addEventListener("click", (e) => {
   const btn = e.target.closest("button");
@@ -1261,13 +1393,27 @@ addEventListener("hashchange", () => {
   qExit();
   if (mode === "club") { renderChips(); solve(); }
 });
+addEventListener("popstate", () => { if (location.hash === "#quiz") qEnter(); });
 
-// debug escape hatch: quizReset() clears today's game (keep stats),
-// quizReset(true) wipes stats too. Re-renders if the quiz is open.
-function quizReset(stats) {
-  delete localStorage.quiz;
-  if (stats) delete localStorage.quizStats;
-  if (document.body.classList.contains("quiz")) { qLoad(); qRender(); }
+// Console reset: { archive: true } also removes today's completed result;
+// { stats: true } clears aggregate stats. The legacy boolean controls stats.
+function quizReset(options = false) {
+  const { stats = false, archive = false } = typeof options === "boolean" ? { stats: options } : options || {};
+  if (archive) {
+    const h = qHistory();
+    delete h.days[qToday()];
+    localStorage.quizHistory = JSON.stringify(h);
+  }
+  localStorage.removeItem("quiz");
+  if (stats) localStorage.removeItem("quizStats");
+  qReplayDate = null; qReplaying = false;
+  qConfirm = null; qLeaveMode = null;
+  if (document.body.classList.contains("quiz")) {
+    document.body.classList.remove("qcal");
+    qLoad();
+    if (qs) history.replaceState(null, "", QuizResult.quizUrl(location.href, qs.date));
+    qRender();
+  }
   else { qs = qPz = null; }
   return "quiz reset";
 }
