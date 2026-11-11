@@ -120,6 +120,8 @@ const STR = {
     copyLink: "copia link", copyLinkT: "Copia il link a questa selezione e ai filtri", copied: "copiato ✓",
     copyFail: "copia non riuscita",
     themeDark: "Passa al tema scuro", themeLight: "Passa al tema chiaro",
+    themeSystem: "Segui il tema del sistema",
+    themeState: { system: "Tema: sistema", light: "Tema: chiaro", dark: "Tema: scuro" },
   },
   en: {
     modeClubs: "Clubs", modePlayers: "Players", modesLabel: "Main mode",
@@ -196,6 +198,8 @@ const STR = {
     copyLink: "copy link", copyLinkT: "Copy a link to this selection and filters", copied: "copied ✓",
     copyFail: "copy failed",
     themeDark: "Switch to dark theme", themeLight: "Switch to light theme",
+    themeSystem: "Follow the system theme",
+    themeState: { system: "Theme: system", light: "Theme: light", dark: "Theme: dark" },
   },
 };
 let lang = STR[localStorage.lang] ? localStorage.lang
@@ -266,29 +270,44 @@ function applyLang() {
   }
   else status.textContent = t.loading;
 }
-// theme toggle: default follows the system; a click forces light or dark and
-// remembers it (localStorage.theme). The head applies a stored choice before
-// paint; here we wire the button and keep its sun/moon icon in sync.
+// Cycle: system → opposite theme → system's theme (manual) → system.
+// The head applies a stored choice before paint; auto has no stored override.
 const themeBtn = $("themebtn");
-const THEME_ICON = {  // show the mode a click switches TO
-  dark: `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>`,
-  light: `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor"><path d="M20 14.5A8 8 0 0 1 9.5 4a.6.6 0 0 0-.82-.7A9 9 0 1 0 20.7 15.3a.6.6 0 0 0-.7-.8z"/></svg>`,
+const THEME_ICON = {  // show the currently selected mode, including system
+  light: `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>`,
+  dark: `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor"><path d="M20 14.5A8 8 0 0 1 9.5 4a.6.6 0 0 0-.82-.7A9 9 0 1 0 20.7 15.3a.6.6 0 0 0-.7-.8z"/></svg>`,
+  system: `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8 20h8"/></svg>`,
 };
-const effectiveTheme = () => document.documentElement.getAttribute("data-theme")
-  || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+const themeMedia = matchMedia("(prefers-color-scheme: dark)");
+const systemTheme = () => themeMedia.matches ? "dark" : "light";
+const themeMode = () => document.documentElement.getAttribute("data-theme") || "system";
+const effectiveTheme = () => themeMode() === "system" ? systemTheme() : themeMode();
+const nextTheme = () => themeMode() === "system"
+  ? (systemTheme() === "dark" ? "light" : "dark")
+  : themeMode() === systemTheme() ? "system" : systemTheme();
 function paintTheme() {
   const dark = effectiveTheme() === "dark";
-  themeBtn.innerHTML = dark ? THEME_ICON.dark : THEME_ICON.light;  // dark now → offer sun
-  themeBtn.setAttribute("aria-label", dark ? t.themeLight : t.themeDark);
+  document.querySelectorAll('meta[name="theme-color"]').forEach(meta => {
+    meta.setAttribute("content", dark ? "#0c1210" : "#fafaf8");
+  });
+  const next = nextTheme();
+  themeBtn.innerHTML = THEME_ICON[themeMode()];
+  const action = next === "system" ? t.themeSystem : next === "dark" ? t.themeDark : t.themeLight;
+  themeBtn.setAttribute("aria-label", `${t.themeState[themeMode()]}. ${action}`);
   themeBtn.title = themeBtn.getAttribute("aria-label");
 }
 themeBtn.onclick = () => {
-  const next = effectiveTheme() === "dark" ? "light" : "dark";
-  document.documentElement.setAttribute("data-theme", localStorage.theme = next);
+  const next = nextTheme();
+  if (next === "system") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", next);
+  try {
+    if (next === "system") localStorage.removeItem("theme");
+    else localStorage.setItem("theme", next);
+  } catch {}  // the selected mode still works for this visit without storage
   paintTheme();
 };
-// while on auto (no stored choice), follow later system changes
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!localStorage.theme) paintTheme(); });
+// Auto follows the system; manual modes only refresh the next action's label/icon.
+themeMedia.addEventListener("change", paintTheme);
 paintTheme();
 langSel.onchange = () => { lang = localStorage.lang = langSel.value; applyLang(); };
 $("aboutbtn").onclick = () => $("about").showModal();

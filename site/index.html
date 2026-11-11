@@ -30,7 +30,17 @@
 <link rel="preload" href="fonts/barlow-semi-condensed-latin-700-italic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/barlow-semi-condensed-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="style.css?v=__V__">
-<script>try{var _t=localStorage.getItem("theme");if(_t==="light"||_t==="dark")document.documentElement.setAttribute("data-theme",_t);}catch(e){}</script>
+<script>
+try {
+  var _t = localStorage.getItem("theme");
+  if (_t === "light" || _t === "dark") {
+    document.documentElement.setAttribute("data-theme", _t);
+    document.querySelectorAll('meta[name="theme-color"]').forEach(function(meta) {
+      meta.setAttribute("content", _t === "dark" ? "#0c1210" : "#fafaf8");
+    });
+  }
+} catch (e) {}
+</script>
 </head>
 <body>
 <header>
