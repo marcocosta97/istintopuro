@@ -853,7 +853,10 @@ body.quiz {
 .qmatch:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 .qresult-player { font-size: .85rem; margin-top: .12rem; }
 .qresult-player .qrp { text-decoration-color: var(--line); }
-.qresult-extra { border-top: 3px double var(--line); padding-top: 1rem; margin-top: .35rem; }
+.qresult-extra {
+  border-top: 3px double var(--line); background: var(--extra-bg);
+  padding: 1rem .65rem .85rem; margin: .35rem -.65rem 0;
+}
 .qresult-meta { border-top: 1px solid var(--line); padding-top: .8rem; color: var(--muted); font-size: .8rem; }
 #qend #qsharebtn { width: 100%; min-height: 44px; margin-top: 1rem; }
 #qshare-status { color: var(--muted); font-size: .8rem; }
