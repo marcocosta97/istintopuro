@@ -656,6 +656,7 @@ body.quiz :is(#packhint, #picker, #controls, #advbody, #status, #results) { disp
 body.quiz {
   --bonus: #70409e; --bonus-bg: #eee5f7; --bonus-ink: #fff;
   --bg: #eef6f0; --card: #f6fbf7; --line: #cfe3d6; --hit: #dcefe3; --bad: #b0392f;
+  --extra-bg: #e1e6e9;
   --warn: #b3760a; --warn-bg: #fbf1dc;  /* cleared-with-a-hint amber */
   /* result squares (end screen + archive): a vivid, self-contained palette,
      kept apart from the semantic --accent/--warn/--bad so they can pop */
@@ -667,6 +668,7 @@ body.quiz {
   :root:not([data-theme="light"]) body.quiz {
     --bonus: #c7a0ed; --bonus-bg: #2c1f3d; --bonus-ink: #20112e;
     --bg: #0a1712; --card: #102019; --line: #1f3a2c; --hit: #173425; --bad: #e0705f;
+    --extra-bg: #22292d;
     --warn: #e0b449; --warn-bg: #2a2412;
     --r0: #35d17f; --r1: #f7cf3f; --r2: #f0604e; --r3: #37503f;
   }
@@ -674,6 +676,7 @@ body.quiz {
 :root[data-theme="dark"] body.quiz {
   --bonus: #c7a0ed; --bonus-bg: #2c1f3d; --bonus-ink: #20112e;
   --bg: #0a1712; --card: #102019; --line: #1f3a2c; --hit: #173425; --bad: #e0705f;
+  --extra-bg: #22292d;
   --warn: #e0b449; --warn-bg: #2a2412;
   --r0: #35d17f; --r1: #f7cf3f; --r2: #f0604e; --r3: #37503f;
 }
@@ -700,12 +703,12 @@ body.quiz {
   display: flex; align-items: baseline; gap: .6rem;
   padding: .32rem .2rem; border-top: 1px solid var(--line); font-size: .9rem;
 }
-#qstages li:last-child { border-bottom: 1px solid var(--line); }
+#qstages li:last-child { border-top: 3px double var(--line); border-bottom: 1px solid var(--line); background: var(--extra-bg); }
 .qsname {
   text-transform: uppercase; letter-spacing: .05em; font-size: .72rem;
   color: var(--muted); min-width: 6.5rem;
 }
-#qstages li.cur { background: var(--hit); }
+#qstages li.cur:not(:last-child) { background: var(--hit); }
 #qstages li.cur .qsname { color: var(--accent); }
 #qstages li.done .qsinfo b { color: var(--accent); }         /* clean clear: green tick + name */
 #qstages li.done.hinted { background: var(--warn-bg); }      /* cleared with a hint: amber */
