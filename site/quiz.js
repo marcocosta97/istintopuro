@@ -907,7 +907,7 @@ function qRender() {
     $("qq").textContent = q.qQ(st.clubs.length);
     const bonus = qs.bonus?.stage === qs.stage ? qs.bonus : null;
     $("qbonus").hidden = !bonus;
-    $("qbonus").innerHTML = bonus ? `<div class="qbonus-heading"><b>${qDiamond()} ${esc(q.qBonusTitle)}</b> <span class="qbonus-optional">${esc(q.qBonusOptional)}</span></div><div>${esc(qBonusText(bonus))}</div>` : "";
+    $("qbonus").innerHTML = bonus ? `<div class="qbonus-heading"><b>${qDiamond()} ${esc(q.qBonusTitle)}</b> <span class="qbonus-optional">${esc(q.qBonusOptional)}</span></div><div>${esc(qBonusText(bonus))}${bonus.kind === "nationality" ? ` ${flag(bonus.value)}` : ""}</div>` : "";
     $("qdaily").hidden = !QuizResult.dailyWon(qs);
     $("qdaily").textContent = q.qSecured;
     $("qsearch").placeholder = q.qPh;
