@@ -61,6 +61,47 @@ h1 .accent { color: var(--accent); }
      solver one and wraps at a different width) never reflows the content below */
   min-height: 2.3rem;
 }
+#intro {
+  margin: auto; width: min(26rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem); overflow-y: auto;
+  padding: 1.4rem; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--card); color: var(--fg);
+}
+#intro::backdrop { background: rgba(0, 0, 0, .45); }
+.intro-top { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; }
+#intro h2 {
+  flex: 1; min-width: 0;
+  font: italic 700 1.7rem/1.1 var(--display);
+  text-transform: uppercase; text-wrap: balance;
+}
+#intro-copy { max-width: 48ch; margin-top: .2rem; font-size: .92rem; }
+#intro-play {
+  display: flex; align-items: center; justify-content: center; min-height: 44px;
+  margin-top: 1rem; padding: .6rem 1rem; border-radius: 7px;
+  background: var(--accent); color: var(--on-accent); font-size: .92rem;
+  font-weight: 600; text-decoration: none; text-align: center;
+}
+#intro-play:hover { text-decoration: underline; text-underline-offset: .2em; }
+#intro-dismiss {
+  display: inline-flex; align-items: flex-start; justify-content: flex-end; gap: .4rem;
+  flex-shrink: 0;
+  min-height: 30px; padding: .2rem 0 0 .6rem;
+  border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  font: inherit; font-size: .8rem; line-height: 1.1;
+}
+#intro-dismiss svg { flex-shrink: 0; }
+#intro-dismiss:hover { color: var(--accent); }
+#intro-note { margin-top: .5rem; color: var(--muted); font-size: .8rem; }
+@media (min-width: 561px) {
+  #intro { width: min(30rem, calc(100vw - 2rem)); }
+}
+@media (max-width: 560px), (pointer: coarse) {
+  #intro-dismiss { min-height: 44px; }
+}
+@media (max-width: 380px) {
+  #intro h2 { font-size: 1.5rem; }
+  #intro-dismiss { max-width: 6rem; }
+}
 .htools { display: flex; align-items: stretch; gap: .4rem; flex-shrink: 0; }
 #langsel, #aboutbtn, #themebtn {
   cursor: pointer; background: transparent; color: var(--muted);

@@ -106,8 +106,12 @@ function prepareCore() {
       const documentResponse = await fetchNetwork("./", { cache: "no-cache" }, 30000, "core");
       if (!documentResponse.ok || !(await documentResponse.clone().text()).includes(`app.js?v=${V}`))
         throw new Error("release changed during download");
+      const quizResponse = await fetchNetwork("./quiz/", { cache: "no-cache" }, 30000, "core");
+      if (!quizResponse.ok || !(await quizResponse.clone().text()).includes(`app.js?v=${V}`))
+        throw new Error("quiz entry changed during download");
       const cache = await caches.open(CORE);
       await cache.put("./", documentResponse);
+      await cache.put("./quiz/", quizResponse);
       await cache.put(`./data/index.json?v=${V}`, indexResponse);
       await cache.put(`./data/quiz-schedule.json?v=${V}`, scheduleResponse);
       await store(CORE, OfflineGame.coreFiles(index, V), "core", { built: index.built, through: schedule.through });
@@ -222,10 +226,30 @@ self.addEventListener("fetch", event => {
         const response = await fetchNetwork(request, {}, 4000);
         if (response.ok) return response;
       } catch { /* fall back to the last completely downloaded release */ }
+      const quizUrl = new URL("./quiz/", self.location);
+      const normalizedPath = url.pathname.replace(/\/index\.html$/, "/");
+      const isQuiz = normalizedPath === quizUrl.pathname || normalizedPath === quizUrl.pathname.slice(0, -1);
       const previous = (await caches.keys()).filter(name => name.startsWith("istintopuro-offline-") && name !== CORE).reverse();
       for (const name of [CORE, ...previous]) {
         if (!await inventory(name)) continue;
         const cache = await caches.open(name);
+        const page = await cache.match(isQuiz ? quizUrl.pathname : url.pathname);
+        if (page) {
+          // Resolve nested assets against /quiz/, including subpath deployments.
+          if (isQuiz && url.pathname !== quizUrl.pathname) {
+            quizUrl.search = url.search;
+            return Response.redirect(quizUrl.href);
+          }
+          return page;
+        }
+        // An older complete release may predate the dedicated quiz entry.
+        // Reopen its root game so relative assets retain their original base.
+        if (isQuiz) {
+          const legacy = new URL("./", self.location);
+          legacy.search = url.search;
+          legacy.hash = "quiz";
+          return Response.redirect(legacy.href);
+        }
         const response = await cache.match("./");
         if (response) return response;
       }

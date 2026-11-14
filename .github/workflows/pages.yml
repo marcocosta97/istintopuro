@@ -32,7 +32,7 @@ jobs:
       - name: Test code and validate published data
         run: sh scripts/check.sh
       # stamp asset URLs so fresh HTML can never pair with stale cached CSS/JS
-      - run: sed -i "s/__V__/$GITHUB_SHA/g" site/index.html
+      - run: python3 scripts/site-pages.py --version "$GITHUB_SHA"
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site

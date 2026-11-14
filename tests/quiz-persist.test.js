@@ -92,7 +92,7 @@ function loadQuiz(storage, today) {
     esc: (s) => String(s), norm: (s) => String(s).toLowerCase(),
     careerOf: async () => [], suggOpen() {}, browseOpen() {}, syncHash() {},
     parseSelectionHash: () => ({ clubs: [], leagues: [], countries: [] }),
-    setMode() {}, renderChips() {}, solve() {},
+    setMode() {}, renderChips() {}, solve() {}, updatePageMetadata() {},
     Date: frozenDate(today),
   });
   // Same-script trailer keeps const/let in scope (they are not context properties).

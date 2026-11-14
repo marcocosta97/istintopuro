@@ -20,6 +20,9 @@ const focusSearch = () => { if (!matchMedia("(pointer: coarse)").matches) search
 // from an older build — which is what the no-cache revalidation below used to buy, at
 // the price of a round trip on every single load. "__V__" locally, which is stable.
 const V = new URL(document.currentScript.src).searchParams.get("v") || "0";
+// A nested entry shares root assets even after a mode switch changes its URL.
+const pageBase = document.querySelector("base");
+if (pageBase) pageBase.href = document.baseURI;
 
 let CORE_DB = null;          // immutable index.json; the quiz always reads this
 let DB = null;               // core composed with the locally enabled league packs
@@ -46,6 +49,15 @@ const PAGE = 50;             // result rows rendered per batch; "show more" appe
 const REPO = "https://github.com/marcocosta97/istintopuro";
 const STR = {
   it: {
+    introTitle: "Chi ha giocato in entrambe?",
+    introCopy: "Trova chi collega le squadre. Tre sfide per la serie quotidiana e un’Impossibile facoltativa, le stesse per tutti.",
+    introPlay: "Gioca alla sfida di oggi", introDismiss: "Esplora il solver",
+    introClose: "Chiudi la presentazione ed esplora il solver",
+    introNote: "Gratis, senza account né tracciamento.",
+    seoTitle: "Istinto Puro — quiz di calcio giornaliero e solver",
+    seoDescription: "Chi ha giocato in entrambe? Gioca al quiz di calcio giornaliero o trova i giocatori in comune tra squadre con il solver. Gratis, senza account né tracciamento.",
+    quizTitle: "Quiz di calcio giornaliero — Istinto Puro",
+    quizDescription: "Trova i calciatori che collegano le squadre: tre sfide al giorno e un’Impossibile facoltativa. Il quiz è uguale per tutti. Gioca gratis, senza account.",
     modeClubs: "Squadre", modePlayers: "Giocatori", modesLabel: "Modalità principale",
     browseCountries: "Paesi", browseLeagues: "Campionati",
     tagline: "Scegli squadre, campionati o paesi — chi li unisce?",
@@ -124,6 +136,15 @@ const STR = {
     themeState: { system: "Tema: sistema", light: "Tema: chiaro", dark: "Tema: scuro" },
   },
   en: {
+    introTitle: "Who played for both?",
+    introCopy: "Find the player who connects the clubs. Three challenges for your daily streak and an optional Impossible, the same for everyone.",
+    introPlay: "Play today’s challenge", introDismiss: "Explore the solver",
+    introClose: "Close the introduction and explore the solver",
+    introNote: "Free, with no account or tracking.",
+    seoTitle: "Istinto Puro — daily football quiz and solver",
+    seoDescription: "Who played for both? Play the daily football quiz or find players who connect your clubs with the solver. Free, with no account or tracking.",
+    quizTitle: "Daily football quiz — Istinto Puro",
+    quizDescription: "Find the footballers who connect the clubs: three daily challenges and an optional Impossible. The same quiz for everyone. Play free, with no account.",
     modeClubs: "Clubs", modePlayers: "Players", modesLabel: "Main mode",
     browseCountries: "Countries", browseLeagues: "Leagues",
     tagline: "Pick clubs, leagues or countries — who connects them?",
@@ -206,9 +227,85 @@ let lang = STR[localStorage.lang] ? localStorage.lang
          : (navigator.language || "").startsWith("it") ? "it" : "en";
 let t = STR[lang];
 
+function updatePageMetadata(quiz = document.body.classList.contains("quiz")
+  || document.documentElement.dataset.entry === "quiz") {
+  const title = quiz ? t.quizTitle : t.seoTitle;
+  const description = quiz ? t.quizDescription : t.seoDescription;
+  document.title = title;
+  for (const key of ['property="og:title"', 'property="og:image:alt"', 'name="twitter:title"', 'name="twitter:image:alt"'])
+    document.querySelector(`meta[${key}]`).content = title;
+  for (const key of ['name="description"', 'property="og:description"', 'name="twitter:description"'])
+    document.querySelector(`meta[${key}]`).content = description;
+  document.querySelector('meta[property="og:locale"]').content = lang === "it" ? "it_IT" : "en_GB";
+  // Canonical URLs identify the HTML entry; #quiz remains a view of the home URL.
+  const canonical = "https://istintopuro.mcosta.it/"
+    + (document.documentElement.dataset.entry === "quiz" ? "quiz/" : "");
+  document.querySelector('link[rel="canonical"]').setAttribute("href", canonical);
+  document.querySelector('meta[property="og:url"]').content = canonical;
+}
+
+function quizWelcomeEligible(storage = localStorage) {
+  try {
+    if (storage.getItem("quizWelcomeSeen") === "1") return false;
+    const read = key => {
+      try { return JSON.parse(storage.getItem(key) || "null"); } catch { return null; }
+    };
+    // Opening an untouched board is not playing. Guesses, hints, skips and
+    // finished games count, including archive practice and older summary rows.
+    const played = state => !!state && (!!state.done || !!state.won || state.stage > 0
+      || (Array.isArray(state.guesses) && state.guesses.length > 0)
+      || (Array.isArray(state.skipped) && state.skipped.length > 0)
+      || Object.values(state.hints || {}).some(hint => hint !== null && hint !== undefined));
+    if (played(read("quiz"))) return false;
+    const stats = read("quizStats");
+    if (stats && (stats.played > 0 || stats.maxStreak > 0 || stats.lastPlayDate || stats.lastWinDate)) return false;
+    const history = Object.values(read("quizHistory")?.days || {});
+    if (history.some(row => played(row?.state) || (Array.isArray(row?.res) && row.res.length === 4))) return false;
+    if (Object.values(read("quizReplays")?.days || {}).some(played)) return false;
+    return true;
+  } catch { return false; }  // Don't interrupt when previous play cannot be checked.
+}
+
+function setupQuizWelcome() {
+  const dialog = $("intro"), eligible = quizWelcomeEligible();
+  const remember = () => { try { localStorage.setItem("quizWelcomeSeen", "1"); } catch {} };
+  if (!eligible) remember();  // Keep known players recognized across quiz-series resets.
+  dialog.addEventListener("close", remember);
+  $("intro-dismiss").onclick = () => dialog.close();
+  $("intro-play").onclick = event => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    remember(); dialog.close();
+    // Keep the current data download; the quiz opens as soon as it is ready.
+    if (DB) $("mode-quiz").click();
+    else location.hash = "quiz";
+  };
+  dialog.addEventListener("click", event => {
+    const box = dialog.getBoundingClientRect();
+    if (event.target === dialog && (event.clientX < box.left || event.clientX > box.right
+      || event.clientY < box.top || event.clientY > box.bottom)) dialog.close();
+  });
+  // Open before boot starts downloading data. Leave direct links and settings
+  // restoration uninterrupted, and never stack dialogs.
+  let restoringSettings = false;
+  try { restoringSettings = sessionStorage.getItem("leaguePackDialog") === "1"; } catch {}
+  if (!eligible || location.hash || new URL(location.href).searchParams.has("day")
+    || document.documentElement.dataset.entry === "quiz" || restoringSettings
+    || document.querySelector("dialog[open]")) return;
+  dialog.showModal();
+}
+
 function applyLang() {
   t = STR[lang];
   document.documentElement.lang = lang;
+  updatePageMetadata();
+  $("intro-title").textContent = t.introTitle;
+  $("intro-copy").textContent = t.introCopy;
+  $("intro-play").textContent = t.introPlay;
+  $("intro-dismiss-label").textContent = t.introDismiss;
+  $("intro-dismiss").setAttribute("aria-label", t.introClose);
+  $("intro-note").textContent = t.introNote;
+  $("mode-quiz").textContent = "Quiz";
   $("mode-club").textContent = t.modeClubs;
   $("mode-player").textContent = t.modePlayers;
   $("modebar").setAttribute("aria-label", t.modesLabel);
@@ -769,6 +866,11 @@ async function boot() {
       if (result.status === "fulfilled") packs.push(result.value);
       else packFailures.set(wanted[i].id, result.reason);
     });
+    // Data can arrive before the later quiz scripts. Keep downloading in the
+    // background, but publish DB only after their helpers and listeners exist.
+    if (document.readyState === "loading") {
+      await new Promise(resolve => document.addEventListener("DOMContentLoaded", resolve, { once: true }));
+    }
     DB = LeaguePacks.compose(CORE_DB, packs);
     DB.quizSchedule = CORE_DB.quizSchedule;
     requiredPackIds = missingPacksForHash();
@@ -2877,6 +2979,7 @@ async function toggleCareer(li, pid) {
 }
 
 applyLang();
+setupQuizWelcome();
 boot();
 
 OfflineGame.start({ version: V, getLang: () => lang,

@@ -74,6 +74,7 @@ function worker({ version = "one", caches = storage(), network = {} } = {}) {
     };
     else if (url.pathname.endsWith("/data/packs/pt/index.json")) body = pack;
     else if (url.pathname.endsWith(".json")) body = network.invalidJson ? "<html>error</html>" : [];
+    else if (url.pathname === "/football/quiz/") body = `<html data-entry="quiz"><base href="../"><script src="app.js?v=${network.quizRelease || network.release || version}"></script></html>`;
     else if (url.pathname === "/football/") body = `<script src="app.js?v=${network.release || version}"></script>`;
     return new Response(typeof body === "string" ? body : JSON.stringify(body));
   };
@@ -136,6 +137,50 @@ test("an explicit download stores everything and survives a cold offline launch"
   await restarted.message({ type: "offline-status" });
   assert.equal(restarted.messages.at(-1).state, "ready");
   assert.equal(restarted.messages.at(-1).through, "2027-01-10");
+});
+
+test("a cold offline quiz navigation retains its entry and root asset base", async () => {
+  const app = worker();
+  await app.download();
+  const restarted = worker({ caches: app.caches, network: { offline: true } });
+  for (const route of ["./quiz/", "./quiz/index.html", "./quiz"]) {
+    let response = await restarted.request(`${route}?day=2026-10-20`, "navigate");
+    if (route !== "./quiz/") {
+      assert.equal(response.status, 302);
+      assert.equal(response.headers.get("location"), BASE + "quiz/?day=2026-10-20");
+      response = await restarted.request(response.headers.get("location"), "navigate");
+    }
+    const html = await response.text();
+    assert.match(html, /data-entry="quiz"/);
+    assert.match(html, /<base href="\.\.\/">/);
+  }
+  assert.match(await (await restarted.request("./", "navigate")).text(), /^<script/);
+});
+
+test("an older offline copy without the quiz entry reopens the legacy root game", async () => {
+  const app = worker();
+  await app.download();
+  const cache = await app.caches.open("istintopuro-offline-one");
+  const marker = "./__offline__/ready";
+  const meta = await (await cache.match(marker)).json();
+  meta.files = meta.files.filter(file => file !== "./quiz/");
+  await cache.delete("./quiz/");
+  await cache.put(marker, new Response(JSON.stringify(meta)));
+  const restarted = worker({ caches: app.caches, network: { offline: true } });
+  for (const route of ["./quiz/", "./quiz/index.html", "./quiz"]) {
+    const response = await restarted.request(`${route}?day=2026-10-20`, "navigate");
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get("location"), BASE + "?day=2026-10-20#quiz");
+  }
+});
+
+test("a quiz HTML release mismatch preserves the previous complete offline game", async () => {
+  const old = worker();
+  await old.download();
+  const next = worker({ version: "two", caches: old.caches, network: { quizRelease: "one" } });
+  await assert.rejects(next.download(), /quiz entry changed during download/);
+  next.network.offline = true;
+  assert.match(await (await next.request("./quiz/", "navigate")).text(), /app.js\?v=one/);
 });
 
 test("interrupted updates leave the previous complete game available and resume later", async () => {

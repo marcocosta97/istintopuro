@@ -3,24 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Istinto Puro — quiz e solver di calcio</title>
-<meta name="description" content="«Istinto Puro»: schedina giornaliera e solver. Scegli squadre, campionati o paesi e scopri chi ha giocato per tutti, o parti dai giocatori per le squadre in comune. Dati Wikidata, tutto nel browser.">
+<title>Istinto Puro — quiz di calcio giornaliero e solver</title>
+<meta name="description" content="Chi ha giocato in entrambe? Gioca al quiz di calcio giornaliero o trova i giocatori in comune tra squadre con il solver. Gratis, senza account né tracciamento.">
 <link rel="canonical" href="https://istintopuro.mcosta.it/">
-<meta property="og:title" content="Istinto Puro — football quiz &amp; solver">
-<meta property="og:description" content="Choose clubs, leagues or countries — who connects them all? Play the daily football quiz or explore player careers. Powered by Wikidata and Wikipedia, entirely in your browser.">
+<meta property="og:title" content="Istinto Puro — quiz di calcio giornaliero e solver">
+<meta property="og:description" content="Chi ha giocato in entrambe? Gioca al quiz di calcio giornaliero o trova i giocatori in comune tra squadre con il solver. Gratis, senza account né tracciamento.">
 <meta property="og:url" content="https://istintopuro.mcosta.it/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Istinto Puro">
-<meta property="og:locale" content="en_GB">
+<meta property="og:locale" content="it_IT">
 <meta property="og:image" content="https://istintopuro.mcosta.it/og.png">
 <meta property="og:image:width" content="1731">
 <meta property="og:image:height" content="909">
-<meta property="og:image:alt" content="Istinto Puro — football quiz &amp; solver">
+<meta property="og:image:alt" content="Istinto Puro — quiz di calcio giornaliero e solver">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Istinto Puro — football quiz &amp; solver">
-<meta name="twitter:description" content="Choose clubs, leagues or countries — who connects them all? Play the daily football quiz or explore player careers. Powered by Wikidata and Wikipedia, entirely in your browser.">
+<meta name="twitter:title" content="Istinto Puro — quiz di calcio giornaliero e solver">
+<meta name="twitter:description" content="Chi ha giocato in entrambe? Gioca al quiz di calcio giornaliero o trova i giocatori in comune tra squadre con il solver. Gratis, senza account né tracciamento.">
 <meta name="twitter:image" content="https://istintopuro.mcosta.it/og.png">
-<meta name="twitter:image:alt" content="Istinto Puro — football quiz &amp; solver">
+<meta name="twitter:image:alt" content="Istinto Puro — quiz di calcio giornaliero e solver">
 <link rel="manifest" href="manifest.webmanifest?v=__V__">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fafaf8">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0c1210">
@@ -131,6 +131,21 @@ try {
   <div id="status" aria-live="polite">Caricamento dati…</div>
   <ul id="results"></ul>
 </main>
+<noscript><p>Per giocare e usare il solver attiva JavaScript. Il quiz cambia ogni giorno: trova un calciatore che abbia giocato in tutte le squadre indicate. Progressi e preferenze restano nel tuo browser.</p></noscript>
+<dialog id="intro" aria-labelledby="intro-title" aria-describedby="intro-copy intro-note">
+  <div class="intro-top">
+    <h2 id="intro-title">Chi ha giocato in entrambe?</h2>
+    <button id="intro-dismiss" type="button" aria-label="Chiudi la presentazione ed esplora il solver">
+      <span id="intro-dismiss-label">Esplora il solver</span>
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="m6 6 12 12M18 6 6 18"></path>
+      </svg>
+    </button>
+  </div>
+  <p id="intro-copy">Trova chi collega le squadre. Tre sfide per la serie quotidiana e un’Impossibile facoltativa, le stesse per tutti.</p>
+  <a id="intro-play" href="quiz/" autofocus>Gioca alla sfida di oggi</a>
+  <p id="intro-note">Gratis, senza account né tracciamento.</p>
+</dialog>
 <dialog id="about">
   <h2>Istinto Puro — quiz & solver</h2>
   <p id="abouttext">Due modi di giocare con «Istinto Puro». Solver: scegli squadre, campionati o paesi e scopri chi li unisce. Schedina giornaliera: quattro sfide di difficoltà crescente, le stesse per tutti. Dati estratti da Wikidata.</p>

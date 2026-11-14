@@ -850,6 +850,7 @@ function qRenderRetired() {
 }
 function qRender() {
   const q = QSTR[lang];
+  updatePageMetadata(true);
   $("tagline").textContent = q.qTag;  // reuse the masthead tagline slot: content never shifts
   if (!qStarted()) { qRenderPre(); return; }  // before launch day
   if (!qs) {
@@ -1302,7 +1303,8 @@ function qOpenPlayer(pid) {
 function qEnter() {
   if (!DB) return;
   const url = new URL(location.href);
-  const day = url.hash === "#quiz" ? QuizResult.validDay(url.searchParams.get("day"), QSERIES, qToday()) : null;
+  const day = url.hash === "#quiz" || document.documentElement.dataset.entry === "quiz"
+    ? QuizResult.validDay(url.searchParams.get("day"), QSERIES, qToday()) : null;
   if (document.body.classList.contains("quiz")) {
     if (day && day !== qs?.date) qCalPick(day);
     return;
@@ -1330,9 +1332,13 @@ function qExit() {
   if (!document.body.classList.contains("quiz")) return;
   qConfirm = null; qLeaveMode = null;
   document.body.classList.remove("quiz");
+  delete document.documentElement.dataset.entry;
   const url = new URL(location.href);
   url.searchParams.delete("day");
+  if (url.pathname.endsWith("/quiz/")) url.pathname = url.pathname.slice(0, -5);
+  else if (url.pathname.endsWith("/quiz/index.html")) url.pathname = url.pathname.slice(0, -15);
   history.replaceState(null, "", url.href);
+  updatePageMetadata(false);
   $("tagline").textContent = mode === "club" ? t.tagline : t.taglineP;  // restore solver tagline
   syncHash();  // drop #quiz, restore the solver's selection hash (or a clean URL)
   $("mode-quiz").setAttribute("aria-pressed", "false");
@@ -1362,7 +1368,9 @@ $("mode-player").addEventListener("click", qExit);
 // langsel's own handler has already swapped `lang` when this one runs
 langSel.addEventListener("change", () => { if (qBuilt && document.body.classList.contains("quiz")) qRender(); });
 // a shared https://…/#quiz link opens straight into the game once data is ready
-document.addEventListener("dbready", () => { if (location.hash === "#quiz") qEnter(); }, { once: true });
+document.addEventListener("dbready", () => {
+  if (location.hash === "#quiz" || !location.hash && document.documentElement.dataset.entry === "quiz") qEnter();
+}, { once: true });
 // warm the quiz while the solver idles after boot: the chain replay, the combination
 // cache and the guess-box name index are all memoized, so paying them here
 // makes the Quiz toggle instant. Start at the epoch so a missing schedule never

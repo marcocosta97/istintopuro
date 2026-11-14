@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+python3 scripts/site-pages.py --check
 for file in site/*.js scripts/*.js; do
   node --check "$file"
 done

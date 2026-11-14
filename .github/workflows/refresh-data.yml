@@ -169,7 +169,7 @@ jobs:
       # A refresh commit changes the positional index and shards together. Stamp the
       # deployed HEAD so an older cached index can never address the refreshed shards.
       - name: Stamp asset version
-        run: sed -i "s/__V__/$(git rev-parse HEAD)/g" site/index.html
+        run: python3 scripts/site-pages.py --version "$(git rev-parse HEAD)"
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site

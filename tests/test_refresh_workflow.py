@@ -54,8 +54,9 @@ class RefreshWorkflowTests(unittest.TestCase):
     def test_deployment_uses_the_refreshed_head_as_its_cache_version(self):
         text = WORKFLOW.read_text()
 
-        self.assertIn('s/__V__/$(git rev-parse HEAD)/g', text)
-        self.assertNotIn('s/__V__/${GITHUB_SHA}/g', text)
+        self.assertIn('scripts/site-pages.py --version "$(git rev-parse HEAD)"', text)
+        self.assertNotIn('scripts/site-pages.py --version "$GITHUB_SHA"', text)
+        self.assertIn('scripts/site-pages.py --version "$GITHUB_SHA"', PAGES_WORKFLOW.read_text())
 
     def test_failed_refresh_falls_back_without_poisoning_validated_state(self):
         text = WORKFLOW.read_text()
