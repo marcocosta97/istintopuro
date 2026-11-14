@@ -7,7 +7,8 @@
 <p align="center"><strong>Every career has a connection.</strong></p>
 
 <p align="center">
-  <a href="https://istintopuro.mcosta.it">Play now</a> ·
+  <a href="https://istintopuro.mcosta.it/quiz/">Play today's quiz</a> ·
+  <a href="https://istintopuro.mcosta.it">Explore the solver</a> ·
   <a href="#run-locally">Run locally</a> ·
   <a href="docs/development.md">Development</a>
 </p>
@@ -15,6 +16,12 @@
 A daily football quiz and a career solver. Find the players who connect your
 clubs, explore shared careers, or test your football memory with a new puzzle
 every day. Everything runs in your browser, with no account or tracking.
+
+<p align="center">
+  <a href="https://istintopuro.mcosta.it/quiz/">
+    <img src="site/readme-preview.svg" width="960" alt="Three daily quiz stages plus an optional Impossible; Inter — ? — PSG; Ibrahimović and Thiago Motta's shared clubs: Inter, PSG and Barcelona.">
+  </a>
+</p>
 
 - **Daily quiz** — four club intersections, from easy to impossible. The same
   puzzle for everyone, with an archive to replay past days. Clear the first three

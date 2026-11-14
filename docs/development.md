@@ -52,6 +52,84 @@ python3 -m http.server -d site 8000
 Pushing to `master` deploys `site/` to GitHub Pages, stamping every asset URL
 with the commit sha.
 
+The dedicated `/quiz/` entry opens the same game and browser progress directly.
+Its HTML, description and canonical URL are available without JavaScript. The
+homepage remains the solver entry; legacy `#quiz` and dated quiz links still work.
+Both pages use the root assets and the same service worker and offline copy.
+Quiz metadata is available immediately, including during data-loading failures.
+Canonical and Open Graph URLs follow the HTML entry: a legacy `#quiz` view keeps
+the home canonical, while leaving `/quiz/` restores the home URL and metadata.
+Offline navigation normalizes `/quiz` and `/quiz/index.html` to `/quiz/`, retaining
+date parameters and the correct asset base, including under a deployment subpath.
+
+After changing `site/index.html`, regenerate the quiz entry before running checks:
+
+```sh
+python3 scripts/site-pages.py
+```
+
+Deployment runs `python3 scripts/site-pages.py --version "$GITHUB_SHA"` to
+stamp both entry points together. The checked-in pages work without a build.
+Run release stamping only in a disposable checkout or deployment copy. The source
+HTML must retain its `__V__` placeholders; `--check` rejects already-stamped HTML.
+
+## Search visibility and first-time play
+
+No visitor analytics or tracking is added. Search Console provides search
+performance independently of the game code.
+
+The welcome dialog appears once on the plain homepage when the browser has no
+quiz activity, before the dataset finishes loading in the background. A labelled
+close button with an X sits at the top right; the main action starts the quiz.
+Starting the quiz keeps the current download and opens the board when ready.
+Guesses, hints, skips, finished games, statistics, archived results and replay
+progress count as prior play; an untouched board does not. Closing it with either
+action, Escape or a backdrop click saves `quizWelcomeSeen` locally.
+Direct quiz and solver-selection links bypass it. The normal page keeps its
+compact layout, including the daily quiz row in the empty solver state.
+
+To prepare the initial search baseline:
+
+1. Open [Google Search Console](https://search.google.com/search-console) and
+   select or add the URL-prefix property `https://istintopuro.mcosta.it/`.
+2. If it is not verified, use Google's HTML-file or HTML-tag method. Put the
+   exact supplied file in `site/`, or the exact verification tag in the home
+   `<head>` and regenerate the quiz entry. Publish it before clicking Verify.
+   If you already own a verified parent domain property, use that access.
+3. Submit `https://istintopuro.mcosta.it/sitemap.xml` in Sitemaps. After this
+   change is published, inspect `/` and `/quiz/` with URL Inspection, run the
+   live test and request indexing if appropriate. Record indexing exclusions
+   and Google's selected canonical rather than assuming sitemap inclusion
+   means a page is indexed.
+4. Export Search results performance for the last 28 complete days: clicks,
+   impressions, CTR, average position, queries and pages. Note the dates and
+   filters. If no data exists yet, record that and collect a baseline over time.
+5. Repeat the same export after four weeks with the same filters. Keep private
+   exports outside the public repository.
+
+Google's [verification guide](https://support.google.com/webmasters/answer/9008080)
+describes the supported ownership methods. Account verification, sitemap
+submission and private metrics require the owner's Search Console access.
+
+For a small usability baseline, recruit five volunteers unfamiliar with the game.
+Give each the homepage without instructions and ask them to try today's quiz.
+Record anonymous observations: what they think the site does, whether they find
+the quiz unaided, whether they understand a valid answer, whether they finish the
+three daily stages, and where they get stuck. Ask whether they would return the
+next day. Keep real observations separate from automated browser checks; the
+five-person exercise gives qualitative evidence, not population conversion rates.
+
+The README has one wide SVG illustration above the uninterrupted feature list:
+`site/readme-preview.svg`, sized 1440 × 240 and displayed at up to 960 × 160 px.
+It combines the daily difficulty progression, Inter — ? — PSG, and Ibrahimović
+and Thiago Motta's shared clubs, Inter, PSG and Barcelona. These career examples
+were verified against the published index; shared clubs do not imply shared
+seasons. Step heights illustrate rising difficulty, not measured scores.
+
+The graphic is illustrative, not a screenshot or today's quiz. It uses the
+project's Barlow fonts embedded under their existing SIL OFL license, a
+transparent background and light/dark colors.
+
 ## Checks
 
 The checks and data pipeline use Python 3 with `requests`, plus Node.js.
