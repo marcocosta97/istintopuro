@@ -63,8 +63,11 @@ save stays intact on the homepage, including after a dataset change or midnight.
 Explicit solver/quiz links and settings restoration retain their destinations.
 Reopening after midnight shows the pending board until the player requests today.
 Quiz metadata is available immediately, including during data-loading failures.
-Canonical and Open Graph URLs follow the HTML entry: a legacy `#quiz` view keeps
-the home canonical, while leaving `/quiz/` restores the home URL and metadata.
+Quiz navigation and shared results use `/quiz/?day=YYYY-MM-DD`, with `/quiz/`
+as the canonical and Open Graph URL. Legacy `#quiz` links normalize to this route.
+Mode changes add browser history entries; Back/Forward restores the view without
+forfeiting a run. Returning to the solver restores its URL, selection and metadata.
+An explicit solver history entry also stays on the solver after reloading.
 Offline navigation normalizes `/quiz` and `/quiz/index.html` to `/quiz/`, retaining
 date parameters and the correct asset base, including under a deployment subpath.
 

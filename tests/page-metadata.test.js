@@ -5,30 +5,34 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const QuizResult = require("../site/quiz-result.js");
 
 const app = fs.readFileSync(path.join(__dirname, "../site/app.js"), "utf8");
 const quiz = fs.readFileSync(path.join(__dirname, "../site/quiz.js"), "utf8");
 const translations = app.slice(app.indexOf("const REPO ="), app.indexOf("let lang ="));
 const metadata = app.slice(app.indexOf("function updatePageMetadata("), app.indexOf("function quizWelcomeEligible("));
-const exit = quiz.slice(quiz.indexOf("function qExit()"), quiz.indexOf("// a run in progress"));
+const exit = quiz.slice(quiz.indexOf("function qExit("), quiz.indexOf("// a run in progress"));
+const setUrl = quiz.slice(quiz.indexOf("function qSetUrl("), quiz.indexOf("// app.js assigns onclick"));
 const ORIGIN = "https://istintopuro.mcosta.it/";
 
 function page({ entry, active = false, url = "https://game.test/" } = {}) {
   const head = new Map(), controls = new Map(), classes = new Set(active ? ["quiz"] : []);
-  const element = () => ({ content: "", attributes: {}, setAttribute(key, value) { this.attributes[key] = value; } });
+  const element = () => ({ content: "", attributes: {}, setAttribute(key, value) { this.attributes[key] = value; },
+    removeAttribute(key) { delete this.attributes[key]; } });
   const document = {
     title: "", documentElement: { dataset: entry ? { entry } : {} },
     body: { classList: { contains: name => classes.has(name), remove: name => classes.delete(name) } },
     querySelector(selector) { if (!head.has(selector)) head.set(selector, element()); return head.get(selector); },
   };
   const location = new URL(url);
-  const context = vm.createContext({ document, location, URL,
+  const context = vm.createContext({ document, location, URL, QuizResult,
     $: id => { if (!controls.has(id)) controls.set(id, element()); return controls.get(id); },
-    history: { replaceState(_state, _title, next) { location.href = new URL(next, location).href; } },
+    history: { replaceState(_state, _title, next) { location.href = new URL(next, location).href; },
+      pushState(_state, _title, next) { location.href = new URL(next, location).href; } },
     syncHash() { location.hash = ""; }, solve() {},
   });
   vm.runInContext(translations + '\nlet lang="en", t=STR[lang], mode="club", qConfirm=null, qLeaveMode=null, qNavigation=0;\n'
-    + "let clubIds=[], leagueIds=[], countryIds=[], playerIds=[];\n" + metadata + exit, context);
+    + "let clubIds=[], leagueIds=[], countryIds=[], playerIds=[];\n" + metadata + setUrl + exit, context);
   return { document, location, head,
     update: () => vm.runInContext("updatePageMetadata()", context),
     leave: () => vm.runInContext("qExit()", context),
@@ -77,11 +81,11 @@ test("leaving either quiz entry clears its marker and restores home metadata acr
   }
 });
 
-test("the legacy hash quiz retains the home's canonical URL", () => {
+test("the legacy hash quiz uses the quiz canonical URL", () => {
   const browser = page({ active: true, url: "https://game.test/?day=2026-11-10#quiz" });
   browser.update();
   assert.equal(browser.document.title, "Daily football quiz — Istinto Puro");
-  assertCanonical(browser, "");
+  assertCanonical(browser, "quiz/");
   browser.leave();
   assert.equal(browser.document.title, "Istinto Puro — daily football quiz and solver");
   assertCanonical(browser, "");

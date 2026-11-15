@@ -677,7 +677,7 @@ function qBuild() {  // static skeleton, rendered once on first entry
     qConfirm = null; qLeaveMode = null;
     if (action === "resign") qResign();
     else if (action === "skip") qSkipStage();
-    else if (action === "leave") { qResign(); qExit(); if (mode !== leaveMode) setMode(leaveMode); }
+    else if (action === "leave") { qResign(); if (mode !== leaveMode) setMode(leaveMode); qExit(); }
   };
 }
 
@@ -1274,12 +1274,12 @@ function qRenderCal() {
 
 // Open a day from the archive. Today is the live persistent game; any past day is
 // restored from its completed state or its saved practice run.
-async function qCalPick(ds) {
+async function qCalPick(ds, { replace = false } = {}) {
   const navigation = ++qNavigation;
   if (ds === qToday() && (await qReloadForNewDay(ds, navigation) || navigation !== qNavigation)) return;
   if (ds === qToday()) { qReplayDate = null; qReplaying = false; qLoad(); }
   else { qReplayDate = ds; qStartReplay(ds); }
-  if (qs) history.replaceState(null, "", QuizResult.quizUrl(location.href, qs.date));
+  if (qs) qSetUrl(QuizResult.quizUrl(location.href, qs.date), "quiz", replace);
   qCalOpen(false);
   qRender();
 }
@@ -1290,18 +1290,17 @@ function qOpenSolver(clubs) {
   clubIds = clubs.slice();
   leagueIds = [];
   countryIds = [];
-  syncHash();
-  qExit();
   if (mode !== "club") setMode("club");  // setMode re-renders for the new selection
   else { renderChips(); solve(); }
+  qExit();
 }
 // reveal click-through: open a revealed player's card in the solver's player mode
 function qOpenPlayer(pid) {
   if (pid < 0) return;
   playerIds = [pid];
-  qExit();
   if (mode !== "player") setMode("player");
   else { renderChips(); solve(); }
+  qExit();
 }
 
 // ---------------------------------------------------------------- mode wiring
@@ -1320,7 +1319,7 @@ async function qReloadForNewDay(date = qToday(), navigation = qNavigation) {
     if (body?.v !== 1 || body.series !== QSERIES || typeof body.built !== "string"
         || !QuizCore.validPublishedQuiz(body.days?.[date], body.bonuses?.[date])) return false;
     if (body.built !== CORE_DB.built) {
-      history.replaceState(null, "", QuizResult.quizUrl(location.href, date));
+      qSetUrl(QuizResult.quizUrl(location.href, date), "quiz", true);
       location.reload();
       return true;
     }
@@ -1332,20 +1331,31 @@ async function qReloadForNewDay(date = qToday(), navigation = qNavigation) {
   finally { clearTimeout(timer); }
 }
 
+function qIsQuizUrl() {
+  return location.hash === "#quiz" || /\/quiz\/(?:index\.html)?$/.test(new URL(location.href).pathname);
+}
+
+function qSetUrl(url, view, replace = false) {
+  const state = { ...history.state, istintopuro: { view, mode } };
+  history[replace || url === location.href ? "replaceState" : "pushState"](state, "", url);
+}
+
 // app.js assigns onclick properties, these listeners run after them: entering
 // club/player mode (even the mode===m no-op click) closes the quiz view
-async function qEnter() {
+async function qEnter({ replace = false } = {}) {
   if (!DB) return;
   const navigation = ++qNavigation;
   const url = new URL(location.href);
-  const day = url.hash === "#quiz" || document.documentElement.dataset.entry === "quiz"
+  const day = qIsQuizUrl()
     ? QuizResult.validDay(url.searchParams.get("day"), QSERIES, qToday()) : null;
   if (await qReloadForNewDay(day || qToday(), navigation) || navigation !== qNavigation) return;
   if (document.body.classList.contains("quiz")) {
-    if (day && day !== qs?.date) qCalPick(day);
+    if (day && day !== qs?.date) return qCalPick(day, { replace });
+    qSetUrl(QuizResult.quizUrl(location.href, qs?.date), "quiz", true);
     return;
   }
   if (day) qReplayDate = day !== qToday() ? day : null;
+  if (!replace) qSetUrl(location.href, "solver", true);
   qConfirm = null; qLeaveMode = null;
   pIndex();  // guess box searches all players, like player mode
   if (!qBuilt) { qBuild(); qBuilt = true; }
@@ -1355,30 +1365,27 @@ async function qEnter() {
   if (qReplayDate && qReplayDate !== qToday()) { qPools(); qStartReplay(qReplayDate); }
   else { qReplayDate = null; qLoad(); }
   document.body.classList.add("quiz");
+  document.documentElement.dataset.entry = "quiz";
   document.body.classList.remove("qcal");  // always (re-)enter on the board, not a stale archive
-  history.replaceState(null, "", qs ? QuizResult.quizUrl(location.href, qs.date) : "#quiz");
-  $("mode-quiz").setAttribute("aria-pressed", "true");
+  qSetUrl(QuizResult.quizUrl(location.href, qs?.date), "quiz", replace);
+  $("mode-quiz").setAttribute("aria-current", "page");
   $("mode-club").setAttribute("aria-pressed", "false");
   $("mode-player").setAttribute("aria-pressed", "false");
   suggOpen(false);  // app.js: closes the solver's list AND clears its combobox aria state
   browseOpen(false);
   qRender();
 }
-function qExit() {
+function qExit({ replace = false } = {}) {
   qNavigation++;
   if (!document.body.classList.contains("quiz")) return;
   qConfirm = null; qLeaveMode = null;
   document.body.classList.remove("quiz");
   delete document.documentElement.dataset.entry;
-  const url = new URL(location.href);
-  url.searchParams.delete("day");
-  if (url.pathname.endsWith("/quiz/")) url.pathname = url.pathname.slice(0, -5);
-  else if (url.pathname.endsWith("/quiz/index.html")) url.pathname = url.pathname.slice(0, -15);
-  history.replaceState(null, "", url.href);
+  qSetUrl(QuizResult.homeUrl(location.href), "solver", replace);
   updatePageMetadata(false);
   $("tagline").textContent = mode === "club" ? t.tagline : t.taglineP;  // restore solver tagline
   syncHash();  // drop #quiz, restore the solver's selection hash (or a clean URL)
-  $("mode-quiz").setAttribute("aria-pressed", "false");
+  $("mode-quiz").removeAttribute("aria-current");
   $("mode-club").setAttribute("aria-pressed", mode === "club");
   $("mode-player").setAttribute("aria-pressed", mode === "player");
   if ((mode === "club" ? clubIds.length + leagueIds.length + countryIds.length : playerIds.length) === 0) solve();
@@ -1399,14 +1406,20 @@ $("modebar").addEventListener("click", (e) => {
   qLeaveMode = btn.id === "mode-club" ? "club" : "player";
   qRender();
 }, true);
-$("mode-quiz").addEventListener("click", qEnter);
+$("mode-quiz").addEventListener("click", event => {
+  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  if (DB) qEnter();
+  else location.hash = "quiz";  // Keep the data download; dbready normalizes the legacy entry.
+});
 $("mode-club").addEventListener("click", qExit);
 $("mode-player").addEventListener("click", qExit);
 // langsel's own handler has already swapped `lang` when this one runs
 langSel.addEventListener("change", () => { if (qBuilt && document.body.classList.contains("quiz")) qRender(); });
 function qShouldResumeOnLaunch() {
   // Explicit destinations and a settings reload take precedence over a saved run.
-  if (location.hash || new URL(location.href).searchParams.has("day") || $("about").open) return false;
+  if (location.hash || new URL(location.href).searchParams.has("day") || $("about").open
+      || history.state?.istintopuro?.view === "solver") return false;
   try {
     const state = JSON.parse(localStorage.quiz || "null");
     return !!(state && (state.v === 1 || state.v === 2)
@@ -1418,8 +1431,7 @@ function qShouldResumeOnLaunch() {
 // The PWA's start URL and a plain homepage visit also resume a started live run.
 // qLoad retains its progress, including the frozen board after midnight.
 document.addEventListener("dbready", () => {
-  if (location.hash === "#quiz" || !location.hash && document.documentElement.dataset.entry === "quiz"
-      || qShouldResumeOnLaunch()) return qEnter();
+  if (qIsQuizUrl() || qShouldResumeOnLaunch()) return qEnter({ replace: true });
 }, { once: true });
 // warm the quiz while the solver idles after boot: the chain replay, the combination
 // cache and the guess-box name index are all memoized, so paying them here
@@ -1439,19 +1451,22 @@ document.addEventListener("dbready", () => {
   const next = () => { const s = steps.shift(); if (s) { s(); idle(next); } };
   idle(next);
 }, { once: true });
-// dbready fires once at boot; this covers every later hash change — a #quiz link
-// opened in an already-loaded tab, the back button, or a hand-edited URL. (Our own
-// replaceState calls don't fire hashchange, so entering/leaving can't loop here.)
-addEventListener("hashchange", () => {
-  if (location.hash === "#quiz") { qEnter(); return; }        // qEnter no-ops before DB is ready
+// Browser navigation restores a view without adding another history entry or
+// treating Back as the explicit in-game action that forfeits a started run.
+function qRestoreNavigation() {
+  if (!DB) return;
+  if (qIsQuizUrl()) return qEnter({ replace: true });
   if (!document.body.classList.contains("quiz")) { qExit(); return; }  // also cancel a pending entry
   // left #quiz for a solver selection hash (or none): adopt that selection, then qExit's
   // syncHash writes it straight back instead of clobbering it with the old clubs
   ({ clubs: clubIds, leagues: leagueIds, countries: countryIds } = parseSelectionHash());
-  qExit();
+  const solverMode = history.state?.istintopuro?.mode === "player" ? "player" : "club";
+  if (mode !== solverMode) setMode(solverMode);
+  qExit({ replace: true });
   if (mode === "club") { renderChips(); solve(); }
-});
-addEventListener("popstate", () => { if (location.hash === "#quiz") qEnter(); });
+}
+addEventListener("hashchange", qRestoreNavigation);
+addEventListener("popstate", qRestoreNavigation);
 
 // Console reset: { archive: true } also removes today's completed result;
 // { stats: true } clears aggregate stats. The legacy boolean controls stats.
@@ -1470,7 +1485,7 @@ function quizReset(options = false) {
   if (document.body.classList.contains("quiz")) {
     document.body.classList.remove("qcal");
     qLoad();
-    if (qs) history.replaceState(null, "", QuizResult.quizUrl(location.href, qs.date));
+    if (qs) qSetUrl(QuizResult.quizUrl(location.href, qs.date), "quiz", true);
     qRender();
   }
   else { qs = qPz = null; }

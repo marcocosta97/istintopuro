@@ -30,7 +30,7 @@ def quiz_page(source):
     for selector, attribute in [('link rel="canonical"', 'href'), ('meta property="og:url"', 'content')]:
         page = re.sub(rf'(<{selector} {attribute}=")https://istintopuro.mcosta.it/',
                       r'\g<1>https://istintopuro.mcosta.it/quiz/', page, count=1)
-    return page.replace('id="intro-play" href="quiz/"', 'id="intro-play" href="#quiz"', 1)
+    return page
 
 
 def main():

@@ -66,11 +66,18 @@
     const time = dayNumber(day) * 864e5;
     return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === day ? day : null;
   }
-  function quizUrl(base, day) {
+  function homeUrl(base) {
     const url = new URL(base);
-    url.searchParams.set("day", day);
-    url.hash = "quiz";
+    url.pathname = url.pathname.replace(/\/quiz(?:\/index\.html|\/)?$/, "/").replace(/\/index\.html$/, "/");
+    url.searchParams.delete("day");
+    url.hash = "";
     return url.href;
   }
-  return { codes, dailyCleared, dailyWon, describe, streakStats, updateStreak, visibleStreak, validDay, quizUrl };
+  function quizUrl(base, day) {
+    const url = new URL(homeUrl(base));
+    url.pathname += "quiz/";
+    if (day) url.searchParams.set("day", day);
+    return url.href;
+  }
+  return { codes, dailyCleared, dailyWon, describe, streakStats, updateStreak, visibleStreak, validDay, homeUrl, quizUrl };
 });

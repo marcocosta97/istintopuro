@@ -20,9 +20,11 @@ const focusSearch = () => { if (!matchMedia("(pointer: coarse)").matches) search
 // from an older build — which is what the no-cache revalidation below used to buy, at
 // the price of a round trip on every single load. "__V__" locally, which is stable.
 const V = new URL(document.currentScript.src).searchParams.get("v") || "0";
-// A nested entry shares root assets even after a mode switch changes its URL.
-const pageBase = document.querySelector("base");
-if (pageBase) pageBase.href = document.baseURI;
+// Both entries keep loading root assets after client-side navigation changes the URL.
+const assetBase = new URL(".", document.baseURI).href;
+let pageBase = document.querySelector("base");
+if (!pageBase) { pageBase = document.createElement("base"); document.head.prepend(pageBase); }
+pageBase.href = assetBase;
 
 let CORE_DB = null;          // immutable index.json; the quiz always reads this
 let DB = null;               // core composed with the locally enabled league packs
@@ -237,9 +239,7 @@ function updatePageMetadata(quiz = document.body.classList.contains("quiz")
   for (const key of ['name="description"', 'property="og:description"', 'name="twitter:description"'])
     document.querySelector(`meta[${key}]`).content = description;
   document.querySelector('meta[property="og:locale"]').content = lang === "it" ? "it_IT" : "en_GB";
-  // Canonical URLs identify the HTML entry; #quiz remains a view of the home URL.
-  const canonical = "https://istintopuro.mcosta.it/"
-    + (document.documentElement.dataset.entry === "quiz" ? "quiz/" : "");
+  const canonical = "https://istintopuro.mcosta.it/" + (quiz ? "quiz/" : "");
   document.querySelector('link[rel="canonical"]').setAttribute("href", canonical);
   document.querySelector('meta[property="og:url"]').content = canonical;
 }
@@ -705,7 +705,7 @@ function removePackClubsFromHash(meta) {
     try { return !packLeagues.has(norm(decodeURIComponent(token.slice(2)).split("|")[0] || "")); }
     catch { return true; }
   });
-  history.replaceState(null, "", kept.length ? `#${kept.join(",")}` : location.pathname + location.search);
+  history.replaceState(history.state, "", kept.length ? `#${kept.join(",")}` : location.pathname + location.search);
 }
 async function togglePack(meta, on) {
   if (packBusy.has(meta.id)) return;
@@ -1706,7 +1706,7 @@ function parseSelectionHash() {
 function syncHash() {
   const tokens = clubIds.map(ci => DB.clubs[ci][3])
     .concat(leagueIds.map(leagueHashToken), countryIds.map(countryToken));
-  history.replaceState(null, "", tokens.length ? "#" + tokens.join(",") : location.pathname + location.search);
+  history.replaceState(history.state, "", tokens.length ? "#" + tokens.join(",") : location.pathname + location.search);
 }
 function addClub(ci) {
   if (ci === undefined || clubIds.includes(ci)) return;

@@ -65,11 +65,22 @@ test("a purple answer preserves its separate hint count", () => {
   assert.equal(result.hints, 1);
 });
 
-test("dated quiz links preserve base paths and reject invalid, future and prelaunch days", () => {
-  const url = new URL(Result.quizUrl("https://game.test/football/?x=1#clubs", "2026-11-11"));
-  assert.equal(url.pathname, "/football/");
-  assert.equal(url.searchParams.get("day"), "2026-11-11");
-  assert.equal(url.hash, "#quiz");
+test("quiz links normalize both entries and legacy links while preserving deployment paths", () => {
+  for (const prefix of ["/", "/football/"]) {
+    for (const entry of ["", "index.html", "quiz", "quiz/", "quiz/index.html"]) {
+      const base = `https://game.test${prefix}${entry}?x=1&day=2026-11-10#quiz`;
+      const url = new URL(Result.quizUrl(base, "2026-11-11"));
+      assert.equal(url.pathname, prefix + "quiz/");
+      assert.equal(url.searchParams.get("day"), "2026-11-11");
+      assert.equal(url.searchParams.get("x"), "1");
+      assert.equal(url.hash, "");
+      assert.equal(Result.homeUrl(url), `https://game.test${prefix}?x=1`);
+      assert.equal(Result.quizUrl(base), `https://game.test${prefix}quiz/?x=1`);
+    }
+  }
+});
+
+test("dated quiz links reject invalid, future and prelaunch days", () => {
   for (const day of ["2026-02-30", "2026-11-12", "2026-08-20", "hello", null])
     assert.equal(Result.validDay(day, "2026-08-21", "2026-11-11"), null);
   assert.equal(Result.validDay("2026-11-11", "2026-08-21", "2026-11-11"), "2026-11-11");

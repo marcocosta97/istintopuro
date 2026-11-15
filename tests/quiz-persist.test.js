@@ -87,7 +87,7 @@ function loadQuiz(storage, today, changeIndex = () => {}) {
     coreClub: name => name, coreStature: () => 1,
     MARQUEE: new Set(),
     localStorage, document, window: { requestIdleCallback: null },
-    location: { hash: "", href: "https://game.test/" }, history: { replaceState() {} }, URL,
+    location: new URL("https://game.test/"), history: { replaceState() {}, pushState() {} }, URL,
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     navigator: {}, addEventListener() {},
     $, lang: "it", langSel: $("langsel"), mode: "club",
@@ -104,7 +104,7 @@ function loadQuiz(storage, today, changeIndex = () => {}) {
 globalThis.__quizTest = {
   qGen, qStagesFromQids, qStagesFor, qLoad, qGuess, qResign, qFinish, qCore, qToday, qSave,
   qForfeitRolled, qUtcMonth, qUtcWeekday, qRenderCal, qRenderEnd, qGetStats, qStartReplay, qShareText, qSkipStage, quizReset, qBonusText, qHintText, qMatches, qHint, qReloadForNewDay,
-  qEnter, qExit, qCalPick, qRetrySchedule,
+  qEnter, qExit, qCalPick, qRetrySchedule, qRestoreNavigation,
   get qs() { return qs; }, set qs(v) { qs = v; },
   get qPz() { return qPz; }, set qPz(v) { qPz = v; },
   get qHold() { return qHold; },
@@ -541,7 +541,7 @@ test("practice never increments an official streak and sharing names no answers"
   ctx.api.qStartReplay(pickToday()); clearDaily(ctx.api); ctx.api.qResign();
   assert.equal(ctx.localStorage.quizStats, before);
   const share = ctx.api.qShareText();
-  assert.match(share, /\?day=2026-11-15#quiz/);
+  assert.match(share, /\/quiz\/\?day=2026-11-15$/);
   assert.doesNotMatch(share, /giorn[oi] di serie/);
   for (const guess of ctx.api.qs.guesses) assert.equal(share.includes(guess.name), false);
 });
@@ -898,15 +898,19 @@ function prepareNavigation(ctx, inQuiz = false) {
   };
   ctx.context.t = { tagline: "Club", taglineP: "Player" };
   ctx.context.V = "test-release";
-  ctx.context.history.replaceState = (_state, _title, url) => { urls.push(url); };
+  ctx.context.history.replaceState = (state, _title, url) => {
+    urls.push(url); ctx.context.location.href = url; ctx.context.history.state = state;
+  };
+  ctx.context.history.pushState = ctx.context.history.replaceState;
   vm.runInContext("qBuilt = true; pIndex = () => {}; qRender = () => {}; qRenderCal = () => {};", ctx.context);
   return { classes, urls };
 }
 
 async function coldOpen(storage, today, { url = "https://game.test/", standalone = false, entry,
-  settings = false, offline = false, changeIndex = () => {} } = {}) {
+  settings = false, offline = false, historyState = null, changeIndex = () => {} } = {}) {
   const ctx = loadQuiz(storage, today, changeIndex), navigation = prepareNavigation(ctx);
   ctx.context.location = new URL(url);
+  ctx.context.history.state = historyState;
   if (entry) ctx.context.document.documentElement.dataset.entry = entry;
   ctx.context.navigator = { standalone, onLine: !offline };
   ctx.context.matchMedia = query => ({ matches: standalone && query === "(display-mode: standalone)" });
@@ -916,6 +920,103 @@ async function coldOpen(storage, today, { url = "https://game.test/", standalone
   await ctx.ready();
   return { ...ctx, ...navigation };
 }
+
+function navigationHistory(ctx, url) {
+  const { classes } = prepareNavigation(ctx);
+  const entries = [{ url, state: { existing: "retained" } }];
+  let current = 0;
+  ctx.context.location = new URL(url);
+  const history = ctx.context.history;
+  history.state = entries[0].state;
+  history.replaceState = (state, _title, next) => {
+    entries[current] = { url: next, state };
+    ctx.context.location.href = next; history.state = state;
+  };
+  history.pushState = (state, _title, next) => {
+    entries.splice(++current); entries.push({ url: next, state });
+    ctx.context.location.href = next; history.state = state;
+  };
+  ctx.context.setMode = m => { ctx.context.mode = m; };
+  ctx.context.parseSelectionHash = () => ({
+    clubs: ctx.context.location.hash.slice(1).split(",")
+      .map(qid => ctx.browser.index.clubs.findIndex(club => club[3] === qid)).filter(ci => ci >= 0),
+    leagues: [], countries: [],
+  });
+  ctx.context.syncHash = () => {
+    const url = new URL(ctx.context.location.href);
+    url.hash = ctx.context.clubIds.map(ci => ctx.browser.index.clubs[ci][3]).join(",");
+    history.replaceState(history.state, "", url.href);
+  };
+  return { entries, classes,
+    async go(offset) {
+      current += offset;
+      ctx.context.location.href = entries[current].url;
+      history.state = entries[current].state;
+      await ctx.api.qRestoreNavigation();
+    },
+  };
+}
+
+test("Back and Forward restore solver selection and a started quiz without forfeiting or adding history", async () => {
+  for (const prefix of ["/", "/football/"]) {
+    for (const mode of ["club", "player"]) {
+      const ctx = loadQuiz({}, EPOCH), qid = ctx.browser.index.clubs[0][3];
+      const history = navigationHistory(ctx, `https://game.test${prefix}#${qid}`);
+      ctx.context.mode = mode; ctx.context.clubIds = [0]; ctx.context.playerIds = [1];
+      await ctx.api.qEnter();
+      ctx.api.qHint("nat");
+      const saved = ctx.localStorage.quiz;
+      assert.equal(ctx.context.location.href, `https://game.test${prefix}quiz/?day=${EPOCH}`);
+      assert.equal(history.entries.length, 2);
+      assert.equal(ctx.context.history.state.existing, "retained");
+      await ctx.api.qEnter();
+      assert.equal(history.entries.length, 2, "clicking the active quiz adds no entry");
+      await history.go(-1);
+      assert.equal(history.classes.has("quiz"), false);
+      assert.equal(ctx.context.location.href, `https://game.test${prefix}#${qid}`);
+      assert.equal(ctx.context.mode, mode);
+      assert.deepEqual(ctx.context.clubIds, [0]);
+      assert.deepEqual(ctx.context.playerIds, [1]);
+      assert.equal(ctx.localStorage.quiz, saved);
+      await history.go(1);
+      assert.equal(history.classes.has("quiz"), true);
+      assert.equal(ctx.api.qs.done, false);
+      assert.equal(ctx.localStorage.quiz, saved);
+      assert.equal(history.entries.length, 2);
+    }
+  }
+});
+
+test("browser history restores dated games and an explicit return to the solver", async () => {
+  const today = dayAfter(EPOCH), ctx = loadQuiz({}, today);
+  const history = navigationHistory(ctx, "https://game.test/");
+  await ctx.api.qEnter();
+  await ctx.api.qCalPick(EPOCH);
+  assert.equal(ctx.api.qs.date, EPOCH);
+  assert.equal(history.entries.length, 3);
+  await history.go(-1);
+  assert.equal(ctx.api.qs.date, today);
+  await history.go(1);
+  assert.equal(ctx.api.qs.date, EPOCH);
+  ctx.api.qExit();
+  assert.equal(ctx.context.location.href, "https://game.test/");
+  assert.equal(history.entries.length, 4);
+  await history.go(-1);
+  assert.equal(history.classes.has("quiz"), true);
+  assert.equal(ctx.api.qs.date, EPOCH);
+  await history.go(1);
+  assert.equal(history.classes.has("quiz"), false);
+  assert.equal(history.entries.length, 4);
+});
+
+test("reloading an explicit solver history entry keeps a pending quiz saved without reopening it", async () => {
+  const initial = loadQuiz({}, EPOCH);
+  initial.api.qLoad(); initial.api.qHint("nat");
+  const ctx = await coldOpen(initial.localStorage._data, EPOCH,
+    { historyState: { istintopuro: { view: "solver", mode: "club" } } });
+  assert.equal(ctx.classes.has("quiz"), false);
+  assert.equal(ctx.localStorage.quiz, initial.localStorage.quiz);
+});
 
 test("cold website and PWA launches resume a started quiz from the homepage", async () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "../site/manifest.webmanifest")));
@@ -933,7 +1034,7 @@ test("cold website and PWA launches resume a started quiz from the homepage", as
       assert.equal(reopened.api.qs.stage, saved.stage);
       assert.equal(reopened.api.qs.lives, saved.lives);
       assert.deepEqual(JSON.parse(reopened.localStorage.quiz), saved);
-      assert.match(reopened.urls.at(-1), /\/football\/\?day=2026-11-15#quiz$/);
+      assert.match(reopened.urls.at(-1), /\/football\/quiz\/\?day=2026-11-15$/);
     }
   }
 });

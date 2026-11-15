@@ -177,9 +177,9 @@ h1 .accent { color: var(--accent); }
 
 /* Club/Player segmented mode switch: its own tight row under the tagline */
 #modebar { display: flex; justify-content: flex-end; margin-bottom: .45rem; }
-#modebar button {
+#modebar button, #modebar a {
   cursor: pointer; background: transparent; color: var(--muted);
-  border: 1px solid var(--line); font: inherit; font-size: .8rem; padding: .12rem .6rem;
+  border: 1px solid var(--line); font: inherit; font-size: .8rem; padding: .12rem .6rem; text-decoration: none;
 }
 #mode-club { border-radius: 7px 0 0 7px; }
 #mode-player { border-radius: 0 7px 7px 0; margin-left: -1px; }
@@ -192,7 +192,7 @@ h1 .accent { color: var(--accent); }
 }
 #mode-quiz::before { content: "★ "; font-size: .85em; }
 #modebar #mode-quiz:hover { background: var(--accent); color: var(--on-accent); }
-#modebar #mode-quiz[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+#modebar #mode-quiz[aria-current="page"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 #modebar button:hover { color: var(--fg); }
 #modebar button[aria-pressed="true"] {  /* lifted so the accent border wins the -1px overlap */
   background: var(--hit); color: var(--accent); border-color: var(--accent); position: relative;

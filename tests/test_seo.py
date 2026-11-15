@@ -77,7 +77,7 @@ class SeoFilesTest(unittest.TestCase):
         quiz = (SITE / "quiz/index.html").read_text()
         self.assertEqual(quiz, generator.quiz_page((SITE / "index.html").read_text()))
         self.assertIn('data-entry="quiz"', quiz)
-        self.assertIn('id="intro-play" href="#quiz"', quiz)
+        self.assertIn('id="intro-play" href="quiz/"', quiz)
         self.assertIn('<dialog id="intro"', quiz)
 
     def test_release_stamps_both_entry_points_in_an_isolated_copy(self):
