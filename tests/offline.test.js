@@ -67,6 +67,13 @@ function worker({ version = "one", caches = storage(), network = {} } = {}) {
       } finally { if (abort) options.signal.removeEventListener("abort", abort); }
     }
     if (network.status) return new Response("unavailable", { status: network.status });
+    if (network.navigationRedirect && url.pathname === "/football/quiz") {
+      // Native navigation fetches expose redirects with status 0 and no
+      // readable Location header; Node cannot construct that response type.
+      const redirect = Response.error();
+      Object.defineProperty(redirect, "type", { value: "opaqueredirect" });
+      return redirect;
+    }
     let body = "asset";
     if (url.pathname.endsWith("/data/index.json")) body = index;
     else if (url.pathname.endsWith("/quiz-schedule.json")) body = {
@@ -137,6 +144,17 @@ test("an explicit download stores everything and survives a cold offline launch"
   await restarted.message({ type: "offline-status" });
   assert.equal(restarted.messages.at(-1).state, "ready");
   assert.equal(restarted.messages.at(-1).through, "2027-01-10");
+});
+
+test("online navigation passes redirects to the browser with or without a complete offline copy", async () => {
+  for (const cached of [false, true]) {
+    const app = worker({ network: { navigationRedirect: true } });
+    if (cached) await app.download();
+    const response = await app.request("./quiz?day=2026-10-20", "navigate");
+    assert.equal(response.type, "opaqueredirect", `cached=${cached}`);
+    assert.equal(response.status, 0);
+    if (!cached) assert.deepEqual(await app.caches.keys(), []);
+  }
 });
 
 test("a cold offline quiz navigation retains its entry and root asset base", async () => {

@@ -224,7 +224,9 @@ self.addEventListener("fetch", event => {
     event.respondWith((async () => {
       try {
         const response = await fetchNetwork(request, {}, 4000);
-        if (response.ok) return response;
+        // Navigation redirects have status 0 and ok=false. Return them to the
+        // browser so it can follow /quiz -> /quiz/ even without an offline copy.
+        if (response.ok || response.type === "opaqueredirect") return response;
       } catch { /* fall back to the last completely downloaded release */ }
       const quizUrl = new URL("./quiz/", self.location);
       const normalizedPath = url.pathname.replace(/\/index\.html$/, "/");
