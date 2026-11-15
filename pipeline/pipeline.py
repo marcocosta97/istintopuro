@@ -12,7 +12,7 @@ Stages (each checkpoints to data/, reruns skip completed stages):
   build    - emit site/data/index.json + career shards, print stats
   recognition - reuse an optional validated popularity snapshot, without source requests
   validate - sanity-check the emitted index; fail instead of shipping junk
-  quiz     - preserve published quizzes and generate/validate the next 90 days
+  quiz     - preserve today/past quizzes and regenerate/validate the next 21 days
   popularity - opt-in, bounded Wikipedia readership + language-coverage collection
 
 Usage: python3 pipeline/pipeline.py [stage ...]   (default: all except popularity)
@@ -2133,7 +2133,7 @@ def stage_validate():
     (DATA / "commit-body.txt").write_text("\n".join(lines) + "\n")
 
 def stage_quiz():
-    """Preserve the published horizon and generate the next 90 days."""
+    """Preserve today/past quizzes and refresh the next 21 days as an offline backup."""
     subprocess.run(["node", str(ROOT / "scripts" / "quiz-schedule.js")], cwd=ROOT, check=True)
 
 def stage_popularity():

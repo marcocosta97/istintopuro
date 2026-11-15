@@ -149,31 +149,61 @@ date-based type quotas. Repeated evidence for the same condition
 retains its strongest supporting spell. Dates without a suitable condition
 store `null`.
 
-Published conditions, including an absent condition, remain pinned while the
-matchup is unchanged. Targets remap by name/birth-year choice at release time.
+Conditions for today and past dates, including an absent condition, and their
+exact rewarded answers are immutable. Future conditions remain provisional and
+are selected again during each refresh.
 A new game copies its criterion into the saved state; started older games gain
 no new condition midway through play. Purple is earned only by the normal
 answer to that question, with no extra attempt or requirement for the streak.
 
 ### Published horizon
 
-`site/data/quiz-schedule.json` locks distributed dates through `through`. Normal
-refresh appends through 90 days after the dataset build and retains an explicitly
-longer horizon. To deliberately replace future dates while preserving earlier games:
+The public series starts on **2026-11-15**, numbered from Schedina #1. On the
+first visit on or after that date, the browser clears progress, archive, practice
+runs and aggregate statistics from the previous series once. Other preferences
+remain unchanged. Dates before the new series are unavailable.
 
-```sh
-node scripts/quiz-schedule.js --regenerate-from 2026-11-10
-```
+`site/data/quiz-schedule.json` stores only the four club-question QID lists
+(`days`) and a bonus entry (`bonuses`) for every distributed date. A bonus keeps
+its stage, criterion and exact name/birth-year target identities; `null` explicitly
+means no bonus. Careers, accepted-answer lists and hint facts are not copied into
+the schedule.
 
-This replaces the future lock and locks the new schedule again. Offline copies
-keep their puzzles until reconnecting. Locked history remains playable under its
-published levels; new dates must satisfy the current rules.
+Each successful refresh on UTC date X preserves club questions and bonuses up to
+and including X, then regenerates X+1 through X+21 using the refreshed dataset.
+The attempts at +7 and +14 may both fail; the next attempt at +21 is still covered,
+including its calendar day before deployment finishes. `generated` records X and
+`lockedThrough` marks that same historical boundary. `built` remains the dataset
+date. CLI generation uses the current UTC date; `--as-of` supports reproducible
+runs. The date cannot precede the dataset build or move an existing lock backwards.
+
+Future club questions and bonuses are provisional, including entries already in
+an older offline download. A future bonus is regenerated even when its club
+question happens to remain the same. Today and historical metadata are copied
+verbatim and missing or malformed entries fail the build. No retrospective bonus
+is added to an existing past quiz. Production refresh does not accept an arbitrary
+`--regenerate-from`; calibration tools can produce nondeployable previews.
+
+The browser resolves ordinary accepted answers and hints from the current core
+dataset. Club-index changes are resolved by QID. Data updates may change the
+ordinary answers; the already active club questions and bonus stay fixed. For
+today and past dates, bonus eligibility keeps the original target identities
+rather than adding newly matching players; an earned bonus still requires an
+accepted normal answer.
+
+Missing dates or unresolvable published questions show the retry state, including
+beyond the offline horizon; the browser never generates a competing local puzzle.
+Saved runs retain their club QIDs, guesses and bonus without career snapshots and
+can restore against the core dataset when the schedule file is unavailable. An
+already started offline forecast keeps its saved question when reconnecting. An
+online tab left open overnight checks the latest calendar before the next day;
+it reloads the release when the index build changes. A failed check keeps the
+cached backup usable. Older offline copies can differ from the latest forecast.
 
 Selection prefers unused intersections and balances country/club use. Country
 pressure uses the fourth power. Historical clubs use covered league affiliation
 as a sampling stratum without changing actual country labels. Cooldowns are 30
-days per unordered intersection, two per club and 14 per representative. Browser
-fallback reconstructs missing dates chronologically with the same rules.
+days per unordered intersection, two per club and 14 per representative. Published days require no chronological reconstruction in the browser.
 
 Every tier supports triples, attempted at 15% for Easy, 30% for Medium and 50%
 for Hard/Impossible, with pairs as fallback. Additional clues must retain the
@@ -221,7 +251,7 @@ node scripts/quiz-recalibration.js \
   --published data/review/published-schedule.json \
   --previous-proposal data/review/previous-proposal.json \
   --feedback data/review/feedback.json \
-  --from 2026-11-10 --output data/review/result
+  --from 2026-11-16 --output data/review/result
 ```
 
 This verifies identical career evidence, reproduces the old proposal, separates

@@ -49,10 +49,14 @@ shows when the complete game and all enabled country packs are ready.
   recency preference resolves similar quality, without fixed type sequences.
   Birth intervals are used only when no suitable nationality or career
   criterion exists across Easy, Medium and Hard.
-- The published schedule extends 90 days after the dataset build. Normal
-  refreshes preserve playable published dates, including future ones. Beyond
-  the saved schedule, locally generated puzzles can differ from a newer online
-  release.
+- The calendar covers 21 days after each successful refresh, covering two
+  missed weekly refreshes through the next scheduled attempt. A refresh on day X
+  preserves today and past club questions and bonuses, including rewarded player
+  identities, and regenerates X+1 through X+21 from current data. Older offline
+  copies may differ from the latest online calendar. Ordinary answers and hints
+  use the updated dataset. Missing dates require a refresh rather than local
+  generation. The current series starts on 15 November 2026 as day one; progress
+  from the previous series resets once at launch.
 - One “Play offline” switch maintains the complete game, career hints, teammate
   data, and all enabled country packs. It defaults to on in the installed PWA and
   off in a browser tab; explicit choices persist. Newly enabled packs download

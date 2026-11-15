@@ -52,7 +52,8 @@ packs. Installing the PWA turns this on by default; the download still needs
 to finish.
 
 Player photos fall back to initials offline. Reconnect occasionally to get fresh
-data and extend the shared quiz calendar, which covers 90 days after each build.
+data and extend the shared quiz calendar, which covers 21 days after each calendar refresh
+to tolerate two missed weekly refreshes.
 
 ## Run locally
 

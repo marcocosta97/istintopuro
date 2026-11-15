@@ -386,7 +386,12 @@ and falls back to the complete saved release, including for HTTP server errors.
 Storage can still be cleared by the user or evicted unless persistence is
 granted; readiness is checked again when Settings opens.
 
-The saved schedule covers 90 days after the dataset build and normal refreshes
-preserve every previously published date, including future ones. After that
-horizon, local generation remains playable but can differ from a newer online
-dataset. Reconnect to download a newer release and extend the shared schedule.
+The saved schedule covers 21 days after calendar generation: two missed weekly
+refreshes at +7 and +14 days are covered through the next attempt at +21,
+including that day's puzzle before deployment finishes. A successful refresh on
+UTC date X preserves today and historical questions and bonuses, and regenerates
+X+1 through X+21 using current data. Future offline forecasts may differ from
+the updated online calendar. Beyond the saved horizon, the quiz requests a refresh rather than locally
+generating a different puzzle. Reconnect to download a newer release and extend
+the shared schedule.
+
