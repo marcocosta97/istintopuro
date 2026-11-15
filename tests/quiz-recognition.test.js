@@ -5,7 +5,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const test = require("node:test");
 const { compile } = require("../scripts/quiz-recognition.js");
-const { createAdapter, validate, LEGACY_CONFIG, LEGACY_CLUB_CONFIG } = require("../site/quiz-recognition.js");
+const { createAdapter, validate, DEFAULT_CONFIG, DEFAULT_CLUB_CONFIG, LEGACY_CONFIG, LEGACY_CLUB_CONFIG } = require("../site/quiz-recognition.js");
 const { createRuntime, loadRuntime } = require("../scripts/quiz-schedule.js");
 const { createModel, BIDIRECTIONAL_CONFIG } = require("../scripts/recognition-model.js");
 const { createClubContext } = require("../scripts/club-recognition.js");
@@ -31,6 +31,9 @@ test("the shipped adapter reproduces the approved player and club model, includi
     assert.deepEqual(b.answers, a.answers);
     assert.deepEqual(published.core.qRanked(b), expected.core.qRanked(a));
     assert.equal(published.core.qFace(b), expected.core.qFace(a));
+    const first = expected.core.nextHintTarget(a);
+    assert.equal(published.core.nextHintTarget(b), first);
+    assert.equal(published.core.nextHintTarget(b, [first]), expected.core.nextHintTarget(a, [first]));
     for (const pid of a.effective)
       assert.equal(published.core.qDifficultyFame(pid, b.clubs), expected.core.qDifficultyFame(pid, a.clubs));
   }
@@ -49,6 +52,50 @@ test("the browser and Node use the same frozen inputs, independently of the wall
   assert.ok(html.indexOf('src="quiz-recognition.js') < html.indexOf('src="quiz.js'));
   const files = require("../site/offline.js").coreFiles({ nshards: 0, clubs: [] }, "test");
   assert.ok(files.includes("./quiz-recognition.js?v=test"));
+});
+
+test("Villa–Forest identikits prefer recognised links while retaining the career representative", () => {
+  const frozen = require("./fixtures/identikit-recognition.json");
+  const { index, core } = createRuntime(structuredClone(frozen.index),
+    { stature: ci => frozen.index._fixture.clubStature[ci] });
+  const [stage] = core.stagesFromQids([frozen.qids]);
+  const first = core.nextHintTarget(stage), second = core.nextHintTarget(stage, [first]);
+  assert.equal(index.names[first], "Marlon Harewood");
+  assert.equal(index.names[second], "Stan Collymore");
+  assert.equal(index.names[core.qFace(stage)], "Sam Hardy");
+
+  // An identikit already spent under the old ranking keeps its exact identity.
+  const hardy = core.qFace(stage);
+  const restored = core.migrateState(JSON.parse(JSON.stringify({
+    v: 2, built: index.built, hints: { ini2: 0 },
+    hintTargets: { ini2: hardy }, hintTargetKeys: { ini2: core.playerIdentity(hardy) },
+  })), [stage]);
+  assert.equal(restored.hintTargets.ini2, hardy);
+  assert.equal(core.nextHintTarget(stage, [restored.hintTargets.ini2]), first);
+});
+
+test("identikits use frozen popularity with spell recall and fall back to career scores without it", () => {
+  const index = require("./helpers/quiz-data.js").recognitionIndex();
+  index.births[0] = 1882;
+  index.births[1] = 1979;
+  index.gks = [0];
+  for (let ci = 0; ci < 2; ci++) index.apps[ci].splice(0, 3, 140, 100, 1);
+  const baseline = createRuntime(structuredClone(index));
+  index.quizRecognition = {
+    v: 1, kind: "quiz-recognition", asOf, config: DEFAULT_CONFIG, clubConfig: DEFAULT_CLUB_CONFIG,
+    players: { Q2: [1, 0.8, 1, 0.2, Date.parse(asOf) + 864e5],
+      Q3: [2, 1, 1, 0.2, Date.parse(asOf) + 864e5] }, clubs: {},
+  };
+  const published = createRuntime(index);
+  const [before] = baseline.core.stagesFromQids([["Q1543", "Q9616"]]);
+  const [after] = published.core.stagesFromQids([["Q1543", "Q9616"]]);
+  assert.equal(baseline.core.nextHintTarget(before), 0);
+  assert.equal(published.core.nextHintTarget(after), 1);
+  assert.equal(published.core.nextHintTarget(after, [1]), 0, "a famous cameo must not outrank a sustained link");
+  assert.equal(published.core.nextHintTarget(after, [1, 0]), 2);
+  assert.equal(published.core.nextHintTarget(after, [1, 0, 2]), null);
+  assert.deepEqual(published.core.qRanked(after), baseline.core.qRanked(before));
+  assert.deepEqual(after.answers, before.answers);
 });
 
 test("cached observations survive an unavailable source and remap by QID after player IDs change", () => {

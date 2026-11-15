@@ -13,6 +13,7 @@ published history and the 730-day audit.
 | `recognition-signals.json` | Synthetic language, readership, zero, stale and missing-source cases; not measured popularity |
 | `club-recall.json` | 129 complete careers, measured sources, familiar-club controls and user minimum-Hard constraints for AlzanoCene/PSG and Bury/Stoke |
 | `recognition-bridges.json` | Shared 655-career projection from the 2026-11-09 index at `80aa884f38f42643430b1a72c7edfe04eaae4316`, with four preserved comparison frames |
+| `identikit-recognition.json` | Complete Villa–Forest intersection from the 2026-11-09 index, all candidate core registrations and frozen recognition inputs; source digest and population weights retained in `_fixture` |
 
 Bridge frames cover target-curve migration, short spells, measured Easy admission
 and generational recall. Each retains original/supplemented source bundles,

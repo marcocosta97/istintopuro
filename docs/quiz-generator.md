@@ -34,8 +34,16 @@ intersections never fall between tiers.
 
 Career exposure, appearances, goals, recency and retirement legacy supply the
 prior, with appearance-based visibility for goalkeepers. Popularity and club
-recall change difficulty only; guesses, representatives and hints keep their
-career-based rules. Scores are heuristics, not solve probabilities.
+recall inform difficulty and newly requested identikits; guesses and
+representatives keep their career-based rules. Scores are heuristics, not solve
+probabilities.
+
+Identikits rank effective answers by the same frozen recognition score, including
+the weakest spell's appearance discount. Missing popularity uses the career prior;
+there is no birth-year exclusion. The second identikit selects the next distinct
+name/birth-year choice, in either button order. Requested targets remain saved by
+identity across reloads and data updates. This ranking does not change club
+selection, representative cooldowns, accepted answers or bonus criteria.
 
 ### Player signals
 

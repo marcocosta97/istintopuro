@@ -226,8 +226,8 @@
         * Math.sqrt(Math.min(weakest, QBRIDGE_FULL_APPS) / QBRIDGE_FULL_APPS);
       return qFame(pid, clubs, audience) * confidence;
     }
-    // Popularity and club recall affect difficulty only. Hint targets,
-    // representatives and saved-answer ranking keep using qBridgeFame.
+    // Popularity, spell recall and club familiarity inform difficulty and new
+    // identikits. Representatives and answer ranking keep using qBridgeFame.
     function qDifficultyFame(pid, clubs, audience = "european") {
       if (!deps.recognition?.adjustBridge) return qBridgeFame(pid, clubs, audience);
       if (clubs.length > 2) {
@@ -349,11 +349,12 @@
       }
       return info;
     }
-    function qRanked(stage) {
+    function rankAnswers(stage, score) {
       const answers = stage.effective || stage.answers;
       return answers.slice().sort((a, b) => Number(qUsableName(b)) - Number(qUsableName(a))
-        || qBridgeFame(b, stage.clubs, stage.audience) - qBridgeFame(a, stage.clubs, stage.audience) || a - b);
+        || score(b, stage.clubs, stage.audience) - score(a, stage.clubs, stage.audience) || a - b);
     }
+    const qRanked = (stage) => rankAnswers(stage, qBridgeFame);
     const qFace = (stage) => qRanked(stage)[0] ?? -1;
     const resolveAnswer = (pid, answers) => {
       const identity = choiceIdentity(pid);
@@ -362,7 +363,9 @@
     const answerMatches = (pid, answers) => resolveAnswer(pid, answers) !== null;
     const nextHintTarget = (stage, targets = []) => {
       const used = new Set(targets.filter(pid => pid !== null && pid !== undefined).map(choiceIdentity));
-      return qRanked(stage).find(pid => !used.has(choiceIdentity(pid))) ?? null;
+      // Only unspent identikits consult current recognition. Persisted targets
+      // are resolved by identity in migrateState and never ranked again.
+      return rankAnswers(stage, qDifficultyFame).find(pid => !used.has(choiceIdentity(pid))) ?? null;
     };
     const careerCacheKey = (pid, date, stage, clubs) =>
       `${date}|${stage}|${pid}|${clubs.slice().sort((a, b) => a - b).join(",")}`;

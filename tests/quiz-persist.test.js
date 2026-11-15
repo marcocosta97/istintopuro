@@ -730,6 +730,26 @@ test("empty searches never reveal answers", () => {
   assert.ok(api.qMatches(name).length > 0);
 });
 
+test("an identikit used on a later stage selects that stage's first choice, in either button order", () => {
+  for (const [first, second] of [["ini", "ini2"], ["ini2", "ini"]]) {
+    const initial = loadQuiz({}, EPOCH), { api } = initial;
+    api.qLoad();
+    assert.equal(api.qHint(first), true);
+    const previous = api.qs.hintTargets[first];
+    assert.equal(api.qGuess(previous), "stage");
+    const expected = api.qCore().nextHintTarget(api.qPz.stages[1]);
+    assert.equal(api.qHint(second), true);
+    assert.equal(api.qs.hintTargets[second], expected);
+    assert.equal(api.qs.hints[first], 0);
+    assert.equal(api.qs.hints[second], 1);
+
+    const restored = loadQuiz(initial.localStorage._data, EPOCH);
+    restored.api.qLoad();
+    assert.equal(restored.api.qs.hintTargets[first], previous);
+    assert.equal(restored.api.qs.hintTargets[second], expected);
+  }
+});
+
 test("corrupt saved hint targets are repaired to distinct valid answers", () => {
   const initial = loadQuiz({}, EPOCH), { api } = initial;
   api.qLoad(); api.qHint("ini"); api.qHint("ini2");

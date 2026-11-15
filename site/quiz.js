@@ -122,7 +122,7 @@ const qSave = () => {
 };
 const qRolled = () => !qReplaying && qs && qs.date !== qToday();  // played past midnight
 // one shot each, spent on whatever stage you're on. "ini2" is adaptive: the
-// second-most-famous answer's identikit, or — on a single-answer stage, which
+// next distinct recognisable answer's identikit, or — on a single-answer stage, which
 // the impossible tier often is — the lone answer's other clubs ("car")
 const QHINTS = ["nat", "ini", "ini2"];
 const qHinted = (i) => QHINTS.some(k => qs.hints[k] === i);  // a hint spent on stage i
