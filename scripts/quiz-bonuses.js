@@ -4,7 +4,7 @@
 // Optional clues annotate an already generated schedule; they never pick clubs.
 const fs = require("node:fs");
 const path = require("node:path");
-const { MARQUEE_QIDS, EASY_QIDS } = require("../site/quiz-core.js");
+const { MARQUEE_QIDS, EASY_QIDS, validBonus } = require("../site/quiz-core.js");
 
 function buildBonuses(runtime, schedule, previous = {}, directory = path.join(__dirname, "../site/data/career")) {
   const { index: db, core } = runtime, shards = new Map();
@@ -34,21 +34,17 @@ function buildBonuses(runtime, schedule, previous = {}, directory = path.join(__
   const targetKeys = (bonus, answers) => [...new Set(answers.filter(pid => matches(bonus, pid)).map(core.choiceIdentity))].sort();
   const bonuses = {};
   for (const [date, entry] of Object.entries(schedule.days).sort(([a], [b]) => a.localeCompare(b))) {
+    if (Object.hasOwn(previous.days || {}, date)) {
+      if (JSON.stringify(previous.days[date]) !== JSON.stringify(entry))
+        throw new Error(`Cannot change published quiz ${date}`);
+      if (!Object.hasOwn(previous.bonuses || {}, date) || !validBonus(previous.bonuses[date]))
+        throw new Error(`Missing or invalid published bonus ${date}`);
+      bonuses[date] = previous.bonuses[date];
+      continue;
+    }
     const checked = core.validateEntry(entry, { requireOrder: false, requireLevels: false });
     if (!checked.ok) throw new Error(`Cannot annotate invalid quiz ${date}`);
     const stages = checked.stages;
-    const old = previous.bonuses?.[date];
-    // An existing criterion (including an intentionally absent one) stays pinned
-    // while its matchup is unchanged. Targets are remapped by name/birth choice.
-    if (Object.prototype.hasOwnProperty.call(previous.bonuses || {}, date)
-        && JSON.stringify(previous.days?.[date]) === JSON.stringify(entry)) {
-      if (old === null) { bonuses[date] = null; continue; }
-      if (old && old.stage >= 0 && old.stage < 3 && ["career", "nationality", "birth"].includes(old.kind)) {
-        const targets = targetKeys(old, stages[old.stage].answers);
-        bonuses[date] = targets.length ? { ...old, targets } : null;
-        continue;
-      }
-    }
     bonuses[date] = null;
     let birthFallback = null;
     for (let stage = 0; stage < 3; stage++) {

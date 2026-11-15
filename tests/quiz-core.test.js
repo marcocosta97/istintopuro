@@ -8,7 +8,7 @@ const { EASY_QIDS } = require("../site/quiz-core.js");
 const { runtime } = require("./helpers/quiz-runtime.js");
 
 const ROOT = path.resolve(__dirname, "..");
-const SERIES_START = "2026-08-21";
+const SERIES_START = "2026-11-15";
 
 test("published combinations stay playable and scoring stays internally consistent", () => {
   const { core } = runtime();
@@ -40,7 +40,7 @@ test("generation is deterministic, classified, effective, and honors QID prior c
   assert.equal(first.stages.every((stage, i) => core.classifyStage(stage) === i), true);
   assert.equal(first.stages.every(stage => stage.effective.length > 0 && !stage.fallback), true);
   const previousDays = [{ date: first.date, stages: core.serializeStages(first.stages) }];
-  const next = core.generate("2026-08-22", { previousDays });
+  const next = core.generate("2026-11-16", { previousDays });
   const yesterday = new Set(first.stages.flatMap(stage => stage.clubs));
   assert.equal(next.stages.every(stage => stage.clubs.every(ci => !yesterday.has(ci))), true);
 });
@@ -49,7 +49,7 @@ test("representative answers do not repeat inside the rolling cooldown", () => {
   const { core } = runtime();
   const previousDays = [], lastSeen = new Map();
   for (let day = 0; day < 30; day++) {
-    const date = new Date(Date.UTC(2026, 7, 21 + day)).toISOString().slice(0, 10);
+    const date = new Date(Date.UTC(2026, 10, 15 + day)).toISOString().slice(0, 10);
     const result = core.generate(date, { previousDays: previousDays.slice(-core.constants.QCOMBO_DAYS) });
     for (const stage of result.stages) {
       const face = core.qFace(stage), previous = lastSeen.get(face);
@@ -102,10 +102,10 @@ test("combination guard treats permutations as equal for 30 days", () => {
   const reversed = rows.map(stage => [...stage].reverse());
   const previousDays = [{ date: SERIES_START, stages: rows }];
   assert.equal(core.constants.QCOMBO_DAYS, 30);
-  assert.equal(core.validateEntry(reversed, { date: "2026-09-20", previousDays }).ok, false);
-  const faceGuarded = core.validateEntry(reversed, { date: "2026-08-22", previousDays });
+  assert.equal(core.validateEntry(reversed, { date: "2026-12-15", previousDays }).ok, false);
+  const faceGuarded = core.validateEntry(reversed, { date: "2026-11-16", previousDays });
   assert.equal(faceGuarded.errors.some(error => error.includes("representative answer repeats")), true);
-  assert.equal(core.validateEntry(reversed, { date: "2026-09-21", previousDays }).ok, true);
+  assert.equal(core.validateEntry(reversed, { date: "2026-12-16", previousDays }).ok, true);
 });
 
 test("ini2-first targets survive reload and ini then selects a distinct identity", () => {

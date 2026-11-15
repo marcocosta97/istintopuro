@@ -11,104 +11,51 @@ const QuizRecognition = require("../site/quiz-recognition.js");
 
 const source = fs.readFileSync(path.join(__dirname, "../site/quiz.js"), "utf8");
 
-function runtime(days) {
-  const calls = [];
-  const core = {
-    constants: { QCOMBO_DAYS: 30 },
-    qShift: shiftDate,
-    validateEntry: rows => ({ ok: rows.length === 4, stages: rows }),
-    generate: (date, options) => {
-      calls.push({ date, previousDays: options.previousDays });
-      return { date, stages: [1, 2, 3, 4] };
-    },
-  };
-  const context = vm.createContext({ QuizRecognition, CORE_DB: { quizSchedule: days === null ? null : { days } },
-    QuizCore: { createQuizCore: () => core, easyQidsFor: QuizCore.easyQidsFor }, corePostings() {}, intersect() {},
-    coreStature() {}, coreLeagueCC() {}, coreClub() {}, MARQUEE: new Set(),
-    localStorage: { quizSeries: EPOCH },
-  });
-  vm.runInContext(source.slice(0, source.indexOf("const qGen =")), context);
-  return { calls, stagesFor: date => context.qStagesFor(date) };
-}
-
-test("opening a scheduled day does not generate or replay unrelated history", () => {
-  const date = shiftDate(EPOCH, 89), stages = [1, 2, 3, 4];
-  const { calls, stagesFor } = runtime({ [date]: stages });
-  assert.equal(stagesFor(date), stages);
-  assert.equal(stagesFor(date), stages);
-  assert.equal(calls.length, 0);
-});
-
-test("fallback reconstructs missing history before the published tail", () => {
-  const days = {};
-  for (let day = 60; day < 90; day++) days[shiftDate(EPOCH, day)] = [1, 2, 3, 4];
-  const { calls, stagesFor } = runtime(days);
-  const date = shiftDate(EPOCH, 90);
-  stagesFor(date);
-  assert.equal(calls.length, 61);
-  assert.equal(calls.at(-1).date, date);
-  assert.equal(calls.at(-1).previousDays.length, 90);
-  assert.equal(calls.at(-1).previousDays[0].date, EPOCH);
-  assert.equal(calls.at(-1).previousDays.at(-1).date, shiftDate(EPOCH, 89));
-});
-
-test("a missing schedule file does not generate an official day", () => {
-  const date = shiftDate(EPOCH, 3);
-  const { calls, stagesFor } = runtime(null);
-  assert.equal(stagesFor(date), null);
-  assert.equal(calls.length, 0);
-});
-
-test("without a published schedule the runtime replays the whole prior chain", () => {
-  const date = shiftDate(EPOCH, 95);
-  const { calls, stagesFor } = runtime({});
-  stagesFor(date);
-  assert.equal(calls.length, 96);
-  assert.equal(calls[0].date, EPOCH);
-  assert.equal(calls[0].previousDays.length, 0);
-  assert.equal(calls.at(-1).date, date);
-  assert.equal(calls.at(-1).previousDays.length, 95);
-  assert.equal(calls.at(-1).previousDays[0].date, EPOCH);
-});
-
-test("browser fallback agrees with the writer after locked published history", () => {
-  const node = loadRuntime();
-  const asset = JSON.parse(fs.readFileSync(path.join(__dirname, "../site/data/quiz-schedule.json"), "utf8"));
-  const date = shiftDate(asset.through, 1);
-  const previousDays = Object.keys(asset.days).sort().map(date => ({ date, stages: asset.days[date] }));
-  const expected = node.core.serializeStages(node.core.generate(date, { previousDays }).stages);
-  const browser = createRuntime(structuredClone(node.index));
+function runtime(asset, index = loadRuntime().index) {
+  const browser = createRuntime(structuredClone(index));
   browser.index.quizSchedule = asset;
   const context = vm.createContext({ CORE_DB: browser.index, QuizCore, QuizRecognition,
     corePostings: browser.postings, intersect: browser.intersect,
     coreLeagueCC: browser.leagueCC, coreClub: name => name,
-    localStorage: { quizSeries: EPOCH, quizHistory: '{"days":{}}' },
-  });
-  vm.runInContext(source.slice(0, source.indexOf("const qGen =")), context);
-  const stages = context.qStagesFor(date);
-  assert.deepEqual(browser.core.serializeStages(stages), expected);
-  assert.equal(browser.core.validateEntry(expected, { date, previousDays, requireLevels: true }).ok, true);
-});
-
-test("runtime preserves locked levels but repairs invalid future classifications", () => {
-  const node = loadRuntime();
-  const asset = JSON.parse(fs.readFileSync(path.join(__dirname, "../site/data/quiz-schedule.json"), "utf8"));
-  const date = shiftDate(asset.through, 1);
-  const previousDays = Object.keys(asset.days).sort().map(date => ({ date, stages: asset.days[date] }));
-  const expected = node.core.serializeStages(node.core.generate(date, { previousDays }).stages);
-  const corrupted = structuredClone(asset);
-  corrupted.days[date] = structuredClone(expected);
-  [corrupted.days[date][0], corrupted.days[date][1]] = [corrupted.days[date][1], corrupted.days[date][0]];
-  const browser = createRuntime(structuredClone(node.index));
-  browser.index.quizSchedule = corrupted;
-  const context = vm.createContext({ CORE_DB: browser.index, QuizCore, QuizRecognition,
-    corePostings: browser.postings, intersect: browser.intersect,
-    coreLeagueCC: browser.leagueCC, coreClub: name => name,
     localStorage: { quizSeries: EPOCH },
   });
   vm.runInContext(source.slice(0, source.indexOf("const qGen =")), context);
-  assert.deepEqual(browser.core.serializeStages(context.qStagesFor(asset.lockedThrough)), asset.days[asset.lockedThrough]);
-  assert.deepEqual(browser.core.serializeStages(context.qStagesFor(date)), expected);
+  return { stagesFor: date => context.qStagesFor(date), browser, context };
+}
+const asset = JSON.parse(fs.readFileSync(path.join(__dirname, "../site/data/quiz-schedule.json"), "utf8"));
+
+test("opening a published day restores the same club questions without generation", () => {
+  const { stagesFor, browser } = runtime(asset);
+  const stages = stagesFor(EPOCH);
+  assert.deepEqual(browser.core.serializeStages(stages), asset.days[EPOCH]);
+  assert.equal(stagesFor(EPOCH), stages);
+});
+
+test("missing, prelaunch and unpublished days never generate local replacements", () => {
+  for (const schedule of [null, { days: {} }, asset]) {
+    const { stagesFor } = runtime(schedule);
+    assert.equal(stagesFor(shiftDate(asset.through, 1)), null);
+    assert.equal(stagesFor(shiftDate(EPOCH, -1)), null);
+  }
+  assert.equal(runtime(null).stagesFor(EPOCH), null);
+});
+
+test("published questions resolve the current dataset after club indices change", () => {
+  const index = structuredClone(loadRuntime().index);
+  for (const field of ["clubs", "postings", "apps", "goals"]) index[field].reverse();
+  const { stagesFor, browser } = runtime(asset, index);
+  assert.deepEqual(browser.core.serializeStages(stagesFor(EPOCH)), asset.days[EPOCH]);
+});
+
+test("unresolvable or malformed published questions never receive replacements", () => {
+  const index = structuredClone(loadRuntime().index);
+  index.clubs = []; index.postings = []; index.apps = []; index.goals = [];
+  assert.equal(runtime(asset, index).stagesFor(EPOCH), null);
+  for (const change of [s => { s.days[EPOCH][0] = null; },
+    s => { delete s.bonuses[EPOCH]; }, s => { s.bonuses[EPOCH].targets = []; }]) {
+    const broken = structuredClone(asset); change(broken);
+    assert.equal(runtime(broken).stagesFor(EPOCH), null);
+  }
 });
 
 test("browser and schedule use the same recognition model independently of solver ranking", () => {

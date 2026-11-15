@@ -222,12 +222,29 @@ test("nationality clues name a single country and include players with multiple 
     assert.equal(bonus.value, "DZ");
     assert.deepEqual(bonus.targets, ["Niche One\u00001985"]);
     const previous = { days: structuredClone(f.schedule.days), bonuses: {
-      "2026-11-11": { kind: "nationality", value: "FR", stage: 0, targets: [] },
+      "2026-11-11": { kind: "nationality", value: "FR", stage: 0, targets: ["Niche One\u00001985", "Niche Two\u00001986"] },
     } };
     const french = buildBonuses(f.runtime, f.schedule, previous, f.dir)["2026-11-11"];
     assert.deepEqual(french.targets, ["Niche One\u00001985", "Niche Two\u00001986"]);
     previous.bonuses["2026-11-11"].value = "DZ,FR";
+    previous.bonuses["2026-11-11"].targets = ["Niche One\u00001985"];
     const legacy = buildBonuses(f.runtime, f.schedule, previous, f.dir)["2026-11-11"];
     assert.deepEqual(legacy.targets, ["Niche One\u00001985"]);
+  } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+
+test("published bonuses keep their exact targets after career and nationality changes", () => {
+  const f = fixture();
+  try {
+    const bonuses = buildBonuses(f.runtime, f.schedule, {}, f.dir);
+    const previous = { days: structuredClone(f.schedule.days), bonuses: structuredClone(bonuses) };
+    f.runtime.index.nats.fill("IT");
+    f.runtime.index.births.fill(2000);
+    fs.unlinkSync(path.join(f.dir, "0.json"));
+    f.runtime.core.validateEntry = () => { throw new Error("published bonuses must not consult new answers"); };
+    assert.deepEqual(buildBonuses(f.runtime, f.schedule, previous, f.dir), bonuses);
+    delete previous.bonuses["2026-11-11"];
+    assert.throws(() => buildBonuses(f.runtime, f.schedule, previous, f.dir), /Missing or invalid published bonus/);
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });

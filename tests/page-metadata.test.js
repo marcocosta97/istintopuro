@@ -27,7 +27,7 @@ function page({ entry, active = false, url = "https://game.test/" } = {}) {
     history: { replaceState(_state, _title, next) { location.href = new URL(next, location).href; } },
     syncHash() { location.hash = ""; }, solve() {},
   });
-  vm.runInContext(translations + '\nlet lang="en", t=STR[lang], mode="club", qConfirm=null, qLeaveMode=null;\n'
+  vm.runInContext(translations + '\nlet lang="en", t=STR[lang], mode="club", qConfirm=null, qLeaveMode=null, qNavigation=0;\n'
     + "let clubIds=[], leagueIds=[], countryIds=[], playerIds=[];\n" + metadata + exit, context);
   return { document, location, head,
     update: () => vm.runInContext("updatePageMetadata()", context),

@@ -60,15 +60,16 @@ function frozenDate(isoDay) {
   return MockDate;
 }
 
-function loadQuiz(storage, today) {
+function loadQuiz(storage, today, changeIndex = () => {}) {
   const browser = createRuntime(structuredClone(loadRuntime().index));
   browser.index.quizSchedule = structuredClone(schedule);
+  changeIndex(browser.index);
   const ids = {};
   const $ = (id) => (ids[id] ||= el(id));
   ["quiz", "modebar", "mode-quiz", "mode-club", "mode-player", "tagline", "langsel"].forEach($);
   const document = {
     body: { classList: { add() {}, remove() {}, contains: () => false, toggle() {} } },
-    documentElement: { lang: "it" },
+    documentElement: { lang: "it", dataset: {} },
     getElementById: $,
     createElement: (tag) => el(tag),
     addEventListener() {},
@@ -90,16 +91,17 @@ function loadQuiz(storage, today) {
     clubIds: [], leagueIds: [], countryIds: [], playerIds: [],
     flag: (cc) => cc || "", countryFlag: (cc) => cc || "", natName: cc => cc, defunct: () => "",
     esc: (s) => String(s), norm: (s) => String(s).toLowerCase(),
-    careerOf: async () => [], suggOpen() {}, browseOpen() {}, syncHash() {},
+    careerOf: async () => [], stillPlaying: () => false, playerMatches: query => browser.index.names.flatMap((name, pid) => name.toLowerCase().includes(query.toLowerCase()) ? [pid] : []), suggOpen() {}, browseOpen() {}, syncHash() {},
     parseSelectionHash: () => ({ clubs: [], leagues: [], countries: [] }),
     setMode() {}, renderChips() {}, solve() {}, updatePageMetadata() {},
-    Date: frozenDate(today),
+    Date: frozenDate(today), AbortController, setTimeout, clearTimeout,
   });
   // Same-script trailer keeps const/let in scope (they are not context properties).
   vm.runInContext(`${source}
 globalThis.__quizTest = {
   qGen, qStagesFromQids, qStagesFor, qLoad, qGuess, qResign, qFinish, qCore, qToday, qSave,
-  qForfeitRolled, qUtcMonth, qUtcWeekday, qRenderCal, qRenderEnd, qGetStats, qStartReplay, qShareText, qSkipStage, quizReset, qBonusText,
+  qForfeitRolled, qUtcMonth, qUtcWeekday, qRenderCal, qRenderEnd, qGetStats, qStartReplay, qShareText, qSkipStage, quizReset, qBonusText, qHintText, qMatches, qHint, qReloadForNewDay,
+  qEnter, qExit, qCalPick, qRetrySchedule,
   get qs() { return qs; }, set qs(v) { qs = v; },
   get qPz() { return qPz; }, set qPz(v) { qPz = v; },
   get qHold() { return qHold; },
@@ -110,42 +112,22 @@ globalThis.__quizTest = {
 
 function pickToday() {
   const days = Object.keys(schedule.days || {}).sort();
-  return days.find(d => d <= schedule.lockedThrough) || days.at(-1) || EPOCH;
+  return days[0] || EPOCH;
 }
 function dayAfter(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
 }
 
-test("qStagesFromQids fails the whole slate when one stage has no effective answers", () => {
-  const today = pickToday();
-  const { api, browser } = loadQuiz({}, today);
-  const generated = api.qGen(today);
-  const rows = generated.stages.map(st => st.clubs.map(ci => browser.index.clubs[ci][3]));
-  assert.equal(rows.length, 4);
-
-  const core = api.qCore();
-  const realEffective = core.qEffective.bind(core);
-  let stageIndex = 0;
-  core.qEffective = (clubs, raw) => {
-    const i = stageIndex++;
-    if (i === 2) return [];
-    return realEffective(clubs, raw);
-  };
-
-  stageIndex = 0;
-  assert.equal(api.qStagesFromQids(rows, { date: today, guesses: [] }), null);
-
-  const face = generated.stages[2].answers[0];
-  assert.ok(Number.isInteger(face) && face >= 0);
-  stageIndex = 0;
-  const restored = api.qStagesFromQids(rows, {
-    date: today,
-    guesses: [{ stage: 2, ok: true, pid: face, name: browser.index.names[face] }],
-  });
-  assert.ok(restored);
-  assert.equal(restored[2].grandfatheredFace, face);
+test("saved club questions stay fixed while ordinary answers follow the dataset", () => {
+  const today = pickToday(), { api, browser } = loadQuiz({}, today);
+  const rows = schedule.days[today];
+  const original = api.qGen(today).stages;
+  const restored = api.qStagesFromQids(rows, { date: today });
+  assert.deepEqual(restored.map(st => st.answers), original.map(st => st.answers));
   assert.deepEqual(restored.map(st => st.clubs.map(ci => browser.index.clubs[ci][3])), rows);
+  const corrupt = structuredClone(rows); corrupt[0][0] = "Q999999999999";
+  assert.equal(api.qStagesFromQids(corrupt, { date: today }), null);
 });
 
 test("qStats is idempotent per date and qLoad prefers finished history over stale quiz", () => {
@@ -510,19 +492,41 @@ test("purple is earned only by an accepted matching answer and survives restore"
   assert.equal(normal.api.qs.guesses[0].bonus, false);
 });
 
-test("updating published bonus selection does not replace a criterion already shown", () => {
+test("updating published bonus selection preserves a game started with a hint", () => {
   const today = pickToday(), initial = loadQuiz({}, today);
   initial.api.qLoad();
   const pid = initial.api.qPz.stages[0].answers[0];
   const shown = { stage: 0, kind: "birth", from: 1990, to: 1999,
     targets: [initial.api.qCore().choiceIdentity(pid)] };
   initial.api.qs.bonus = shown;
-  initial.api.qSave();
+  initial.api.qHint("nat");
+  assert.equal(initial.api.qs.guesses.length, 0);
+  assert.equal(initial.api.qs.hints.nat, 0);
   const restored = loadQuiz(initial.localStorage._data, today);
   restored.browser.index.quizSchedule.bonuses[today] = { stage: 0, kind: "career", value: "Different Club",
     targets: shown.targets };
   restored.api.qLoad();
   assert.deepEqual(JSON.parse(JSON.stringify(restored.api.qs.bonus)), shown);
+});
+
+test("an unstarted game adopts the published bonus even when its clubs are unchanged", () => {
+  const initial = loadQuiz({}, EPOCH);
+  initial.api.qLoad();
+  const old = JSON.parse(JSON.stringify(initial.api.qs.bonus));
+  assert.ok(old);
+  const target = initial.api.qPz.stages[old.stage].answers
+    .map(pid => initial.api.qCore().choiceIdentity(pid)).find(key => !old.targets.includes(key));
+  assert.ok(target);
+  for (const bonus of [null, { ...old, value: "IT" }, { ...old, targets: [target] }]) {
+    const restored = loadQuiz(initial.localStorage._data, EPOCH, index => {
+      index.quizSchedule.bonuses[EPOCH] = bonus;
+    });
+    restored.api.qLoad();
+    assert.equal(restored.api.qs.guesses.length, 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(restored.api.qs.stages)), schedule.days[EPOCH]);
+    assert.deepEqual(JSON.parse(JSON.stringify(restored.api.qs.bonus)), bonus);
+    assert.deepEqual(JSON.parse(restored.localStorage.quiz).bonus, bonus);
+  }
 });
 
 test("practice never increments an official streak and sharing names no answers", () => {
@@ -532,7 +536,7 @@ test("practice never increments an official streak and sharing names no answers"
   ctx.api.qStartReplay(pickToday()); clearDaily(ctx.api); ctx.api.qResign();
   assert.equal(ctx.localStorage.quizStats, before);
   const share = ctx.api.qShareText();
-  assert.match(share, /\?day=2026-08-21#quiz/);
+  assert.match(share, /\?day=2026-11-15#quiz/);
   assert.doesNotMatch(share, /giorn[oi] di serie/);
   for (const guess of ctx.api.qs.guesses) assert.equal(share.includes(guess.name), false);
 });
@@ -612,7 +616,7 @@ test("nationality bonus labels preserve historic countries and localize legacy m
 });
 
 test("answer disclosure includes every unguessed bonus option outside the first six without awarding it", () => {
-  const { api, context, localStorage } = loadQuiz({}, "2026-11-11");
+  const { api, context, localStorage } = loadQuiz({}, EPOCH);
   api.qLoad();
   const stage = api.qPz.stages[0], core = api.qCore();
   const choices = core.uniqueChoices([...core.qRanked(stage), ...stage.answers]);
@@ -636,7 +640,7 @@ test("answer disclosure includes every unguessed bonus option outside the first 
 });
 
 test("a bonus option already among the first six is marked once without duplication", () => {
-  const { api, context } = loadQuiz({}, "2026-11-11");
+  const { api, context } = loadQuiz({}, EPOCH);
   api.qLoad();
   const stage = api.qPz.stages[0], core = api.qCore();
   const choices = core.uniqueChoices([...core.qRanked(stage), ...stage.answers]), pid = choices[1];
@@ -647,4 +651,311 @@ test("a bonus option already among the first six is marked once without duplicat
   assert.equal([...reveal.matchAll(/class="qbonus-hit"/g)].length, 1);
   assert.equal([...reveal.matchAll(new RegExp(`data-p="${pid}"`, "g"))].length, 1);
   assert.equal(api.qs.guesses[0].bonus, true);
+});
+
+
+test("the new series resets progress once on November 15, including a tab open across midnight", () => {
+  const old = { quizSeries: "2026-08-21", quiz: "old-game", quizStats: "old-stats",
+    quizHistory: "old-history", quizReplays: "old-replays", theme: "dark" };
+  const before = loadQuiz(old, "2026-11-14");
+  assert.equal(before.localStorage.quiz, old.quiz);
+  before.api.qLoad();
+  assert.equal(before.api.qs, null);
+  assert.equal(before.localStorage.quizHistory, old.quizHistory);
+  before.context.Date = frozenDate(EPOCH);
+  before.api.qLoad();
+  assert.equal(before.api.qs.num, 1);
+  assert.equal(before.api.qs.date, EPOCH);
+  assert.equal(before.localStorage.quizSeries, EPOCH);
+  for (const key of ["quizStats", "quizHistory", "quizReplays"]) assert.equal(before.localStorage[key], undefined);
+  assert.equal(before.localStorage._data.theme, "dark");
+  before.api.qGuess(before.api.qPz.stages[0].answers[0]);
+  const reopened = loadQuiz(before.localStorage._data, EPOCH);
+  reopened.api.qLoad();
+  assert.equal(reopened.api.qs.guesses.length, 1, "later loads never reset the new series");
+  reopened.api.qStartReplay("2026-11-14");
+  assert.equal(reopened.api.qs, null, "the old series cannot be replayed");
+});
+
+function removeClubPlayer(index, qid, pid) {
+  const ci = index.clubs.findIndex(c => c[3] === qid);
+  let total = 0;
+  const ids = index.postings[ci].map(delta => total += delta), at = ids.indexOf(pid);
+  assert.ok(at >= 0);
+  ids.splice(at, 1); index.apps[ci].splice(at, 1); index.goals[ci].splice(at, 1);
+  let previous = 0;
+  index.postings[ci] = ids.map(id => { const delta = id - previous; previous = id; return delta; });
+}
+
+test("an unplayed archived day keeps its questions and bonus while ordinary answers change", () => {
+  const original = loadQuiz({}, EPOCH);
+  original.api.qLoad();
+  const bonus = JSON.parse(JSON.stringify(original.api.qs.bonus));
+  assert.ok(bonus);
+  const st = original.api.qPz.stages[bonus.stage];
+  const target = st.answers.find(pid => bonus.targets.includes(original.api.qCore().choiceIdentity(pid)));
+  assert.ok(Number.isInteger(target));
+  const rows = schedule.days[EPOCH];
+  const later = loadQuiz({}, "2027-01-15", index => removeClubPlayer(index, rows[bonus.stage][0], target));
+  later.api.qStartReplay(EPOCH);
+  assert.deepEqual(JSON.parse(JSON.stringify(later.api.qs.stages)), rows);
+  assert.deepEqual(JSON.parse(JSON.stringify(later.api.qs.bonus)), bonus);
+  assert.equal(later.api.qPz.stages[bonus.stage].answers.includes(target), false);
+  assert.equal(later.api.qPz.stages[bonus.stage].answers.length, st.answers.length - 1);
+  assert.equal(later.api.qs.content, undefined, "no career or answer snapshots are stored");
+});
+
+test("a changed nationality does not add newly qualifying players to a published bonus", () => {
+  const original = loadQuiz({}, EPOCH);
+  original.api.qLoad();
+  const bonus = original.api.qs.bonus;
+  assert.equal(bonus.kind, "nationality"); assert.equal(bonus.stage, 0);
+  const st = original.api.qPz.stages[0];
+  const normal = st.answers.find(pid => !bonus.targets.includes(original.api.qCore().choiceIdentity(pid)));
+  const later = loadQuiz({}, EPOCH, index => { index.nats[normal] = bonus.value; });
+  later.api.qLoad(); later.api.qGuess(normal);
+  assert.equal(later.api.qs.guesses[0].ok, true);
+  assert.equal(later.api.qs.guesses[0].bonus, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(later.api.qs.bonus)), JSON.parse(JSON.stringify(bonus)));
+});
+
+test("empty searches never reveal answers", () => {
+  const { api, context, browser } = loadQuiz({}, EPOCH);
+  context.norm = value => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  api.qLoad();
+  for (const query of ["", "   ", "\t\n", "---"]) {
+    assert.equal(api.qMatches(query).length, 0, JSON.stringify(query));
+  }
+  const name = browser.index.names[api.qPz.stages[0].answers[0]];
+  assert.ok(api.qMatches(name).length > 0);
+});
+
+test("corrupt saved hint targets are repaired to distinct valid answers", () => {
+  const initial = loadQuiz({}, EPOCH), { api } = initial;
+  api.qLoad(); api.qHint("ini"); api.qHint("ini2");
+  const stage = api.qPz.stages[0];
+  api.qHintText("ini", stage);
+  const expected = api.qHintText("ini", stage);
+  const unrelated = initial.browser.index.names.findIndex((_, pid) => !stage.answers.includes(pid));
+  assert.ok(unrelated >= 0);
+  api.qs.hintTargets.ini = unrelated;
+  api.qSave();
+
+  const restored = loadQuiz(initial.localStorage._data, EPOCH);
+  restored.api.qLoad();
+  const st = restored.api.qPz.stages[0], target = restored.api.qs.hintTargets.ini;
+  assert.ok(st.answers.includes(target));
+  assert.notEqual(target, restored.api.qs.hintTargets.ini2);
+  assert.equal(restored.api.qs.hints.ini, 0);
+  assert.equal(restored.api.qs.hints.ini2, 0);
+  assert.equal(JSON.parse(restored.localStorage.quiz).hintTargets.ini, target);
+  restored.api.qHintText("ini", st);
+  assert.equal(restored.api.qHintText("ini", st), expected);
+});
+
+test("degraded archive records offline show retry without overwriting saved progress", () => {
+  const initial = loadQuiz({}, EPOCH);
+  initial.api.qLoad();
+  for (const state of [undefined, { v: 9, date: EPOCH }]) {
+    const record = { num: 1, res: [3, 3, 3, 3], stages: initial.api.qs.stages, state };
+    const storage = { ...initial.localStorage._data,
+      quizHistory: JSON.stringify({ v: 1, days: { [EPOCH]: record } }) };
+    const ctx = loadQuiz(storage, EPOCH, index => { index.quizSchedule = null; });
+    ctx.api.qStartReplay(EPOCH);
+    assert.equal(ctx.api.qs, null);
+    assert.equal(ctx.api.qHold, "schedule");
+    assert.equal(vm.runInContext("qReplaying", ctx.context), false);
+    assert.deepEqual(ctx.localStorage._data, storage);
+
+    ctx.browser.index.quizSchedule = structuredClone(schedule);
+    ctx.api.qStartReplay(EPOCH);
+    assert.equal(ctx.api.qs.done, false);
+    assert.deepEqual(JSON.parse(JSON.stringify(ctx.api.qs.stages)), schedule.days[EPOCH]);
+    assert.deepEqual(JSON.parse(JSON.stringify(ctx.api.qs.bonus)), schedule.bonuses[EPOCH]);
+  }
+});
+
+test("a completed archive replay still restores from its saved club questions offline", () => {
+  const initial = loadQuiz({}, EPOCH);
+  initial.api.qLoad();
+  initial.api.qGuess(initial.api.qPz.stages[0].answers[0]);
+  initial.api.qResign();
+  const restored = loadQuiz(initial.localStorage._data, EPOCH, index => { index.quizSchedule = null; });
+  restored.api.qStartReplay(EPOCH);
+  assert.equal(restored.api.qs.done, true);
+  assert.equal(restored.api.qs.guesses[0].name, initial.api.qs.guesses[0].name);
+  assert.deepEqual(JSON.parse(JSON.stringify(restored.api.qs.bonus)), JSON.parse(JSON.stringify(initial.api.qs.bonus)));
+  assert.equal(restored.localStorage.quizStats, initial.localStorage.quizStats);
+});
+
+
+test("an online tab opened yesterday checks the network and reloads for a new dataset", async () => {
+  const ctx = loadQuiz({}, EPOCH);
+  ctx.api.qLoad(); ctx.api.qGuess(ctx.api.qPz.stages[0].answers[0]);
+  const saved = ctx.localStorage.quiz, next = dayAfter(EPOCH);
+  let reloads = 0, url, requested;
+  ctx.context.fetch = async (request, options) => {
+    requested = { request, options };
+    return { ok: true, json: async () => ({ ...structuredClone(schedule), built: next }) };
+  };
+  ctx.context.location.reload = () => { reloads++; };
+  ctx.context.history.replaceState = (_s, _t, value) => { url = value; };
+  ctx.context.navigator.onLine = true;
+  assert.equal(await ctx.api.qReloadForNewDay(), false);
+  assert.equal(requested, undefined, "no check during the same day");
+  ctx.context.Date = frozenDate(next);
+  assert.equal(await ctx.api.qReloadForNewDay(), true);
+  assert.equal(reloads, 1);
+  assert.equal(new URL(url).searchParams.get("day"), next);
+  assert.equal(new URL(requested.request, "https://game.test/").searchParams.has("v"), false);
+  assert.equal(requested.options.cache, "no-store");
+  assert.equal(ctx.localStorage.quiz, saved);
+  ctx.context.navigator.onLine = false;
+  assert.equal(await ctx.api.qReloadForNewDay(), false);
+  assert.equal(reloads, 1);
+});
+
+test("an overnight network failure keeps the cached schedule playable", async () => {
+  const ctx = loadQuiz({}, EPOCH), next = dayAfter(EPOCH);
+  ctx.api.qLoad();
+  const cached = ctx.browser.index.quizSchedule;
+  ctx.context.Date = frozenDate(next);
+  ctx.context.fetch = async () => { throw new Error("network unavailable"); };
+  ctx.context.location.reload = () => { throw new Error("must not navigate away from a working offline copy"); };
+  assert.equal(await ctx.api.qReloadForNewDay(), false);
+  assert.equal(ctx.browser.index.quizSchedule, cached);
+  ctx.api.qLoad();
+  assert.equal(ctx.api.qs.date, next);
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.api.qs.stages)), cached.days[next]);
+});
+
+test("an overnight forecast update with the same dataset replaces cached future questions", async () => {
+  const ctx = loadQuiz({}, EPOCH), next = dayAfter(EPOCH), later = dayAfter(next);
+  ctx.api.qLoad();
+  const refreshed = structuredClone(schedule);
+  refreshed.days[next] = structuredClone(schedule.days[later]);
+  refreshed.bonuses[next] = structuredClone(schedule.bonuses[later]);
+  let checks = 0;
+  ctx.context.fetch = async () => { checks++; return { ok: true, json: async () => refreshed }; };
+  ctx.context.location.reload = () => { throw new Error("matching indexes can use the refreshed calendar directly"); };
+  ctx.context.Date = frozenDate(next);
+  assert.equal(await ctx.api.qReloadForNewDay(), false);
+  ctx.api.qLoad();
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.api.qs.stages)), refreshed.days[next]);
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.api.qs.bonus)), refreshed.bonuses[next]);
+  assert.equal(await ctx.api.qReloadForNewDay(), false);
+  assert.equal(checks, 1);
+});
+
+test("an already started offline forecast survives a different current online question", () => {
+  const initial = loadQuiz({}, EPOCH);
+  initial.api.qLoad(); initial.api.qGuess(initial.api.qPz.stages[0].answers[0]);
+  const rows = JSON.parse(JSON.stringify(initial.api.qs.stages));
+  const restored = loadQuiz(initial.localStorage._data, EPOCH);
+  restored.browser.index.quizSchedule.days[EPOCH] = structuredClone(schedule.days[dayAfter(EPOCH)]);
+  restored.api.qLoad();
+  assert.equal(restored.api.qs.guesses.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(restored.api.qs.stages)), rows);
+  assert.deepEqual(JSON.parse(JSON.stringify(restored.api.qs.bonus)), JSON.parse(JSON.stringify(initial.api.qs.bonus)));
+});
+
+function prepareNavigation(ctx, inQuiz = false) {
+  const classes = new Set(inQuiz ? ["quiz", "qcal"] : []), urls = [];
+  ctx.context.document.body.classList = {
+    contains: name => classes.has(name),
+    add: name => classes.add(name),
+    remove: name => classes.delete(name),
+    toggle(name, on) {
+      const show = on ?? !classes.has(name);
+      if (show) classes.add(name); else classes.delete(name);
+      return show;
+    },
+  };
+  ctx.context.t = { tagline: "Club", taglineP: "Player" };
+  ctx.context.V = "test-release";
+  ctx.context.history.replaceState = (_state, _title, url) => { urls.push(url); };
+  vm.runInContext("qBuilt = true; pIndex = () => {}; qRender = () => {}; qRenderCal = () => {};", ctx.context);
+  return { classes, urls };
+}
+
+test("leaving quiz cancels a pending overnight entry or day selection", async () => {
+  const next = dayAfter(EPOCH);
+  for (const action of ["enter", "calendar"]) {
+    for (const changedDataset of [false, true]) {
+      const ctx = loadQuiz({}, EPOCH);
+      ctx.api.qLoad();
+      const saved = ctx.localStorage.quiz, cached = ctx.browser.index.quizSchedule;
+      const { classes, urls } = prepareNavigation(ctx, action === "calendar");
+      ctx.context.Date = frozenDate(next);
+      let resolveFetch, reloads = 0;
+      ctx.context.fetch = () => new Promise(resolve => { resolveFetch = resolve; });
+      ctx.context.location.reload = () => { reloads++; };
+      const pending = action === "enter" ? ctx.api.qEnter() : ctx.api.qCalPick(next);
+      assert.equal(typeof resolveFetch, "function");
+      ctx.api.qExit();
+      assert.equal(classes.has("quiz"), false);
+      const urlsAfterExit = urls.length;
+      const fresh = { ...structuredClone(schedule), built: changedDataset ? next : schedule.built };
+      resolveFetch({ ok: true, json: async () => fresh });
+      await pending;
+      assert.equal(classes.has("quiz"), false, action);
+      assert.equal(urls.length, urlsAfterExit, "a late response must not change the solver URL");
+      assert.equal(reloads, 0, "a cancelled check must not reload into quiz");
+      assert.equal(ctx.localStorage.quiz, saved);
+      assert.equal(ctx.browser.index.quizSchedule, cached);
+    }
+  }
+});
+
+test("choosing an archived day supersedes a pending selection of today", async () => {
+  const ctx = loadQuiz({}, EPOCH), next = dayAfter(EPOCH);
+  ctx.api.qLoad();
+  const { classes, urls } = prepareNavigation(ctx, true);
+  ctx.context.Date = frozenDate(next);
+  let resolveFetch;
+  ctx.context.fetch = () => new Promise(resolve => { resolveFetch = resolve; });
+  const pending = ctx.api.qCalPick(next);
+  await ctx.api.qCalPick(EPOCH);
+  const saved = ctx.localStorage.quizReplays, url = urls.at(-1);
+  resolveFetch({ ok: true, json: async () => structuredClone(schedule) });
+  await pending;
+  assert.equal(ctx.api.qs.date, EPOCH);
+  assert.equal(vm.runInContext("qReplayDate", ctx.context), EPOCH);
+  assert.equal(ctx.localStorage.quizReplays, saved);
+  assert.equal(urls.at(-1), url);
+  assert.equal(classes.has("quiz"), true);
+});
+
+test("a late schedule retry does not replace a subsequently selected replay", async () => {
+  const ctx = loadQuiz({}, dayAfter(EPOCH));
+  ctx.api.qLoad();
+  const { urls } = prepareNavigation(ctx, true);
+  let resolveFetch;
+  ctx.context.fetch = () => new Promise(resolve => { resolveFetch = resolve; });
+  const pending = ctx.api.qRetrySchedule();
+  await Promise.resolve();
+  assert.equal(typeof resolveFetch, "function");
+  await ctx.api.qCalPick(EPOCH);
+  const url = urls.at(-1);
+  resolveFetch({ ok: true, json: async () => structuredClone(schedule) });
+  await pending;
+  assert.equal(ctx.api.qs.date, EPOCH);
+  assert.equal(vm.runInContext("qReplayDate", ctx.context), EPOCH);
+  assert.equal(urls.at(-1), url);
+});
+
+test("selecting today refreshes an untouched offline board already open for that date", async () => {
+  const ctx = loadQuiz({}, EPOCH), next = dayAfter(EPOCH);
+  ctx.context.Date = frozenDate(next);
+  ctx.api.qLoad();
+  assert.equal(ctx.api.qs.date, next);
+  assert.equal(ctx.api.qs.guesses.length, 0);
+  prepareNavigation(ctx, true);
+  const refreshed = structuredClone(schedule);
+  refreshed.bonuses[next] = null;
+  ctx.context.fetch = async () => ({ ok: true, json: async () => refreshed });
+  await ctx.api.qCalPick(next);
+  assert.equal(ctx.api.qs.date, next);
+  assert.equal(ctx.api.qs.bonus, null);
+  assert.equal(JSON.parse(ctx.localStorage.quiz).bonus, null);
 });

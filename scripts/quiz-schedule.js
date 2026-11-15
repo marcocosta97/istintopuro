@@ -9,8 +9,9 @@ const DEFAULT_INDEX = path.join(ROOT, "site/data/index.json");
 const DEFAULT_OUTPUT = path.join(ROOT, "site/data/quiz-schedule.json");
 const CORE_PATH = path.join(ROOT, "site/quiz-core.js");
 const VERSION = 1;
-const EPOCH = "2026-08-21";
-const HORIZON_DAYS = 90;
+const { SERIES: EPOCH, validPublishedQuiz } = require(CORE_PATH);
+// Cover two missed weekly refreshes (+7, +14) through the next attempt (+21).
+const HORIZON_DAYS = 21;
 const AUDIT_DAYS = 730;
 const COMBO_GUARD_DAYS = 30;
 const TRIPLE_RATE_MIN = 0.4;
@@ -100,7 +101,9 @@ function readJson(file) {
 }
 
 function loadRuntime(indexPath = DEFAULT_INDEX) {
-  return createRuntime(readJson(indexPath));
+  const runtime = createRuntime(readJson(indexPath));
+  runtime.indexPath = indexPath;
+  return runtime;
 }
 
 function canonicalCombo(stage) {
@@ -164,6 +167,10 @@ function validateAsset(runtime, asset, { expectedBuilt, expectedThrough } = {}) 
   if (asset.v !== VERSION) errors.push(`v must be ${VERSION}`);
   if (!isIsoDate(asset.built)) errors.push("built must be an ISO date");
   if (!isIsoDate(asset.through)) errors.push("through must be an ISO date");
+  if (!isIsoDate(asset.generated) || (isIsoDate(asset.built) && asset.generated < asset.built)
+      || (isIsoDate(asset.through) && asset.generated > asset.through))
+    errors.push("generated must be an ISO date between built and through");
+  if (asset.lockedThrough !== asset.generated) errors.push("lockedThrough must equal generated");
   if (isIsoDate(asset.through) && asset.through < EPOCH) errors.push(`through must be on or after ${EPOCH}`);
   if (isIsoDate(asset.built) && isIsoDate(asset.through) && asset.through < asset.built) errors.push("through precedes built");
   if (asset.lockedThrough !== undefined && (!isIsoDate(asset.lockedThrough)
@@ -183,19 +190,14 @@ function validateAsset(runtime, asset, { expectedBuilt, expectedThrough } = {}) 
     const expectedDates = dateRange(EPOCH, asset.through);
     const actualDates = Object.keys(asset.days).sort();
     if (JSON.stringify(actualDates) !== JSON.stringify(expectedDates)) errors.push("days must cover epoch through `through` with no gaps or extras");
-    const accepted = {};
+    if (asset.series !== EPOCH) errors.push("wrong quiz series");
+    for (const field of ["bonuses"])
+      if (JSON.stringify(Object.keys(asset[field] || {}).sort()) !== JSON.stringify(expectedDates))
+        errors.push(`${field} must cover every published date without extras`);
     for (const date of expectedDates) {
       if (!Object.hasOwn(asset.days, date)) continue;
-      // Published history is immutable across data refreshes as long as its clubs
-      // still resolve and every stage remains playable. Difficulty can move when
-      // appearances change, so only newly generated/future days enforce levels
-      // and the repetition guard against the preserved tail.
-      const validationThrough = asset.lockedThrough || asset.built;
-      const result = inspectEntry(runtime, asset.days[date], {
-        date, previousDays: previousContext(accepted, date), strict: date > validationThrough,
-      });
-      if (!result.ok) errors.push(`${date}: ${result.errors.join("; ")}`);
-      accepted[date] = asset.days[date];
+      if (!validPublishedQuiz(asset.days[date], asset.bonuses?.[date]))
+        errors.push(`${date}: missing or invalid published questions or bonus`);
     }
   }
   return { ok: errors.length === 0, errors };
@@ -233,39 +235,51 @@ function generateEntry(runtime, date, previousDays) {
   return { entry, slate, diagnostics };
 }
 
-function buildSchedule(runtime, existing, { through: requestedThrough, regenerateFrom, warn = console.warn } = {}) {
+function buildSchedule(runtime, existing, { through: requestedThrough, regenerateFrom, asOf = runtime.index.built } = {}) {
   const built = runtime.index.built;
   if (!isIsoDate(built)) throw new Error(`index has invalid built date: ${built}`);
-  const through = scheduleThrough(built, requestedThrough ?? existing?.horizonThrough);
-  const oldDays = existing?.v === VERSION && existing.days && typeof existing.days === "object" ? existing.days : {};
-  // Every distributed date is available to offline players. Preserve the whole
-  // published horizon, including dates that have not happened yet.
-  let preserveThrough = isIsoDate(existing?.through) && existing.through > built
-    ? existing.through : built;
-  if (regenerateFrom !== undefined) {
-    if (!isIsoDate(regenerateFrom) || regenerateFrom <= built || regenerateFrom > through)
-      throw new Error("regenerateFrom must be an ISO date after the dataset build and within the horizon");
-    preserveThrough = shiftDate(regenerateFrom, -1);
-  }
-  const days = {};
+  if (!isIsoDate(asOf) || asOf < built) throw new Error("asOf must be an ISO date on or after the dataset build");
+  const previous = existing?.v === VERSION && existing.series === EPOCH ? existing : null;
+  // Never move the historical boundary backwards, even during a dataset rollback.
+  const generated = isIsoDate(previous?.generated) && previous.generated > asOf ? previous.generated : asOf;
+  const requested = scheduleThrough(generated, requestedThrough ?? previous?.horizonThrough);
+  const through = isIsoDate(previous?.through) && previous.through > requested ? previous.through : requested;
+  if (regenerateFrom !== undefined)
+    throw new Error("regenerateFrom is for review previews; normal refresh rebuilds tomorrow onward");
+  const days = {}, preserved = { days: {}, bonuses: {} };
   for (const date of dateRange(EPOCH, through)) {
-    const previousDays = previousContext(days, date);
-    const old = date <= preserveThrough ? oldDays[date] : undefined;
-    if (old) {
-      const preserved = inspectEntry(runtime, old, { strict: false });
-      if (preserved.ok) {
-        days[date] = old;
-        continue;
-      }
-      warn(`WARNING: regenerating invalid preserved quiz ${date}: ${preserved.errors.join("; ")}`);
+    if (previous && date <= generated && date <= previous.through) {
+      if (!Object.hasOwn(previous.days, date)) throw new Error(`${date}: missing published quiz`);
+      if (!validPublishedQuiz(previous.days[date], previous.bonuses?.[date]))
+        throw new Error(`${date}: invalid published questions or bonus`);
+      days[date] = preserved.days[date] = previous.days[date];
+      preserved.bonuses[date] = previous.bonuses[date];
+    } else {
+      days[date] = generateEntry(runtime, date, previousContext(days, date)).entry;
     }
-    days[date] = generateEntry(runtime, date, previousDays).entry;
   }
-  const asset = { v: VERSION, built, lockedThrough: through, through, days };
-  if (through > shiftDate(built, HORIZON_DAYS)) asset.horizonThrough = through;
+  const asset = { v: VERSION, series: EPOCH, built, generated, lockedThrough: generated, through, days };
+  const directory = path.join(path.dirname(runtime.indexPath || DEFAULT_INDEX), "career");
+  asset.bonuses = require("./quiz-bonuses.js").buildBonuses(runtime, asset, preserved, directory);
+  if (through > shiftDate(generated, HORIZON_DAYS)) asset.horizonThrough = through;
   const checked = validateAsset(runtime, asset, { expectedBuilt: built, expectedThrough: through });
   if (!checked.ok) throw new Error(`generated schedule failed validation:\n  ${checked.errors.join("\n  ")}`);
   return asset;
+}
+
+// Review artifacts can explore different future selections without producing a
+// deployable asset. The production writer never replaces frozen dates.
+function buildPreviewSchedule(runtime, existing, { through: requestedThrough, regenerateFrom } = {}) {
+  const built = runtime.index.built;
+  const through = scheduleThrough(built, requestedThrough ?? existing?.horizonThrough);
+  if (!isIsoDate(regenerateFrom) || regenerateFrom < EPOCH || regenerateFrom <= built || regenerateFrom > through)
+    throw new Error("regenerateFrom must be a future date in the current series and horizon");
+  const days = {};
+  for (const date of dateRange(EPOCH, through)) {
+    if (date < regenerateFrom && existing?.days?.[date]) days[date] = existing.days[date];
+    else days[date] = generateEntry(runtime, date, previousContext(days, date)).entry;
+  }
+  return { v: VERSION, series: EPOCH, built, through, days, preview: true };
 }
 
 function auditSchedule(runtime, { start = EPOCH, days = AUDIT_DAYS, enforce = true } = {}) {
@@ -404,10 +418,11 @@ function parseArgs(argv) {
     else if (arg === "--output") options.output = path.resolve(argv[++i]);
     else if (arg === "--check") options.check = true;
     else if (arg === "--audit") options.audit = true;
-    else if (arg === "--through" || arg === "--regenerate-from") {
+    else if (arg === "--through" || arg === "--regenerate-from" || arg === "--as-of") {
       const value = argv[++i];
       if (!isIsoDate(value)) throw new Error(`${arg} requires an ISO date`);
       if (arg === "--through") options.through = value;
+      else if (arg === "--as-of") options.asOf = value;
       else options.regenerateFrom = value;
     }
     else throw new Error(`unknown argument: ${arg}`);
@@ -421,16 +436,14 @@ function main(argv = process.argv.slice(2)) {
   if (options.check) {
     const asset = readJson(options.output);
     const checked = validateAsset(runtime, asset, {
-      expectedBuilt: runtime.index.built, expectedThrough: scheduleThrough(runtime.index.built, asset.horizonThrough),
+      expectedBuilt: runtime.index.built, expectedThrough: scheduleThrough(asset.generated, asset.horizonThrough),
     });
     if (!checked.ok) throw new Error(`quiz schedule validation failed:\n  ${checked.errors.join("\n  ")}`);
-    const bonuses = require("./quiz-bonuses.js").buildBonuses(runtime, asset, asset, path.join(path.dirname(options.index), "career"));
-    if (JSON.stringify(bonuses) !== JSON.stringify(asset.bonuses)) throw new Error("quiz bonus metadata is missing or stale");
     console.log(`quiz schedule: OK (${Object.keys(readJson(options.output).days).length} days)`);
   } else if (!options.audit) {
     const existing = fs.existsSync(options.output) ? readJson(options.output) : null;
-    const asset = buildSchedule(runtime, existing, { through: options.through, regenerateFrom: options.regenerateFrom });
-    asset.bonuses = require("./quiz-bonuses.js").buildBonuses(runtime, asset, existing || {}, path.join(path.dirname(options.index), "career"));
+    const asset = buildSchedule(runtime, existing, { through: options.through, regenerateFrom: options.regenerateFrom,
+      asOf: options.asOf || new Date().toISOString().slice(0, 10) });
     writeAsset(options.output, asset);
     console.log(`quiz schedule: wrote ${Object.keys(asset.days).length} days through ${asset.through}`);
   }
@@ -454,6 +467,6 @@ if (require.main === module) {
 module.exports = {
   ALL_SLOT_COUNTRY_MAX_RATIO, AUDIT_DAYS, BASELINE_MAX_IMPOSSIBLE_CLUB, COMBO_GUARD_DAYS,
   EPOCH, HORIZON_DAYS, MIN_GOALKEEPER_FACES, VERSION,
-  auditSchedule, buildSchedule, countryBalanceErrors, createRuntime, inspectEntry, loadRuntime,
+  auditSchedule, buildSchedule, buildPreviewSchedule, countryBalanceErrors, createRuntime, inspectEntry, loadRuntime,
   shiftDate, scheduleThrough, validateAsset,
 };

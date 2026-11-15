@@ -30,7 +30,8 @@
   const QLEVELS = ["easy", "medium", "hard", "impossible"];
   const QELIGIBILITY_VERSION = 2;
 
-  const QEPOCH = Date.UTC(2026, 7, 21);
+  const SERIES = "2026-11-15";
+  const QEPOCH = Date.parse(`${SERIES}T00:00:00Z`);
   const QT = 240;
   const QCOMBO_DAYS = 30;
   const QMAX_ATTEMPTS = 64;
@@ -276,10 +277,11 @@
       // such as Zidane's Bordeaux–Juventus career.
       return ease;
     }
-    const playerIdentity = (pid) => `${DB.names[pid]}\u0000${DB.births[pid] || ""}\u0000${DB.nats[pid] || ""}`;
+    const player = pid => ({ name: DB.names[pid], birth: DB.births[pid], nat: DB.nats[pid] });
+    const playerIdentity = (pid) => { const p = player(pid); return `${p.name}\u0000${p.birth || ""}\u0000${p.nat || ""}`; };
     // Guess choices are distinguished by name and birth year. Keep the fuller
     // identity above for saved record resolution and recognition calibration.
-    const choiceIdentity = (pid) => `${DB.names[pid]}\u0000${DB.births[pid] || ""}`;
+    const choiceIdentity = (pid) => { const p = player(pid); return `${p.name}\u0000${p.birth || ""}`; };
     const uniqueChoices = (pids) => {
       const seen = new Set();
       return pids.filter(pid => {
@@ -368,7 +370,10 @@
     function migrateState(state, stages, hintKinds = ["nat", "ini", "ini2"]) {
       if (!state || (state.v !== 1 && state.v !== 2)) return null;
       let identities;
-      const resolveIdentity = (key, pid) => {
+      const resolveIdentity = (key, pid, stageIndex) => {
+        const candidates = stages?.[stageIndex]?.answers || [];
+        const answer = candidates.find(p => playerIdentity(p) === key);
+        if (answer !== undefined) return answer;
         if (Number.isInteger(pid) && pid >= 0 && pid < DB.names.length && playerIdentity(pid) === key) return pid;
         identities ||= new Map(DB.names.map((name, index) => [playerIdentity(index), index]));
         return identities.get(key) ?? null;
@@ -378,8 +383,13 @@
       state.hintTargets ||= {};
       for (const [kind, pid] of Object.entries(state.hintTargets)) {
         const key = state.hintTargetKeys?.[kind];
-        if (key) state.hintTargets[kind] = resolveIdentity(key, pid);
+        if (key) state.hintTargets[kind] = resolveIdentity(key, pid, state.hints[kind]);
         else if (state.built && state.built !== DB.built) delete state.hintTargets[kind];
+        const stage = stages?.[state.hints[kind]], target = state.hintTargets[kind];
+        // Rebuild corrupt targets before choosing distinct identikits below.
+        // A stored null without an identity is the intentional career fallback.
+        if (stage && (target !== null || key) && !stage.answers.includes(target))
+          delete state.hintTargets[kind];
       }
       for (const kind of ["ini", "ini2"]) {
         if (state.hints[kind] === null || kind in state.hintTargets) continue;
@@ -390,12 +400,12 @@
       }
       state.guesses = (state.guesses || []).map(guess => {
         const valid = Number.isInteger(guess.pid) && guess.pid >= 0 && guess.pid < DB.names.length
-          && DB.names[guess.pid] === guess.name;
-        const birth = guess.birth ?? (valid ? DB.births[guess.pid] : 0);
-        const nat = guess.nat ?? (valid ? DB.nats[guess.pid] : "");
+          && player(guess.pid).name === guess.name;
+        const birth = guess.birth ?? (valid ? player(guess.pid).birth : 0);
+        const nat = guess.nat ?? (valid ? player(guess.pid).nat : "");
         const key = guess.key || guess.identity || `${guess.name}\u0000${birth || ""}\u0000${nat || ""}`;
         return { ...guess, birth: birth || 0, nat: nat || "",
-          key, pid: resolveIdentity(key, guess.pid) };
+          key, pid: resolveIdentity(key, guess.pid, guess.stage) };
       });
       state.built = DB.built;
       state.v = 2;
@@ -420,8 +430,9 @@
       res.forEach((code, i) => {
         if (code > 1) return;
         const pid = qFace(stages[i]);
-        if (pid < 0) return;
-        guesses.push({ name: DB.names[pid], birth: DB.births[pid] || 0, nat: DB.nats[pid] || "",
+        if (!player(pid).name) return;
+        const person = player(pid);
+        guesses.push({ name: person.name, birth: person.birth || 0, nat: person.nat || "",
           key: playerIdentity(pid), pid, stage: i, ok: true });
       });
       return {
@@ -770,5 +781,28 @@
     };
   }
 
-  return { createQuizCore, MARQUEE_QIDS, ELITE_QIDS, EASY_QIDS, LEGACY_EASY_QIDS, easyQidsFor, KNOWN_LEGACY_QIDS };
+  function validBonus(bonus) {
+    if (bonus === null) return true;
+    if (!bonus || !Number.isInteger(bonus.stage) || bonus.stage < 0 || bonus.stage > 2
+        || !["nationality", "career", "birth"].includes(bonus.kind)
+        || !Array.isArray(bonus.targets) || !bonus.targets.length
+        || new Set(bonus.targets).size !== bonus.targets.length
+        || !bonus.targets.every(key => typeof key === "string" && key.split("\u0000").length === 2
+          && key.split("\u0000")[0].length > 0)) return false;
+    return bonus.kind === "birth"
+      ? Number.isInteger(bonus.from) && Number.isInteger(bonus.to) && bonus.from <= bonus.to
+      : typeof bonus.value === "string" && bonus.value.length > 0;
+  }
+
+  function validPublishedQuiz(rows, bonus) {
+    if (!Array.isArray(rows) || rows.length !== 4) return false;
+    const used = new Set();
+    return rows.every(qids => Array.isArray(qids) && qids.length >= 2 && qids.length <= 3
+      && qids.every(qid => {
+        if (typeof qid !== "string" || !/^Q\d+$/.test(qid) || used.has(qid)) return false;
+        used.add(qid); return true;
+      })) && validBonus(bonus);
+  }
+
+  return { createQuizCore, validBonus, validPublishedQuiz, SERIES, MARQUEE_QIDS, ELITE_QIDS, EASY_QIDS, LEGACY_EASY_QIDS, easyQidsFor, KNOWN_LEGACY_QIDS };
 });

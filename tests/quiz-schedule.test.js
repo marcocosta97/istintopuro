@@ -8,7 +8,7 @@ const { calibrationRuntime } = require("./helpers/quiz-runtime.js");
 
 const ROOT = path.resolve(__dirname, "..");
 const {
-  AUDIT_DAYS, auditSchedule, buildSchedule, countryBalanceErrors, createRuntime, EPOCH, inspectEntry,
+  AUDIT_DAYS, auditSchedule, buildSchedule, countryBalanceErrors, createRuntime, EPOCH, HORIZON_DAYS, inspectEntry,
   loadRuntime, shiftDate, scheduleThrough, validateAsset,
 } = require("../scripts/quiz-schedule.js");
 
@@ -19,8 +19,9 @@ test("writer emits a valid deterministic v1 schedule", () => {
   generated = buildSchedule(runtime, null);
   assert.equal(generated.v, 1);
   assert.equal(generated.built, runtime.index.built);
-  assert.equal(generated.through, shiftDate(runtime.index.built, 90));
-  assert.equal(generated.lockedThrough, generated.through);
+  assert.equal(generated.through, shiftDate(runtime.index.built, HORIZON_DAYS));
+  assert.equal(generated.generated, runtime.index.built);
+  assert.equal(generated.lockedThrough, generated.generated);
   assert.equal(Object.keys(generated.days)[0], EPOCH);
   assert.deepEqual(validateAsset(runtime, generated, {
     expectedBuilt: runtime.index.built,
@@ -29,68 +30,129 @@ test("writer emits a valid deterministic v1 schedule", () => {
   assert.deepEqual(buildSchedule(runtime, generated), generated);
 });
 
-test("later refresh preserves the entire offline horizon, repairs invalid days, and extends it", () => {
+test("a refresh preserves today and history and regenerates tomorrow through the horizon", () => {
   generated ||= buildSchedule(runtime, null);
-  const input = structuredClone(generated);
-  const nextIndex = structuredClone(runtime.index);
-  nextIndex.built = shiftDate(runtime.index.built, 7);
-  const nextRuntime = createRuntime(nextIndex);
-  const preservedDate = EPOCH;
-  const invalidDate = shiftDate(EPOCH, 1);
-  const regeneratedDate = shiftDate(nextIndex.built, 1);
-  const nextThrough = shiftDate(nextIndex.built, 90);
-  const excessDate = shiftDate(nextThrough, 1);
-  const preservedHistory = Object.fromEntries(Object.entries(input.days)
-    .map(([date, stages]) => [date, structuredClone(stages)]));
-  const preserved = preservedHistory[preservedDate];
-  input.days[invalidDate][0][0] = "Q999999999999";
-  delete preservedHistory[invalidDate];
-  input.days[regeneratedDate][0].reverse();
-  preservedHistory[regeneratedDate] = structuredClone(input.days[regeneratedDate]);
-  input.days[excessDate] = preserved;
-  const warnings = [];
+  const index = structuredClone(runtime.index), asOf = shiftDate(index.built, 7);
+  index.built = asOf;
+  const input = structuredClone(generated), tomorrow = shiftDate(asOf, 1);
+  input.days[tomorrow][0][0] = "Q999999999999";
+  input.bonuses[tomorrow] = { kind: "nationality", value: "FAKE", stage: 0, targets: ["Fake\u00001900"] };
+  const next = createRuntime(index), calls = [], generate = next.core.generateSlate;
+  next.core.generateSlate = (date, options) => { calls.push(date); return generate(date, options); };
+  const output = buildSchedule(next, input);
+  for (const date of Object.keys(generated.days).filter(d => d <= asOf)) {
+    assert.deepEqual(output.days[date], generated.days[date]);
+    assert.deepEqual(output.bonuses[date], generated.bonuses[date]);
+  }
+  assert.equal(output.generated, asOf);
+  assert.equal(output.lockedThrough, asOf);
+  assert.equal(output.through, shiftDate(asOf, HORIZON_DAYS));
+  assert.equal(calls[0], tomorrow);
+  assert.equal(calls.at(-1), output.through);
+  assert.equal(calls.length, HORIZON_DAYS);
+  assert.notEqual(output.days[tomorrow][0][0], "Q999999999999");
+  assert.notEqual(output.bonuses[tomorrow]?.value, "FAKE");
+});
 
-  const repaired = buildSchedule(nextRuntime, input, { warn: message => warnings.push(message) });
+test("a future bonus is selected again even when its club question stays the same", () => {
+  generated ||= buildSchedule(runtime, null);
+  const input = structuredClone(generated), tomorrow = shiftDate(EPOCH, 1);
+  input.bonuses[tomorrow] = { kind: "nationality", value: "FAKE", stage: 0, targets: ["Fake\u00001900"] };
+  const output = buildSchedule(runtime, input, { asOf: EPOCH });
+  assert.deepEqual(output.days[tomorrow], generated.days[tomorrow]);
+  assert.deepEqual(output.bonuses[tomorrow], generated.bonuses[tomorrow]);
+  assert.deepEqual(output.bonuses[EPOCH], generated.bonuses[EPOCH]);
+});
 
-  for (const [date, stages] of Object.entries(preservedHistory)) assert.deepEqual(repaired.days[date], stages);
-  assert.equal(repaired.built, nextIndex.built);
-  assert.equal(repaired.through, nextThrough);
-  assert.equal(repaired.lockedThrough, nextThrough);
-  assert.equal(Object.hasOwn(repaired.days, excessDate), false);
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], new RegExp(invalidDate));
-  assert.equal(inspectEntry(nextRuntime, repaired.days[invalidDate], { strict: false }).ok, true);
+test("the horizon covers two missed weekly refreshes through the next scheduled attempt", () => {
+  generated ||= buildSchedule(runtime, null);
+  assert.equal(HORIZON_DAYS, 21);
+  const built = runtime.index.built;
+  for (const offset of [7, 14, 21]) {
+    const date = shiftDate(built, offset);
+    assert.ok(generated.days[date], `the scheduled day at +${offset} must already be playable`);
+    assert.ok(Object.hasOwn(generated.bonuses, date));
+  }
+  assert.equal(generated.through, shiftDate(built, 21));
+  assert.equal(generated.days[shiftDate(built, 22)], undefined);
+});
+
+test("a shorter request retains backup dates while allowing future regeneration", () => {
+  generated ||= buildSchedule(runtime, null);
+  const tail = shiftDate(generated.through, 1);
+  const extended = buildSchedule(runtime, generated, { through: tail });
+  const retained = buildSchedule(runtime, extended, { through: generated.through });
+  assert.equal(retained.through, tail);
+  assert.equal(retained.horizonThrough, tail);
+  assert.deepEqual(Object.keys(retained.days), Object.keys(extended.days));
+});
+
+test("a dataset rollback cannot move the protected day backwards", () => {
+  generated ||= buildSchedule(runtime, null);
+  const published = buildSchedule(runtime, generated, { asOf: EPOCH });
+  const index = structuredClone(runtime.index);
+  index.built = shiftDate(index.built, -7);
+  const output = buildSchedule(createRuntime(index), published);
+  assert.equal(output.generated, EPOCH);
+  assert.equal(output.lockedThrough, EPOCH);
+  assert.equal(output.through, published.through);
+  assert.deepEqual(output.days[EPOCH], published.days[EPOCH]);
+  assert.deepEqual(output.bonuses[EPOCH], published.bonuses[EPOCH]);
+});
+
+test("historical questions survive source changes while future questions use the updated clubs", () => {
+  generated ||= buildSchedule(runtime, null);
+  const index = structuredClone(runtime.index), removedQid = generated.days[EPOCH][0][0];
+  index.clubs.find(c => c[3] === removedQid)[3] = "Q999999999999";
+  delete index.byQid;
+  const next = createRuntime(index);
+  const output = buildSchedule(next, generated, { asOf: EPOCH });
+  assert.deepEqual(output.days[EPOCH], generated.days[EPOCH]);
+  assert.deepEqual(output.bonuses[EPOCH], generated.bonuses[EPOCH]);
+  assert.equal(next.byQid.has(removedQid), false);
+  for (const [date, stages] of Object.entries(output.days)) if (date > EPOCH)
+    assert.equal(stages.flat().includes(removedQid), false);
+  assert.equal(validateAsset(next, output).ok, true);
+});
+
+test("the generation date controls the horizon even with an older dataset", () => {
+  const asOf = shiftDate(runtime.index.built, 10);
+  const output = buildSchedule(runtime, null, { asOf });
+  assert.equal(output.built, runtime.index.built);
+  assert.equal(output.generated, asOf);
+  assert.equal(output.through, shiftDate(asOf, HORIZON_DAYS));
 });
 
 test("committed schedule matches the current index", () => {
   const asset = JSON.parse(fs.readFileSync(path.join(ROOT, "site/data/quiz-schedule.json"), "utf8"));
   const checked = validateAsset(runtime, asset, {
     expectedBuilt: runtime.index.built,
-    expectedThrough: scheduleThrough(runtime.index.built, asset.horizonThrough),
+    expectedThrough: scheduleThrough(asset.generated, asset.horizonThrough),
   });
   assert.equal(checked.ok, true, checked.errors.join("\n"));
 });
 
-test("explicit regeneration replaces future locks while preserving earlier published days", () => {
-  const asset = JSON.parse(fs.readFileSync(path.join(ROOT, "site/data/quiz-schedule.json"), "utf8"));
-  const from = shiftDate(runtime.index.built, 6), through = shiftDate(runtime.index.built, 100);
-  const input = structuredClone(asset);
-  input.lockedThrough = shiftDate(from, 5);
-  input.days[from][0].reverse();
-  const output = buildSchedule(runtime, input, { regenerateFrom: from, through });
-  assert.equal(output.lockedThrough, through);
-  assert.equal(output.through, through);
-  assert.equal(output.horizonThrough, through);
-  for (const [date, rows] of Object.entries(input.days))
-    if (date < from) assert.deepEqual(output.days[date], rows, date);
-  assert.notDeepEqual(output.days[from], input.days[from]);
-  assert.deepEqual(buildSchedule(runtime, output), output, "normal refresh must retain the requested horizon");
-  assert.equal(validateAsset(runtime, output, { expectedBuilt: runtime.index.built,
-    expectedThrough: scheduleThrough(runtime.index.built, output.horizonThrough) }).ok, true);
-  assert.throws(() => buildSchedule(runtime, input, { regenerateFrom: runtime.index.built }), /regenerateFrom/);
-  assert.throws(() => buildSchedule(runtime, input, { regenerateFrom: "2026-02-30" }), /regenerateFrom/);
-  const invalid = { ...output, horizonThrough: shiftDate(through, 1) };
-  assert.match(validateAsset(runtime, invalid).errors.join("\n"), /horizonThrough/);
+test("today and historical questions and bonuses cannot be regenerated or backfilled", () => {
+  generated ||= buildSchedule(runtime, null);
+  assert.throws(() => buildSchedule(runtime, generated, { regenerateFrom: EPOCH }), /regenerateFrom/);
+  const missing = structuredClone(generated);
+  delete missing.bonuses[EPOCH];
+  assert.throws(() => buildSchedule(runtime, missing, { asOf: EPOCH }), /invalid published questions or bonus/);
+  delete missing.days[EPOCH];
+  assert.throws(() => buildSchedule(runtime, missing, { asOf: EPOCH }), /missing published quiz/);
+  const malformed = structuredClone(generated);
+  malformed.bonuses[EPOCH].targets = [];
+  assert.throws(() => buildSchedule(runtime, malformed, { asOf: EPOCH }), /invalid published questions or bonus/);
+});
+
+test("a new series drops previous dates and generates only from day one", () => {
+  generated ||= buildSchedule(runtime, null);
+  const previous = { ...generated, series: "2026-08-21", days: { "2026-08-21": generated.days[EPOCH] } };
+  const next = buildSchedule(runtime, previous);
+  assert.equal(next.series, EPOCH);
+  assert.equal(Object.keys(next.days)[0], EPOCH);
+  assert.equal(next.days["2026-08-21"], undefined);
+  assert.deepEqual(next, generated);
 });
 
 test("a higher medium score is valid when its recognition requirements differ from easy", () => {
@@ -113,7 +175,7 @@ test("validator rejects malformed dates and repeated clubs in published history"
   repeated.days[date][1][0] = repeated.days[date][0][0];
   const checked = validateAsset(runtime, repeated);
   assert.equal(checked.ok, false);
-  assert.match(checked.errors.join("\n"), /repeats within the day/);
+  assert.match(checked.errors.join("\n"), /invalid published questions or bonus/);
 });
 
 test("a lock cannot exempt dates outside the schedule horizon from validation", () => {
