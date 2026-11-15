@@ -56,6 +56,12 @@ The dedicated `/quiz/` entry opens the same game and browser progress directly.
 Its HTML, description and canonical URL are available without JavaScript. The
 homepage remains the solver entry; legacy `#quiz` and dated quiz links still work.
 Both pages use the root assets and the same service worker and offline copy.
+Opening the homepage, including the PWA's start URL, resumes an unfinished daily
+quiz after a guess, hint or skip. Fresh and completed boards keep the solver entry.
+Automatic entry first checks that the saved board can rebuild; an unrestorable
+save stays intact on the homepage, including after a dataset change or midnight.
+Explicit solver/quiz links and settings restoration retain their destinations.
+Reopening after midnight shows the pending board until the player requests today.
 Quiz metadata is available immediately, including during data-loading failures.
 Canonical and Open Graph URLs follow the HTML entry: a legacy `#quiz` view keeps
 the home canonical, while leaving `/quiz/` restores the home URL and metadata.

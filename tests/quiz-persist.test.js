@@ -64,7 +64,7 @@ function loadQuiz(storage, today, changeIndex = () => {}) {
   const browser = createRuntime(structuredClone(loadRuntime().index));
   browser.index.quizSchedule = structuredClone(schedule);
   changeIndex(browser.index);
-  const ids = {};
+  const ids = {}, documentListeners = new Map();
   const $ = (id) => (ids[id] ||= el(id));
   ["quiz", "modebar", "mode-quiz", "mode-club", "mode-player", "tagline", "langsel"].forEach($);
   const document = {
@@ -72,7 +72,10 @@ function loadQuiz(storage, today, changeIndex = () => {}) {
     documentElement: { lang: "it", dataset: {} },
     getElementById: $,
     createElement: (tag) => el(tag),
-    addEventListener() {},
+    addEventListener(type, listener) {
+      if (!documentListeners.has(type)) documentListeners.set(type, []);
+      documentListeners.get(type).push(listener);
+    },
     dispatchEvent() { return true; },
     activeElement: null,
   };
@@ -107,7 +110,9 @@ globalThis.__quizTest = {
   get qHold() { return qHold; },
 };
 `, context);
-  return { api: context.__quizTest, localStorage: context.localStorage, browser, today, context };
+  return { api: context.__quizTest, localStorage: context.localStorage, browser, today, context,
+    ready: () => Promise.all((documentListeners.get("dbready") || []).map(listener => listener())),
+  };
 }
 
 function pickToday() {
@@ -897,6 +902,121 @@ function prepareNavigation(ctx, inQuiz = false) {
   vm.runInContext("qBuilt = true; pIndex = () => {}; qRender = () => {}; qRenderCal = () => {};", ctx.context);
   return { classes, urls };
 }
+
+async function coldOpen(storage, today, { url = "https://game.test/", standalone = false, entry,
+  settings = false, offline = false, changeIndex = () => {} } = {}) {
+  const ctx = loadQuiz(storage, today, changeIndex), navigation = prepareNavigation(ctx);
+  ctx.context.location = new URL(url);
+  if (entry) ctx.context.document.documentElement.dataset.entry = entry;
+  ctx.context.navigator = { standalone, onLine: !offline };
+  ctx.context.matchMedia = query => ({ matches: standalone && query === "(display-mode: standalone)" });
+  ctx.context.$("about").open = settings;
+  // Startup warming may wait for idle time; route restoration must not need it.
+  ctx.context.window.requestIdleCallback = ctx.context.requestIdleCallback = () => {};
+  await ctx.ready();
+  return { ...ctx, ...navigation };
+}
+
+test("cold website and PWA launches resume a started quiz from the homepage", async () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "../site/manifest.webmanifest")));
+  for (const action of ["guess", "hint", "skip"]) {
+    const initial = loadQuiz({}, EPOCH);
+    initial.api.qLoad();
+    if (action === "guess") initial.api.qGuess(initial.api.qPz.stages[0].answers[0]);
+    else if (action === "hint") initial.api.qHint("ini");
+    else initial.api.qSkipStage();
+    const saved = JSON.parse(initial.localStorage.quiz);
+    for (const standalone of [false, true]) for (const offline of [false, true]) {
+      const url = new URL(standalone ? manifest.start_url : "./", "https://game.test/football/").href;
+      const reopened = await coldOpen(initial.localStorage._data, EPOCH, { standalone, offline, url });
+      assert.ok(reopened.classes.has("quiz"), `${action}, standalone=${standalone}, offline=${offline}`);
+      assert.equal(reopened.api.qs.stage, saved.stage);
+      assert.equal(reopened.api.qs.lives, saved.lives);
+      assert.deepEqual(JSON.parse(reopened.localStorage.quiz), saved);
+      assert.match(reopened.urls.at(-1), /\/football\/\?day=2026-11-15#quiz$/);
+    }
+  }
+});
+
+test("cold launch keeps fresh, finished, invalid and unavailable saves on the homepage", async () => {
+  const initial = loadQuiz({}, EPOCH);
+  initial.api.qLoad();
+  const fresh = initial.localStorage.quiz;
+  initial.api.qHint("ini");
+  const started = JSON.parse(initial.localStorage.quiz);
+  initial.api.qResign();
+  const finished = initial.localStorage.quiz;
+  for (const quiz of [undefined, "bad json", "null", "[]", fresh, finished,
+    JSON.stringify({ ...started, v: 99 }), JSON.stringify({ ...started, date: "2026-11-31" }),
+    JSON.stringify({ ...started, date: dayAfter(EPOCH) }), JSON.stringify({ ...started, date: "2026-11-14" })]) {
+    const ctx = await coldOpen({ quiz }, EPOCH);
+    assert.equal(ctx.classes.has("quiz"), false);
+    assert.equal(ctx.localStorage.quiz, quiz);
+  }
+  const blocked = loadQuiz({}, EPOCH), { classes } = prepareNavigation(blocked);
+  blocked.context.window.requestIdleCallback = blocked.context.requestIdleCallback = () => {};
+  Object.defineProperty(blocked.localStorage, "quiz", { get() { throw new Error("denied"); } });
+  await blocked.ready();
+  assert.equal(classes.has("quiz"), false);
+});
+
+test("automatic resume preserves an unrestorable save, including after dataset drift and midnight", async () => {
+  const initial = loadQuiz({}, EPOCH);
+  initial.api.qLoad(); initial.api.qHint("nat");
+  const saved = initial.localStorage.quiz, state = JSON.parse(saved);
+  for (const today of [EPOCH, dayAfter(EPOCH)]) {
+    for (const drift of [false, true]) {
+      const quiz = drift ? saved : JSON.stringify({ ...state, stages: "invalid" });
+      const ctx = await coldOpen({ quiz }, today, { changeIndex(index) {
+        if (drift) index.clubs.find(club => club[3] === state.stages[2][0])[3] = "Q999999999999";
+      } });
+      assert.equal(ctx.classes.has("quiz"), false);
+      assert.equal(ctx.localStorage.quiz, quiz);
+      assert.equal(ctx.localStorage.quizHistory, undefined);
+      assert.equal(ctx.localStorage.quizStats, undefined);
+    }
+  }
+});
+
+test("automatic quiz resume leaves explicit solver links and settings restoration in control", async () => {
+  const initial = loadQuiz({}, EPOCH);
+  initial.api.qLoad(); initial.api.qHint("nat");
+  for (const options of [{ url: "https://game.test/#Q631,Q1543" },
+    { url: "https://game.test/#L:Premier%20League%7C1%7CGB" },
+    { url: "https://game.test/#C:IT" }, { settings: true }]) {
+    const ctx = await coldOpen(initial.localStorage._data, EPOCH, options);
+    assert.equal(ctx.classes.has("quiz"), false);
+    assert.equal(ctx.localStorage.quiz, initial.localStorage.quiz);
+  }
+});
+
+test("explicit quiz entries work without progress and dated links outrank a pending live run", async () => {
+  for (const options of [{ url: "https://game.test/#quiz" },
+    { url: "https://game.test/quiz/", entry: "quiz" }]) {
+    const ctx = await coldOpen({}, EPOCH, options);
+    assert.ok(ctx.classes.has("quiz"));
+    assert.equal(ctx.api.qs.date, EPOCH);
+  }
+  const today = dayAfter(EPOCH), initial = loadQuiz({}, today);
+  initial.api.qLoad(); initial.api.qHint("nat");
+  const ctx = await coldOpen(initial.localStorage._data, today,
+    { url: `https://game.test/?day=${EPOCH}#quiz` });
+  assert.ok(ctx.classes.has("quiz"));
+  assert.equal(ctx.api.qs.date, EPOCH);
+  assert.equal(ctx.localStorage.quiz, initial.localStorage.quiz);
+});
+
+test("reopening after midnight shows the pending board without forfeiting it", async () => {
+  const initial = loadQuiz({}, EPOCH);
+  initial.api.qLoad(); initial.api.qHint("nat");
+  const ctx = await coldOpen(initial.localStorage._data, dayAfter(EPOCH));
+  assert.ok(ctx.classes.has("quiz"));
+  assert.equal(ctx.api.qs.date, EPOCH);
+  assert.equal(ctx.api.qs.done, false);
+  assert.equal(ctx.localStorage.quiz, initial.localStorage.quiz);
+  assert.equal(ctx.localStorage.quizHistory, undefined);
+  assert.equal(ctx.localStorage.quizStats, undefined);
+});
 
 test("leaving quiz cancels a pending overnight entry or day selection", async () => {
   const next = dayAfter(EPOCH);

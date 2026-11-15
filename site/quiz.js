@@ -1404,9 +1404,22 @@ $("mode-club").addEventListener("click", qExit);
 $("mode-player").addEventListener("click", qExit);
 // langsel's own handler has already swapped `lang` when this one runs
 langSel.addEventListener("change", () => { if (qBuilt && document.body.classList.contains("quiz")) qRender(); });
-// a shared https://…/#quiz link opens straight into the game once data is ready
+function qShouldResumeOnLaunch() {
+  // Explicit destinations and a settings reload take precedence over a saved run.
+  if (location.hash || new URL(location.href).searchParams.has("day") || $("about").open) return false;
+  try {
+    const state = JSON.parse(localStorage.quiz || "null");
+    return !!(state && (state.v === 1 || state.v === 2)
+      && QuizResult.validDay(state.date, QSERIES, qToday()) && qRunStarted(state)
+      && qStagesFromQids(state.stages, state));
+  } catch { return false; }
+}
+
+// The PWA's start URL and a plain homepage visit also resume a started live run.
+// qLoad retains its progress, including the frozen board after midnight.
 document.addEventListener("dbready", () => {
-  if (location.hash === "#quiz" || !location.hash && document.documentElement.dataset.entry === "quiz") qEnter();
+  if (location.hash === "#quiz" || !location.hash && document.documentElement.dataset.entry === "quiz"
+      || qShouldResumeOnLaunch()) return qEnter();
 }, { once: true });
 // warm the quiz while the solver idles after boot: the chain replay, the combination
 // cache and the guess-box name index are all memoized, so paying them here
