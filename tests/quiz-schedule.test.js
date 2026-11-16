@@ -13,6 +13,7 @@ const {
 } = require("../scripts/quiz-schedule.js");
 
 const runtime = loadRuntime();
+const AS_OF = runtime.index.built > EPOCH ? runtime.index.built : EPOCH;
 let generated;
 
 test("writer emits a valid deterministic v1 schedule", () => {
@@ -56,9 +57,9 @@ test("a refresh preserves today and history and regenerates tomorrow through the
 
 test("a future bonus is selected again even when its club question stays the same", () => {
   generated ||= buildSchedule(runtime, null);
-  const input = structuredClone(generated), tomorrow = shiftDate(EPOCH, 1);
+  const input = structuredClone(generated), tomorrow = shiftDate(AS_OF, 1);
   input.bonuses[tomorrow] = { kind: "nationality", value: "FAKE", stage: 0, targets: ["Fake\u00001900"] };
-  const output = buildSchedule(runtime, input, { asOf: EPOCH });
+  const output = buildSchedule(runtime, input, { asOf: AS_OF });
   assert.deepEqual(output.days[tomorrow], generated.days[tomorrow]);
   assert.deepEqual(output.bonuses[tomorrow], generated.bonuses[tomorrow]);
   assert.deepEqual(output.bonuses[EPOCH], generated.bonuses[EPOCH]);
@@ -89,12 +90,12 @@ test("a shorter request retains backup dates while allowing future regeneration"
 
 test("a dataset rollback cannot move the protected day backwards", () => {
   generated ||= buildSchedule(runtime, null);
-  const published = buildSchedule(runtime, generated, { asOf: EPOCH });
+  const published = buildSchedule(runtime, generated, { asOf: AS_OF });
   const index = structuredClone(runtime.index);
   index.built = shiftDate(index.built, -7);
   const output = buildSchedule(createRuntime(index), published);
-  assert.equal(output.generated, EPOCH);
-  assert.equal(output.lockedThrough, EPOCH);
+  assert.equal(output.generated, AS_OF);
+  assert.equal(output.lockedThrough, AS_OF);
   assert.equal(output.through, published.through);
   assert.deepEqual(output.days[EPOCH], published.days[EPOCH]);
   assert.deepEqual(output.bonuses[EPOCH], published.bonuses[EPOCH]);
@@ -106,11 +107,11 @@ test("historical questions survive source changes while future questions use the
   index.clubs.find(c => c[3] === removedQid)[3] = "Q999999999999";
   delete index.byQid;
   const next = createRuntime(index);
-  const output = buildSchedule(next, generated, { asOf: EPOCH });
+  const output = buildSchedule(next, generated, { asOf: AS_OF });
   assert.deepEqual(output.days[EPOCH], generated.days[EPOCH]);
   assert.deepEqual(output.bonuses[EPOCH], generated.bonuses[EPOCH]);
   assert.equal(next.byQid.has(removedQid), false);
-  for (const [date, stages] of Object.entries(output.days)) if (date > EPOCH)
+  for (const [date, stages] of Object.entries(output.days)) if (date > AS_OF)
     assert.equal(stages.flat().includes(removedQid), false);
   assert.equal(validateAsset(next, output).ok, true);
 });
@@ -137,12 +138,12 @@ test("today and historical questions and bonuses cannot be regenerated or backfi
   assert.throws(() => buildSchedule(runtime, generated, { regenerateFrom: EPOCH }), /regenerateFrom/);
   const missing = structuredClone(generated);
   delete missing.bonuses[EPOCH];
-  assert.throws(() => buildSchedule(runtime, missing, { asOf: EPOCH }), /invalid published questions or bonus/);
+  assert.throws(() => buildSchedule(runtime, missing, { asOf: AS_OF }), /invalid published questions or bonus/);
   delete missing.days[EPOCH];
-  assert.throws(() => buildSchedule(runtime, missing, { asOf: EPOCH }), /missing published quiz/);
+  assert.throws(() => buildSchedule(runtime, missing, { asOf: AS_OF }), /missing published quiz/);
   const malformed = structuredClone(generated);
   malformed.bonuses[EPOCH].targets = [];
-  assert.throws(() => buildSchedule(runtime, malformed, { asOf: EPOCH }), /invalid published questions or bonus/);
+  assert.throws(() => buildSchedule(runtime, malformed, { asOf: AS_OF }), /invalid published questions or bonus/);
 });
 
 test("a new series drops previous dates and generates only from day one", () => {

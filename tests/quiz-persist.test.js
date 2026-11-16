@@ -818,10 +818,11 @@ test("an online tab opened yesterday checks the network and reloads for a new da
   const ctx = loadQuiz({}, EPOCH);
   ctx.api.qLoad(); ctx.api.qGuess(ctx.api.qPz.stages[0].answers[0]);
   const saved = ctx.localStorage.quiz, next = dayAfter(EPOCH);
+  const refreshedBuilt = dayAfter(ctx.browser.index.built);
   let reloads = 0, url, requested;
   ctx.context.fetch = async (request, options) => {
     requested = { request, options };
-    return { ok: true, json: async () => ({ ...structuredClone(schedule), built: next }) };
+    return { ok: true, json: async () => ({ ...structuredClone(schedule), built: refreshedBuilt }) };
   };
   ctx.context.location.reload = () => { reloads++; };
   ctx.context.history.replaceState = (_s, _t, value) => { url = value; };
