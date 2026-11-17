@@ -620,6 +620,16 @@ test("nationality bonus labels preserve historic countries and localize legacy m
   assert.equal(api.qBonusText({ kind: "nationality", value: "YU" }), "Nationality: Yugoslavia");
 });
 
+test("career bonus labels retain the reserve-team suffix in both languages", () => {
+  const { api, context } = loadQuiz({}, pickToday());
+  const app = fs.readFileSync(path.join(__dirname, "../site/app.js"), "utf8");
+  vm.runInContext(app.slice(app.indexOf("const ALIASES ="), app.indexOf("// A nat is")), context);
+  const bonus = { kind: "career", value: "Athletic Bilbao B", from: 1996, to: 2000 };
+  assert.equal(api.qBonusText(bonus), "Ha giocato nel Athletic Bilbao B · 1996–2000");
+  context.lang = "en";
+  assert.equal(api.qBonusText(bonus), "Played for Athletic Bilbao B · 1996–2000");
+});
+
 test("answer disclosure includes every unguessed bonus option outside the first six without awarding it", () => {
   const { api, context, localStorage } = loadQuiz({}, EPOCH);
   api.qLoad();

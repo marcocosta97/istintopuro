@@ -74,6 +74,14 @@ test("legal-name shortening, disambiguation and existing search aliases survive"
   assert.ok(!matches("spal").includes("Q13385"), "selected clubs remain excluded");
 });
 
+test("shortened names keep reserve-team suffixes distinct from the first team", () => {
+  const { coreClub } = runtime();
+  for (const [name, short] of [["Athletic Bilbao B", "Athletic Bilbao B"],
+    ["Villarreal CF B", "Villarreal CF B"], ["FC Barcelona C", "Barcelona C"],
+    ["Hertha BSC II", "Hertha BSC II"], ["AC Milan", "Milan"]])
+    assert.equal(coreClub(name), short, name);
+});
+
 test("club suggestions present the shortened name with the full source label in a title", () => {
   const { DB, context } = runtime();
   const rows = [];
