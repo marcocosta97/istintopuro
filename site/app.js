@@ -523,7 +523,8 @@ const coreClub = (name) => {
   const w = name.split(" ");
   let a = 0, b = w.length;
   while (a < w.length - 1 && isLegal(w[a])) a++;
-  while (b > a + 1 && isLegal(w[b - 1])) b--;
+  // B/C identify reserve teams, including in career bonus clues.
+  while (b > a + 1 && !/^[BC]$/.test(w[b - 1]) && isLegal(w[b - 1])) b--;
   return w.slice(a, b).join(" ");
 };
 // A nat is comma-separated when a player represented more than one country, so flag()
